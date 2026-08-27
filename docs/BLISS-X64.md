@@ -9,8 +9,13 @@ Branch **`bliss-x64`** tracks GameNative changes for Bass:Lineout x86_64 tablets
 ./gradlew :app:assembleModernX64Release
 ```
 
-JNI prebuilts for `x86_64` are staged under `app/src/modernX64/jniLibs/x86_64/`
-(see README there). Phase 1 builds proot/winlator/vulkan_renderer for the host ABI.
+JNI prebuilts for `x86_64` are staged under `app/src/modernX64/jniLibs/x86_64/`.
+Build open-source libs with `./scripts/build-x86_64-jni.sh` (see README there).
+
+**Blockers for full runtime:** proprietary ARM-only `libredirect-bionic-wx.so`,
+`libhook_impl.so`, `libmain_hook.so`, plus `libevshim.so` (SDL2 headers) and
+`libwinlator_11.so`. Modern Bionic skips redirect preload on x86_64 until upstream
+ships x86_64 redirect binaries.
 
 ## ax86 graphics
 
