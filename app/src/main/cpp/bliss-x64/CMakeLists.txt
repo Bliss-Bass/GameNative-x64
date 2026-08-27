@@ -15,10 +15,11 @@ add_subdirectory(${GN_CPP}/patchelf ${CMAKE_BINARY_DIR}/patchelf)
 add_subdirectory(${GN_CPP}/xconnectorpatch ${CMAKE_BINARY_DIR}/xconnectorpatch)
 
 # proot: upstream tree is ARM-only (arch.h); modern Bionic uses linker64 without proot.
-# evshim: requires vendored SDL2 headers (app/src/main/cpp/third_party/SDL2/).
-# Enable once arch.h x86_64 port and SDL2 headers are present.
-# add_subdirectory(${GN_CPP}/proot ${CMAKE_BINARY_DIR}/proot)
-# add_subdirectory(${GN_CPP}/evshim ${CMAKE_BINARY_DIR}/evshim)
+# evshim: full build needs vendored SDL2 headers (app/src/main/cpp/third_party/SDL2/).
+# Host stub covers WinHandler JNI until SDL headers are vendored for Wine virtual joysticks.
+add_library(evshim SHARED ${CMAKE_CURRENT_LIST_DIR}/evshim_host.c)
+target_link_libraries(evshim log)
+target_link_options(evshim PRIVATE -Wl,-z,max-page-size=16384)
 
 add_library(winlator SHARED
     ${GN_CPP}/winlator/sysvshared_memory.c
@@ -61,3 +62,10 @@ add_library(extras SHARED
     ${GN_CPP}/extras/vulkan.c)
 target_link_libraries(extras log android EGL GLESv2 GLESv3)
 target_link_options(extras PRIVATE -Wl,-z,max-page-size=16384)
+
+# X11 drawable raster + Vulkan device queries (loaded as winlator_11 by Drawable/GPUHelper).
+add_library(winlator_11 SHARED
+    ${GN_CPP}/asurfacerenderer/drawable.c
+    ${GN_CPP}/winlator/gpu_helper.c)
+target_link_libraries(winlator_11 log android jnigraphics vulkan dl)
+target_link_options(winlator_11 PRIVATE -Wl,-z,max-page-size=16384)

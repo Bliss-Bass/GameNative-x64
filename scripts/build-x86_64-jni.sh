@@ -57,6 +57,6 @@ bash "$(dirname "$0")/stage-x86_64-jni.sh"
 
 echo
 echo "Open-source JNI staged. Still required from upstream (ARM-only proprietary prebuilts):"
-echo "  libredirect-bionic-wx.so, libhook_impl.so, libmain_hook.so, libwinlator_11.so"
-echo "  libevshim.so (needs SDL2 headers + build), libsteambootstrap.so, pulseaudio stack"
+echo "  libredirect-bionic-wx.so, libhook_impl.so, libmain_hook.so"
+echo "  libsteambootstrap.so, pulseaudio stack"
 echo "  libproot.so / libproot-loader.so (proot arch.h needs x86_64 port for legacy path)"
