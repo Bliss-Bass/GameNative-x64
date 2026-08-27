@@ -308,7 +308,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         if (new File(sysvPath).exists()) ld_preload += sysvPath;
 
-        ld_preload += ":" + evshimPath;
+        File evshimFile = new File(evshimPath);
+        if (evshimFile.exists()) {
+            ld_preload += ":" + evshimPath;
+        } else {
+            Log.w("BionicProgramLauncherComponent",
+                    "libevshim.so missing at " + evshimPath + ", skipping evshim preload");
+        }
         if (!HostCpu.current().isX86_64() && new File(replacePath).exists()) {
             ld_preload += ":" + replacePath;
         } else if (HostCpu.current().isX86_64()) {
