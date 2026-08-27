@@ -38,6 +38,7 @@ gen/
 # Native
 .cxx
 app/.cxx/
+app/.cxx-bliss-x64/
 
 # Kotlin 2.0
 .kotlin/sessions
