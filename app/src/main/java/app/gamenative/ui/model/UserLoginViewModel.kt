@@ -10,8 +10,7 @@ import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
 import app.gamenative.ui.data.UserLoginState
-import app.gamenative.PrefManager
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import `in`.dragonbra.javasteam.steam.authentication.IAuthenticator
 import java.util.concurrent.CompletableFuture
 import kotlinx.coroutines.channels.Channel
@@ -147,22 +146,18 @@ class UserLoginViewModel : ViewModel() {
         }
 
         if (it.loginResult == LoginResult.Success) {
-            if (PrefManager.usageAnalyticsEnabled) {
-                PostHog.capture(
-                    event = "login_success",
-                    properties = mapOf("method" to method),
-                )
-            }
+            Telemetry.capture(
+                event = "login_success",
+                properties = mapOf("method" to method),
+            )
         } else if (it.loginResult == LoginResult.Failed) {
-            if (PrefManager.usageAnalyticsEnabled) {
-                PostHog.capture(
-                    event = "login_failed",
-                    properties = mapOf(
-                        "method" to method,
-                        "reason" to (it.message ?: "unknown"),
-                    ),
-                )
-            }
+            Telemetry.capture(
+                event = "login_failed",
+                properties = mapOf(
+                    "method" to method,
+                    "reason" to (it.message ?: "unknown"),
+                ),
+            )
             it.message?.let(::showSnack)
         }
     }

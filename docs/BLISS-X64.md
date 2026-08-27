@@ -28,3 +28,18 @@ Contribute `HostCpu`, launcher branches, and CI in small PRs to
 
 Product integration (preinstall APK): Bliss-Bass `gamenative` addon in
 `vendor/ax86-lite/addons/gamenative/`.
+
+## Port debug builds (`BLISS_PORT_DEBUG`)
+
+The `modernX64` flavor sets `BuildConfig.BLISS_PORT_DEBUG = true`. All other
+flavors leave it `false`.
+
+When the flag is **true** (ax86 port / dev builds):
+
+- PostHog is not initialized; `Telemetry.capture()` is a no-op
+- Game-run / compatibility API submissions are skipped (`GameFeedbackUtils`)
+- Automatic exit-feedback prompts after a game session are suppressed
+
+When the flag is **false** (normal upstream builds), behavior is unchanged:
+user opt-out via Settings still applies to PostHog; compatibility reporting works
+as shipped.

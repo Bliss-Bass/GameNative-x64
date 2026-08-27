@@ -33,6 +33,7 @@ import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.Telemetry
 import app.gamenative.utils.UpdateInfo
 import app.gamenative.utils.WineProcessSnapshotHelper
 import com.materialkolor.PaletteStyle
@@ -621,6 +622,7 @@ class MainViewModel @Inject constructor(
                     System.currentTimeMillis() - gameSessionStartTime >= MIN_WARM_PITCH_SESSION_MS
                 gameSessionStartTime = 0L
                 var feedbackRequested = false
+                if (Telemetry.compatibilityReportsEnabled) {
                 try {
                     // Show feedback for all stores except custom games.
                     val feedbackGameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
@@ -650,6 +652,7 @@ class MainViewModel @Inject constructor(
                     }
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to check/update feedback dialog state for $appId")
+                }
                 }
 
                 if (feedbackRequested) {

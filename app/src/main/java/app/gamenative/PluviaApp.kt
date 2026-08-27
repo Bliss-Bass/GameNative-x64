@@ -22,6 +22,7 @@ import app.gamenative.utils.ContainerMigrator
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.PlayIntegrity
+import app.gamenative.utils.Telemetry
 import app.gamenative.utils.downloader.ContainerFilesDownloader
 import java.io.File
 import javax.inject.Inject
@@ -115,27 +116,29 @@ class PluviaApp : SplitCompatApplication() {
             Timber.e(e, "[PluviaApp]: Failed to clear temporary config overrides")
         }
 
-        // Initialize PostHog Analytics
-        val postHogConfig = PostHogAndroidConfig(
-            apiKey = BuildConfig.POSTHOG_API_KEY,
-            host = BuildConfig.POSTHOG_HOST,
-        ).apply {
-            /* turn every event into an identified one */
-            personProfiles = PersonProfiles.ALWAYS
-        }
-        PostHogAndroid.setup(this, postHogConfig)
-        com.posthog.PostHog.register("build_flavor", BuildConfig.FLAVOR)
-
-        if (PrefManager.usageAnalyticsEnabled) {
+        // Remote telemetry (PostHog) — skipped on Bliss ax86 port builds.
+        if (Telemetry.usageAnalyticsEnabled) {
+            val postHogConfig = PostHogAndroidConfig(
+                apiKey = BuildConfig.POSTHOG_API_KEY,
+                host = BuildConfig.POSTHOG_HOST,
+            ).apply {
+                personProfiles = PersonProfiles.ALWAYS
+            }
+            PostHogAndroid.setup(this, postHogConfig)
+            com.posthog.PostHog.register("build_flavor", BuildConfig.FLAVOR)
             com.posthog.PostHog.capture(
                 event = "\$set",
                 properties = mapOf(
                     "\$set" to mapOf("recommendation_enabled" to PrefManager.showRecommendations),
                 ),
             )
+        } else if (Telemetry.isPortDebugBuild) {
+            Timber.i("PostHog disabled (BLISS_PORT_DEBUG build)")
         }
 
-        PlayIntegrity.warmUp(this)
+        if (!Telemetry.isPortDebugBuild) {
+            PlayIntegrity.warmUp(this)
+        }
 
         PowerManager.initialize(this)
     }

@@ -120,7 +120,7 @@ import app.gamenative.service.gog.GOGService
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.PlatformOAuthHandlers
 import app.gamenative.utils.SteamUtils
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import kotlinx.coroutines.launch
 import android.os.SystemClock
 
@@ -331,13 +331,13 @@ private fun LibraryScreenContent(
     var recDisclosureShown by remember { mutableStateOf(PrefManager.recDisclosureShown) }
     var showRecTeaserDialog by remember { mutableStateOf(false) }
     val onRecTeaserTapped = {
-        if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "rec_teaser_tapped")
+        Telemetry.capture(event = "rec_teaser_tapped")
         showRecTeaserDialog = true
     }
     val recTeaserVisible = state.appInfoList.firstOrNull()?.isRecTeaser == true
     LaunchedEffect(recTeaserVisible) {
-        if (recTeaserVisible && PrefManager.usageAnalyticsEnabled) {
-            PostHog.capture(event = "rec_teaser_shown")
+        if (recTeaserVisible) {
+            Telemetry.capture(event = "rec_teaser_shown")
         }
     }
 

@@ -42,6 +42,7 @@ import androidx.compose.ui.res.stringResource
 import app.gamenative.BuildConfig
 import app.gamenative.R
 import app.gamenative.PrefManager
+import app.gamenative.utils.Telemetry
 import app.gamenative.enums.AppTheme
 import app.gamenative.ui.component.dialog.SingleChoiceDialog
 import app.gamenative.ui.theme.settingsTileColorsAlt
@@ -359,14 +360,12 @@ fun SettingsGroupInterface(
                 showRecommendations = it
                 PrefManager.showRecommendations = it
                 PluviaApp.events.emit(AndroidEvent.RecommendationToggleChanged)
-                if (PrefManager.usageAnalyticsEnabled) {
-                    com.posthog.PostHog.capture(
-                        event = "\$set",
-                        properties = mapOf("\$set" to mapOf("recommendation_enabled" to it)),
-                    )
-                    if (!it) {
-                        com.posthog.PostHog.capture("recommendation_disabled")
-                    }
+                Telemetry.capture(
+                    event = "\$set",
+                    properties = mapOf("\$set" to mapOf("recommendation_enabled" to it)),
+                )
+                if (!it) {
+                    Telemetry.capture("recommendation_disabled")
                 }
             },
         )

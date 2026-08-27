@@ -6,9 +6,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.res.stringResource
-import app.gamenative.PrefManager
 import app.gamenative.R
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 
 @Composable
 fun RecommendationDisclosureDialog(
@@ -17,9 +16,7 @@ fun RecommendationDisclosureDialog(
     source: String = "tab",
 ) {
     fun capture(event: String) {
-        if (PrefManager.usageAnalyticsEnabled) {
-            PostHog.capture(event = event, properties = mapOf("source" to source))
-        }
+        Telemetry.capture(event = event, properties = mapOf("source" to source))
     }
     LaunchedEffect(Unit) {
         capture("rec_disclosure_shown")

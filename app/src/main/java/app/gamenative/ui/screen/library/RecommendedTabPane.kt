@@ -32,7 +32,7 @@ import app.gamenative.ui.enums.PaneType
 import app.gamenative.ui.model.GogRecommendationsViewModel
 import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import java.util.EnumSet
 
 @Composable
@@ -51,12 +51,10 @@ fun RecommendedTabPane(
 
     LaunchedEffect(Unit) {
         viewModel.loadIfNeeded()
-        if (PrefManager.usageAnalyticsEnabled) {
-            PostHog.capture(
-                event = "recommendation_tab_opened",
-                properties = mapOf("\$set" to mapOf("recommendation_enabled" to true)),
-            )
-        }
+        Telemetry.capture(
+            event = "recommendation_tab_opened",
+            properties = mapOf("\$set" to mapOf("recommendation_enabled" to true)),
+        )
     }
 
     val items = remember(state.cards) {
@@ -84,9 +82,9 @@ fun RecommendedTabPane(
     }
     DisposableEffect(Unit) {
         onDispose {
-            if (PrefManager.usageAnalyticsEnabled && seenIndices.isNotEmpty()) {
+            if (seenIndices.isNotEmpty()) {
                 val gameIds = seenIndices.sorted().mapNotNull { currentCards.getOrNull(it)?.productId }
-                PostHog.capture(
+                Telemetry.capture(
                     event = "recommendation_tab_viewed",
                     properties = mapOf(
                         "impressed_count" to seenIndices.size,

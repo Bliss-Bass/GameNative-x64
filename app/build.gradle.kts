@@ -68,6 +68,7 @@ android {
         versionName = "1.2.0"
 
         buildConfigField("boolean", "GOLD", "false")
+        buildConfigField("boolean", "BLISS_PORT_DEBUG", "false")
         fun secret(name: String) =
             project.findProperty(name) as String? ?: System.getenv(name) ?: ""
 
@@ -155,6 +156,7 @@ android {
             buildConfigField("boolean", "MODERN_ANDROID", "true")
             buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
             buildConfigField("String", "HOST_CPU", "\"X86_64\"")
+            buildConfigField("boolean", "BLISS_PORT_DEBUG", "true")
         }
         create("modernXr") {
             dimension = "androidApi"

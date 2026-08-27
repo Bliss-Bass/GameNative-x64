@@ -21,7 +21,7 @@ import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.screen.library.AppScreen
 import app.gamenative.ui.screen.library.RecommendedGameScreen
 import app.gamenative.ui.theme.PluviaTheme
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import java.util.EnumSet
 
 @Composable
@@ -62,9 +62,9 @@ internal fun LibraryDetailPane(
                     GogRecommendationsRepository.getRecommendedGame(libraryItem.recommendedGameId)
                         ?: RecommendationRepository.getCurrentRecommendation(context)
                 }
-                if (game != null && PrefManager.usageAnalyticsEnabled) {
+                if (game != null) {
                     if (libraryItem.isFeatured) {
-                        PostHog.capture(
+                        Telemetry.capture(
                             event = "featured_opened",
                             properties = mapOf(
                                 "campaign_id" to (game?.id ?: ""),
@@ -73,7 +73,7 @@ internal fun LibraryDetailPane(
                             ),
                         )
                     } else {
-                        PostHog.capture(
+                        Telemetry.capture(
                             event = "recommendation_opened",
                             properties = mapOf(
                                 "game_name" to (game?.name ?: ""),

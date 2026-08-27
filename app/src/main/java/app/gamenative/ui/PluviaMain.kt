@@ -67,7 +67,7 @@ import app.gamenative.gamefixes.GameFixesRegistry
 import app.gamenative.service.ActiveGameRegistry
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import app.gamenative.ui.component.AchievementOverlay
 import app.gamenative.ui.component.ConnectionStatusBanner
 import app.gamenative.ui.component.GameInviteOverlay
@@ -265,18 +265,16 @@ private fun consumePendingSteamLoginError(context: Context) {
 private const val LAUNCH_PITCH_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000L
 
 private fun trackMembershipPrompt(event: String, trigger: String) {
-    if (PrefManager.usageAnalyticsEnabled) {
-        PostHog.capture(
-            event = event,
-            properties = mapOf("trigger" to trigger),
-        )
-    }
+    Telemetry.capture(
+        event = event,
+        properties = mapOf("trigger" to trigger),
+    )
 }
 
 private fun trackGameLaunched(appId: String) {
     val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val gameName = ContainerUtils.resolveGameName(appId)
-    PostHog.capture(
+    Telemetry.capture(
         event = "game_launched",
         properties = mapOf(
             "game_name" to gameName,

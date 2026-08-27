@@ -10,6 +10,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
+import app.gamenative.utils.Telemetry
 import com.winlator.core.GPUInformation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,6 +26,10 @@ object GameFeedbackUtils {
         tags: List<String>,
         notes: String?,
     ): Boolean = withContext(Dispatchers.IO) {
+        if (!Telemetry.compatibilityReportsEnabled) {
+            Timber.i("GameFeedbackUtils: skipped (BLISS_PORT_DEBUG build)")
+            return@withContext false
+        }
         Timber.d("GameFeedbackUtils: Starting submitGameFeedback method with rating=$rating")
         try {
             val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)

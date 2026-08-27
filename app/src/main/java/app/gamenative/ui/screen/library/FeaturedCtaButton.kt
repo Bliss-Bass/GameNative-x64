@@ -34,7 +34,7 @@ import app.gamenative.service.SteamWishlistService
 import app.gamenative.ui.component.focusRing
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.ConversionTracker
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import kotlinx.coroutines.launch
 
 @Composable
@@ -64,17 +64,15 @@ internal fun FeaturedCtaButton(
     val onClick: () -> Unit = onClick@{
         if (inert) return@onClick
 
-        if (PrefManager.usageAnalyticsEnabled) {
-            PostHog.capture(
-                event = "featured_action_clicked",
-                properties = mapOf(
-                    "campaign_id" to campaignId,
-                    "action_label" to action.label,
-                    "url" to action.url,
-                    "source" to recSource,
-                ),
-            )
-        }
+        Telemetry.capture(
+            event = "featured_action_clicked",
+            properties = mapOf(
+                "campaign_id" to campaignId,
+                "action_label" to action.label,
+                "url" to action.url,
+                "source" to recSource,
+            ),
+        )
         if (cta == null) {
             openUrl()
         } else {
