@@ -36,6 +36,7 @@ import java.util.List;
 import app.gamenative.PluviaApp;
 import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
+import app.gamenative.utils.HostCpu;
 
 public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -70,8 +71,10 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         Log.d("GlibcProgramLauncherComponent", "Starting...");
         synchronized (lock) {
             stop();
-            extractBox64Files();
-            copyDefaultBox64RCFile();
+            if (!HostCpu.current().isX86_64()) {
+                extractBox64Files();
+                copyDefaultBox64RCFile();
+            }
             if (preUnpack != null) preUnpack.run();
             pid = execGuestProgram();
             Log.d("GlibcProgramLauncherComponent", "Process " + pid + " started");
@@ -178,7 +181,9 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", true);
 
         EnvVars envVars = new EnvVars();
-        addBox64EnvVars(envVars, enableBox86_64Logs);
+        if (!HostCpu.current().isX86_64()) {
+            addBox64EnvVars(envVars, enableBox86_64Logs);
+        }
         envVars.put("HOME", imageFs.home_path);
         envVars.put("USER", ImageFs.USER);
         envVars.put("TMPDIR", imageFs.getRootDir().getPath() + "/tmp");
@@ -223,13 +228,16 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
 
-        String box64Path = rootDir.getPath() + "/usr/local/bin/box64";
-
-        // Check if box64 exists and log its details before executing
-        File box64File = new File(box64Path);
-        Log.d("GlibcProgramLauncherComponent", "About to execute box64 from: " + box64Path);
-
-        String command = box64Path + " " + guestExecutable;
+        String command;
+        if (HostCpu.current().isX86_64()) {
+            command = guestExecutable;
+            Log.d("GlibcProgramLauncherComponent", "Native x86_64 host launch: " + command);
+        } else {
+            String box64Path = rootDir.getPath() + "/usr/local/bin/box64";
+            File box64File = new File(box64Path);
+            Log.d("GlibcProgramLauncherComponent", "About to execute box64 from: " + box64Path);
+            command = box64Path + " " + guestExecutable;
+        }
         Log.d("GlibcProgramLauncherComponent", "Final command: " + command);
 
         return ProcessHelper.exec(command, envVars.toStringArray(), workingDir != null ? workingDir : rootDir, (status) -> {
@@ -331,9 +339,13 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
 
-        String box64Path = rootDir.getPath() + "/usr/local/bin/box64";
-
-        String finalCommand = box64Path + " " + command;
+        String finalCommand;
+        if (HostCpu.current().isX86_64()) {
+            finalCommand = command;
+        } else {
+            String box64Path = rootDir.getPath() + "/usr/local/bin/box64";
+            finalCommand = box64Path + " " + command;
+        }
 
         // Execute the command and capture its output
         Log.d("GlibcProgramLauncherComponent", "Shell command is " + finalCommand);

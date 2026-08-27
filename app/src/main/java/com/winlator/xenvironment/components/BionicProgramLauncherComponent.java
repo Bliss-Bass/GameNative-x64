@@ -54,6 +54,7 @@ import app.gamenative.BuildConfig;
 import app.gamenative.PluviaApp;
 import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
+import app.gamenative.utils.HostCpu;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -101,7 +102,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             stop();
             if (wineInfo.isArm64EC())
                 extractEmulatorsDlls();
-            else
+            else if (!HostCpu.current().isX86_64())
                 extractBox64Files();
             if (preUnpack != null) preUnpack.run();
             pid = execGuestProgram();
@@ -392,8 +393,9 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 envVars.put("HODLL", "libwow64fex.dll");
             else
                 envVars.put("HODLL", "wowbox64.dll");
-        }
-        else
+        } else if (HostCpu.current().isX86_64() && wineInfo.isWin64()) {
+            command = winePath + "/" + guestExecutable;
+        } else
             command = binDir + "/box64 " + guestExecutable;
         return command;
     }
