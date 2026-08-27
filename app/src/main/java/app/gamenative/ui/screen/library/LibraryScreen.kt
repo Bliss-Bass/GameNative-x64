@@ -7,6 +7,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -576,24 +577,13 @@ private fun LibraryScreenContent(
 
 
     // Padding for the library *list* view (tab bar, grid, search bar) so content
-    // never draws behind the display cutout. The window now opts in to
-    // LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES via Theme.Pluvia, so:
-    //   * Status bar visible (portrait):   statusBars insets already cover the top notch.
-    //   * Status bar hidden (portrait):    statusBars insets are 0; displayCutout supplies
-    //                                       the notch height so content isn't behind the notch.
-    //   * Landscape (cutout on a side):    statusBars is top-only; displayCutout supplies
-    //                                       the side inset so the tab bar isn't clipped.
-    // Bottom is intentionally excluded so scroll content can reach the bottom edge.
+    // never draws behind the display cutout or freeform/desktop caption bar.
     //
     // The detail (game) page deliberately does NOT use this — the hero image is meant
     // to bleed through the cutout, so AppScreenContent insets only the elements that
     // need to stay tappable (e.g. the back button) instead.
     val safePaddingModifier = if (selectedLibraryItem == null) {
-        Modifier.windowInsetsPadding(
-            WindowInsets.statusBars
-                .union(WindowInsets.displayCutout)
-                .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-        )
+        Modifier.pluviaTopSafeAreaPadding()
     } else {
         Modifier
     }

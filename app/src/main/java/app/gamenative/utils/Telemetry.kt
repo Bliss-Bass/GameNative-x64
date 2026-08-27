@@ -28,7 +28,9 @@ object Telemetry {
     fun capture(event: String, properties: Map<String, Any?>? = null) {
         if (!usageAnalyticsEnabled) return
         if (properties != null) {
-            PostHog.capture(event = event, properties = properties)
+            @Suppress("UNCHECKED_CAST")
+            val normalized = properties.filterValues { it != null } as Map<String, Any>
+            PostHog.capture(event = event, properties = normalized)
         } else {
             PostHog.capture(event = event)
         }

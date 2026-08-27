@@ -619,7 +619,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        applyImmersiveMode()
         // Log.d("MainActivity", "Requested orientation: $requestedOrientation => ${Orientation.fromActivityInfoValue(requestedOrientation)}")
+    }
+
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        applyImmersiveMode()
     }
 
     private fun startOrientator() {
@@ -646,13 +652,22 @@ class MainActivity : ComponentActivity() {
      * Must be called in multiple lifecycle methods to ensure bars stay hidden.
      */
     private fun applyImmersiveMode() {
+        if (isInMultiWindowMode) {
+            // Freeform/desktop windowed mode: keep content below the system caption bar.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(true)
+                window.insetsController?.show(systemBarInsetTypes())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            }
+            return
+        }
+
         if (desiredSystemUiVisible) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(true)
-                window.insetsController?.show(
-                    android.view.WindowInsets.Type.statusBars() or
-                        android.view.WindowInsets.Type.navigationBars(),
-                )
+                window.insetsController?.show(systemBarInsetTypes())
             } else {
                 @Suppress("DEPRECATION")
                 run {
@@ -686,6 +701,15 @@ class MainActivity : ComponentActivity() {
                     or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 )
         }
+    }
+
+    private fun systemBarInsetTypes(): Int {
+        var types = android.view.WindowInsets.Type.statusBars() or
+            android.view.WindowInsets.Type.navigationBars()
+        if (Build.VERSION.SDK_INT >= 35) {
+            types = types or android.view.WindowInsets.Type.captionBar()
+        }
+        return types
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

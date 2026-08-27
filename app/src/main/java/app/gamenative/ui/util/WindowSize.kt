@@ -1,7 +1,16 @@
 package app.gamenative.ui.util
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.captionBar
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -16,6 +25,18 @@ enum class WindowWidthClass {
     MEDIUM,   // 600-840dp
     EXPANDED, // > 840dp
 }
+
+/** Top/side insets for app chrome in fullscreen and freeform/desktop windowed mode. */
+@Composable
+fun pluviaTopContentHorizontalInsets(): WindowInsets =
+    WindowInsets.statusBars
+        .union(WindowInsets.displayCutout)
+        .union(WindowInsets.captionBar)
+        .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+
+@Composable
+fun Modifier.pluviaTopSafeAreaPadding(): Modifier =
+    windowInsetsPadding(pluviaTopContentHorizontalInsets())
 
 @Composable
 fun rememberWindowWidthClass(): WindowWidthClass {

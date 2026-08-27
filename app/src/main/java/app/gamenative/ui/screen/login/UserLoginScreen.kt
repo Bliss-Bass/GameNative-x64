@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
+import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -343,7 +343,7 @@ private fun UserLoginScreenContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                .pluviaTopSafeAreaPadding()
                 .focusGroup(),
         ) {
             // Header

@@ -26,8 +26,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
+import app.gamenative.ui.util.pluviaTopContentHorizontalInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -850,11 +849,7 @@ internal fun AppScreenContent(
                     contentDescription = stringResource(R.string.back),
                     onClick = onBack,
                     modifier = Modifier
-                        .windowInsetsPadding(
-                            WindowInsets.statusBars
-                                .union(WindowInsets.displayCutout)
-                                .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-                        )
+                        .windowInsetsPadding(pluviaTopContentHorizontalInsets())
                         .padding(16.dp),
                 )
 
