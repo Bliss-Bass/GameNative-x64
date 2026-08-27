@@ -8,7 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#if defined(__aarch64__)
 #include "adrenotools/include/adrenotools/driver.h"
+#endif
 
 #define LOG_TAG "System.out"
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -95,6 +97,10 @@ static void init_original_vulkan() {
 }
 
 static void init_vulkan(JNIEnv  *env, jobject context, const char *driver_name) {
+#if !defined(__aarch64__)
+    init_original_vulkan();
+    return;
+#else
     char *tmpdir = NULL;
     char *library_name = NULL;
     char *native_library_dir = NULL;
@@ -117,6 +123,7 @@ static void init_vulkan(JNIEnv  *env, jobject context, const char *driver_name) 
     free(library_name);
     free(native_library_dir);
     free(driver_path);
+#endif
 }
 
 static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context) {

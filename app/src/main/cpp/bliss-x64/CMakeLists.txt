@@ -56,6 +56,8 @@ target_compile_definitions(vulkan_renderer PRIVATE BLISS_HOST_X86_64=1)
 target_link_libraries(vulkan_renderer log android vulkan dl atomic)
 target_link_options(vulkan_renderer PRIVATE -Wl,-z,max-page-size=16384)
 
-add_library(extras SHARED ${GN_CPP}/extras/gpu_image.c)
+add_library(extras SHARED
+    ${GN_CPP}/extras/gpu_image.c
+    ${GN_CPP}/extras/vulkan.c)
 target_link_libraries(extras log android EGL GLESv2 GLESv3)
 target_link_options(extras PRIVATE -Wl,-z,max-page-size=16384)
