@@ -145,6 +145,16 @@ android {
             ndk.abiFilters += listOf("arm64-v8a")
             buildConfigField("boolean", "MODERN_ANDROID", "true")
             buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
+            buildConfigField("String", "HOST_CPU", "\"ARM64\"")
+        }
+        create("modernX64") {
+            dimension = "androidApi"
+            minSdk = 29
+            targetSdk = 36
+            ndk.abiFilters += listOf("x86_64")
+            buildConfigField("boolean", "MODERN_ANDROID", "true")
+            buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
+            buildConfigField("String", "HOST_CPU", "\"X86_64\"")
         }
         create("modernXr") {
             dimension = "androidApi"
@@ -264,6 +274,15 @@ android {
             java.srcDir("src/nonXr/java")
             assets {
                 srcDirs("src/modern/assets", "src/main/assets")
+            }
+        }
+        getByName("modernX64") {
+            java.srcDir("src/nonXr/java")
+            assets {
+                srcDirs("src/modern/assets", "src/main/assets")
+            }
+            jniLibs {
+                srcDirs("src/modern/jniLibs", "src/modernX64/jniLibs")
             }
         }
         getByName("modernXr") {
