@@ -19,6 +19,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.sync.FrontendSyncManager
 import app.gamenative.ui.screen.xserver.RadialMenuCoordinator
 import app.gamenative.utils.ContainerMigrator
+import app.gamenative.utils.HostCpu
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.PlayIntegrity
 import app.gamenative.utils.downloader.ContainerFilesDownloader
@@ -74,6 +75,8 @@ class PluviaApp : SplitCompatApplication() {
         } else {
             Timber.plant(ReleaseTree())
         }
+
+        Timber.i("HostCpu=%s supportedAbis=%s", HostCpu.current(), Build.SUPPORTED_ABIS.joinToString())
 
         NetworkMonitor.init(this)
 
