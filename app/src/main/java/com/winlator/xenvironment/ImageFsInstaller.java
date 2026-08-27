@@ -5,6 +5,7 @@ import android.content.res.AssetManager;
 import android.util.Log;
 
 import app.gamenative.BuildConfig;
+import app.gamenative.utils.HostCpu;
 import app.gamenative.R;
 import app.gamenative.enums.Marker;
 import app.gamenative.service.SteamService;
@@ -91,7 +92,7 @@ public abstract class ImageFsInstaller {
     // (src/modern/assets/) until it's folded into redirect.tzst. Copy it next to
     // the tarball-extracted variant so BionicProgramLauncherComponent can find it
     private static void ensureBionicLib(Context context, File imagefs) {
-        if (BuildConfig.MODERN_ANDROID) {
+        if (BuildConfig.MODERN_ANDROID && !HostCpu.current().isX86_64()) {
             File wxDest = new File(imagefs, "usr/lib/libredirect-bionic-wx.so");
             if (!wxDest.exists()) {
                 FileUtils.copy(context, "libredirect-bionic-wx.so", wxDest);

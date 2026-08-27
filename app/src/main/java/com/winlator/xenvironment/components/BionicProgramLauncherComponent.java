@@ -51,7 +51,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import app.gamenative.BuildConfig;
-import app.gamenative.PluviaApp;
 import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
 import app.gamenative.utils.HostCpu;
@@ -236,15 +235,18 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (true) {
             envVars.put("EVSHIM_SHM_ID", 1);
         }
-        addBox64EnvVars(envVars, enableBox86_64Logs);
-        envVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        if (!HostCpu.current().isX86_64()) {
+            addBox64EnvVars(envVars, enableBox86_64Logs);
+            envVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        }
 
         String renderer = GPUInformation.getRenderer(context);
 
-        if (renderer.contains("Mali"))
+        if (!HostCpu.current().isX86_64() && renderer.contains("Mali"))
             envVars.put("BOX64_MMAP32", "0");
 
-        if (envVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC())
+        if (!HostCpu.current().isX86_64()
+                && envVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC())
             envVars.put("WRAPPER_DISABLE_PLACED", "1");
 
         // Setting up essential environment variables for Wine
@@ -306,9 +308,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         if (new File(sysvPath).exists()) ld_preload += sysvPath;
 
-
         ld_preload += ":" + evshimPath;
-        ld_preload += ":" + replacePath;
+        if (!HostCpu.current().isX86_64() && new File(replacePath).exists()) {
+            ld_preload += ":" + replacePath;
+        } else if (HostCpu.current().isX86_64()) {
+            Log.w("BionicProgramLauncherComponent",
+                    "Skipping bionic redirect preload on x86_64 host (x86_64 libredirect pending upstream)");
+        }
 
         envVars.put("LD_PRELOAD", ld_preload);
         envVars.put("EVSHIM_WINE", 1);
@@ -343,7 +349,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             }
         }
 
-        if (LsfgVkManager.isSupported(container)) {
+        if (!HostCpu.current().isX86_64() && LsfgVkManager.isSupported(container)) {
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
             LsfgVkManager.writeConfig(container);
             LsfgVkManager.applyLaunchEnv(container, envVars);
