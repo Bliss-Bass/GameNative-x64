@@ -301,28 +301,26 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("ANDROID_RESOLV_DNS", primaryDNS);
         envVars.put("WINE_NEW_NDIS", "1");
 
-        String ld_preload = "";
-        String sysvPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
+        ArrayList<String> preloadLibs = new ArrayList<>();
+        String sysvPath = resolveSysvShmPreloadPath(context, imageFs);
+        if (sysvPath != null) preloadLibs.add(sysvPath);
+
         String evshimPath = context.getApplicationInfo().nativeLibraryDir + "/libevshim.so";
-        String replacePath = imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
-
-        if (new File(sysvPath).exists()) ld_preload += sysvPath;
-
-        File evshimFile = new File(evshimPath);
-        if (evshimFile.exists()) {
-            ld_preload += ":" + evshimPath;
+        if (new File(evshimPath).exists()) {
+            preloadLibs.add(evshimPath);
         } else {
             Log.w("BionicProgramLauncherComponent",
                     "libevshim.so missing at " + evshimPath + ", skipping evshim preload");
         }
-        if (!HostCpu.current().isX86_64() && new File(replacePath).exists()) {
-            ld_preload += ":" + replacePath;
-        } else if (HostCpu.current().isX86_64()) {
+        if (!HostCpu.current().isX86_64()) {
+            String replacePath = imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
+            if (new File(replacePath).exists()) preloadLibs.add(replacePath);
+        } else {
             Log.w("BionicProgramLauncherComponent",
                     "Skipping bionic redirect preload on x86_64 host (x86_64 libredirect pending upstream)");
         }
 
-        envVars.put("LD_PRELOAD", ld_preload);
+        envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
         envVars.put("EVSHIM_WINE", 1);
         envVars.put("EVSHIM_SHM_NAME", "controller-shm0");
 
@@ -474,6 +472,24 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         containerDataChanged = true;
         if (containerDataChanged) container.saveData();
+    }
+
+    /**
+     * Resolve SysV shared-memory preload library. On x86_64 hosts the imagefs copy is ARM
+     * and must not be used — only the APK-bundled native library is valid.
+     */
+    private String resolveSysvShmPreloadPath(Context context, ImageFs imageFs) {
+        if (HostCpu.current().isX86_64()) {
+            String nativePath = context.getApplicationInfo().nativeLibraryDir + "/libandroid-sysvshm.so";
+            if (new File(nativePath).exists()) {
+                return nativePath;
+            }
+            Log.w("BionicProgramLauncherComponent",
+                    "x86_64 libandroid-sysvshm.so missing at " + nativePath);
+            return null;
+        }
+        String imageFsPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
+        return new File(imageFsPath).exists() ? imageFsPath : null;
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {
@@ -661,7 +677,9 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         ImageFs imageFs = ImageFs.find(context);
         File rootDir = imageFs.getRootDir();
         EnvVars envVars = new EnvVars();
-        addBox64EnvVars(envVars, false);
+        if (!HostCpu.current().isX86_64()) {
+            addBox64EnvVars(envVars, false);
+        }
 
         envVars.put("HOME", imageFs.home_path);
         envVars.put("USER", ImageFs.USER);
@@ -684,24 +702,26 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("WINE_DISABLE_FULLSCREEN_HACK", "1");
         envVars.put("SteamGameId", "0");
 
-        String ld_preload = "";
-        String sysvPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
-        String replacePath = imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
+        ArrayList<String> preloadLibs = new ArrayList<>();
+        String sysvPath = resolveSysvShmPreloadPath(context, imageFs);
+        if (sysvPath != null) preloadLibs.add(sysvPath);
+        if (!HostCpu.current().isX86_64()) {
+            String replacePath = imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
+            if (new File(replacePath).exists()) preloadLibs.add(replacePath);
+        }
 
-        if (new File(sysvPath).exists()) ld_preload += sysvPath;
-
-        ld_preload += ":" + replacePath;
-
-        envVars.put("LD_PRELOAD", ld_preload);
+        envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
 
         String emulator = container.getEmulator();
         if (this.envVars != null) envVars.putAll(this.envVars);
 
         String finalCommand = getFinalCommand(winePath, emulator, envVars, imageFs.getBinDir(), command);
 
-        File box64File = new File(rootDir, "/usr/bin/box64");
-        if (box64File.exists()) {
-            FileUtils.chmod(box64File, 0755);
+        if (!HostCpu.current().isX86_64()) {
+            File box64File = new File(rootDir, "/usr/bin/box64");
+            if (box64File.exists()) {
+                FileUtils.chmod(box64File, 0755);
+            }
         }
 
         Log.d("BionicProgramLauncherComponent", "Shell command is " + finalCommand);

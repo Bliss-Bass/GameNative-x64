@@ -127,6 +127,7 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.downloader.CoreDriverDownloader
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
+import app.gamenative.utils.HostCpu
 import app.gamenative.utils.LsfgQuickMenuHelper
 import app.gamenative.utils.LsfgVkManager
 import app.gamenative.utils.ManifestComponentHelper
@@ -139,7 +140,7 @@ import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.downloader.WinComponentDownloader
 import app.gamenative.utils.WineProcessSnapshotHelper
-import com.posthog.PostHog
+import app.gamenative.utils.Telemetry
 import com.winlator.alsaserver.ALSAClient
 import com.winlator.container.Container
 import com.winlator.container.ContainerManager
@@ -1104,7 +1105,7 @@ fun XServerScreen(
         anchor.post {
             if (anchor.windowToken != null) {
                 val show = {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = analyticsEvent)
+                    Telemetry.capture(event = analyticsEvent)
                     val isExternalDisplaySession =
                         (anchor.display?.displayId ?: Display.DEFAULT_DISPLAY) != Display.DEFAULT_DISPLAY
 
@@ -1133,10 +1134,10 @@ fun XServerScreen(
 
             QuickMenuAction.INPUT_CONTROLS -> {
                 if (areControlsVisible) {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_controller_disabled")
+                    Telemetry.capture(event = "onscreen_controller_disabled")
                     hideInputControls()
                 } else {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_controller_enabled")
+                    Telemetry.capture(event = "onscreen_controller_enabled")
                     val manager = PluviaApp.inputControlsManager
                     val profiles = manager?.getProfiles(false) ?: listOf()
                     if (profiles.isNotEmpty()) {
@@ -1171,7 +1172,7 @@ fun XServerScreen(
             }
 
             QuickMenuAction.EDIT_CONTROLS -> {
-                if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "edit_controls_in_game")
+                Telemetry.capture(event = "edit_controls_in_game")
                 keepPausedForEditor = true
 
                 // Get or create profile for this container
@@ -1319,14 +1320,14 @@ fun XServerScreen(
             }
 
             QuickMenuAction.EDIT_PHYSICAL_CONTROLLER -> {
-                if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "edit_physical_controller_from_menu")
+                Telemetry.capture(event = "edit_physical_controller_from_menu")
                 keepPausedForEditor = true
                 showPhysicalControllerDialog = true
                 true
             }
 
             QuickMenuAction.RADIAL_MENU -> {
-                if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "edit_radial_menu_from_menu")
+                Telemetry.capture(event = "edit_radial_menu_from_menu")
                 PluviaApp.radialMenuCoordinator?.showSettingsDialog() == true
             }
 
@@ -1335,17 +1336,15 @@ fun XServerScreen(
                 isPerformanceHudEnabled = enabled
                 PrefManager.showFps = enabled
                 updatePerformanceHud(enabled)
-                if (PrefManager.usageAnalyticsEnabled) {
-                    PostHog.capture(
-                        event = "performance_hud_toggled",
-                        properties = mapOf("enabled" to enabled),
-                    )
-                }
+                Telemetry.capture(
+                    event = "performance_hud_toggled",
+                    properties = mapOf("enabled" to enabled),
+                )
                 false
             }
 
             QuickMenuAction.EXIT_GAME -> {
-                PostHog.capture(
+                Telemetry.capture(
                     event = "game_closed",
                     properties = buildMap {
                         put("game_name", ContainerUtils.resolveGameName(appId))
@@ -1376,7 +1375,7 @@ fun XServerScreen(
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
         if (imeVisible) {
-            if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_keyboard_disabled")
+            Telemetry.capture(event = "onscreen_keyboard_disabled")
             imeInputReceiver?.hideKeyboard()
             view.post {
                 if (Build.VERSION.SDK_INT >= 30) {
@@ -4591,7 +4590,7 @@ private fun exit(
         return
     }
 
-    PostHog.capture(
+    Telemetry.capture(
         event = "game_exited",
         properties = mapOf(
             "game_name" to ContainerUtils.resolveGameName(appId),
@@ -5684,6 +5683,15 @@ private suspend fun extractGraphicsDriverFiles(
             }
         }
     } else {
+        if (graphicsDriver == "System" && HostCpu.current() == HostCpu.X86_64) {
+            if (dxwrapper.contains("dxvk")) {
+                DXVKHelper.setEnvVars(context, dxwrapperConfig, envVars)
+            } else if (dxwrapper.contains("vkd3d")) {
+                DXVKHelper.setVKD3DEnvVars(context, dxwrapperConfig, envVars)
+            }
+            return
+        }
+
         var adrenoToolsDriverId: String? = ""
         val selectedDriverVersion: String?
         val graphicsDriverConfig = KeyValueSet(container.getGraphicsDriverConfig())

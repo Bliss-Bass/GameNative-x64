@@ -69,3 +69,8 @@ add_library(winlator_11 SHARED
     ${GN_CPP}/winlator/gpu_helper.c)
 target_link_libraries(winlator_11 log android jnigraphics vulkan dl)
 target_link_options(winlator_11 PRIVATE -Wl,-z,max-page-size=16384)
+
+add_library(android-sysvshm SHARED ${GN_CPP}/winlator/sysvshared_memory.c)
+set_target_properties(android-sysvshm PROPERTIES OUTPUT_NAME "android-sysvshm")
+target_link_libraries(android-sysvshm log android)
+target_link_options(android-sysvshm PRIVATE -Wl,-z,max-page-size=16384)
