@@ -264,9 +264,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 rootDir.getPath() + "/usr/bin");
         if (BuildConfig.MODERN_ANDROID) envVars.put("REDIRECT_EXEC__PROC_SELF_EXE", winePath + "/wine");
 
-        String ldLibraryPath = rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64";
-        if (BuildConfig.MODERN_ANDROID) ldLibraryPath += ":" + imageFs.getWinePath() + "/lib";
-        envVars.put("LD_LIBRARY_PATH", ldLibraryPath);
+        envVars.put("LD_LIBRARY_PATH", buildLdLibraryPath(imageFs, rootDir));
+        applyX86_64WineEnvVars(envVars, imageFs);
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
         envVars.put("FONTCONFIG_PATH", rootDir.getPath() + "/usr/etc/fonts");
 
@@ -474,10 +473,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (containerDataChanged) container.saveData();
     }
 
-    /**
-     * Resolve SysV shared-memory preload library. On x86_64 hosts the imagefs copy is ARM
-     * and must not be used — only the APK-bundled native library is valid.
-     */
     private String resolveSysvShmPreloadPath(Context context, ImageFs imageFs) {
         if (HostCpu.current().isX86_64()) {
             String nativePath = context.getApplicationInfo().nativeLibraryDir + "/libandroid-sysvshm.so";
@@ -490,6 +485,28 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         }
         String imageFsPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
         return new File(imageFsPath).exists() ? imageFsPath : null;
+    }
+
+    /** Without libredirect on x86_64, point Wine at Proton's ntdll.so instead of the apex stub path. */
+    private String buildLdLibraryPath(ImageFs imageFs, File rootDir) {
+        StringBuilder path = new StringBuilder();
+        path.append(rootDir.getPath()).append("/usr/lib");
+        path.append(":/system/lib64");
+        if (BuildConfig.MODERN_ANDROID) {
+            String wineRoot = imageFs.getWinePath();
+            path.append(":").append(wineRoot).append("/lib");
+            if (HostCpu.current().isX86_64()) {
+                path.append(":").append(wineRoot).append("/lib/wine");
+                path.append(":").append(wineRoot).append("/lib/wine/x86_64-unix");
+            }
+        }
+        return path.toString();
+    }
+
+    private void applyX86_64WineEnvVars(EnvVars envVars, ImageFs imageFs) {
+        if (!HostCpu.current().isX86_64()) return;
+        String wineRoot = imageFs.getWinePath();
+        envVars.put("WINEDLLPATH", wineRoot + "/lib/wine/x86_64-unix");
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {
@@ -693,9 +710,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("PATH", winePath + ":" + rootDir.getPath() + "/usr/bin");
         if (BuildConfig.MODERN_ANDROID) envVars.put("REDIRECT_EXEC__PROC_SELF_EXE", winePath + "/wine");
 
-        String ldLibraryPath = rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64";
-        if (BuildConfig.MODERN_ANDROID) ldLibraryPath += ":" + imageFs.getWinePath() + "/lib";
-        envVars.put("LD_LIBRARY_PATH", ldLibraryPath);
+        envVars.put("LD_LIBRARY_PATH", buildLdLibraryPath(imageFs, rootDir));
+        applyX86_64WineEnvVars(envVars, imageFs);
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
         envVars.put("WINE_NO_DUPLICATE_EXPLORER", "1");
         envVars.put("PREFIX", rootDir.getPath() + "/usr");
