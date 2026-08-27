@@ -490,8 +490,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
     /** Without libredirect on x86_64, point Wine at Proton's ntdll.so instead of the apex stub path. */
     private String buildLdLibraryPath(ImageFs imageFs, File rootDir) {
         StringBuilder path = new StringBuilder();
-        path.append(rootDir.getPath()).append("/usr/lib");
-        path.append(":/system/lib64");
+        if (HostCpu.current().isX86_64()) {
+            // imagefs/usr/lib is ARM — must not be on LD_LIBRARY_PATH for x86_64 Proton.
+            path.append("/system/lib64");
+        } else {
+            path.append(rootDir.getPath()).append("/usr/lib");
+            path.append(":/system/lib64");
+        }
         if (BuildConfig.MODERN_ANDROID) {
             String wineRoot = imageFs.getWinePath();
             path.append(":").append(wineRoot).append("/lib");
