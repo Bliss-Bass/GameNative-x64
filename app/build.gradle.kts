@@ -248,7 +248,10 @@ android {
         // the release-only lintVital pass fails on 150+ ExtraTranslation errors.
         disable += "ExtraTranslation"
     }
-    dynamicFeatures += setOf(":ubuntufs")
+    // Ubuntu on-demand module — omit for Bliss ax86 modernX64 until the feature is ported.
+    if (!gradle.startParameter.taskNames.any { it.contains("modernX64", ignoreCase = true) }) {
+        dynamicFeatures += setOf(":ubuntufs")
+    }
 
     // Configure Assets to be used in different variants
     sourceSets {
@@ -281,9 +284,7 @@ android {
             assets {
                 srcDirs("src/modern/assets", "src/main/assets")
             }
-            jniLibs {
-                srcDirs("src/modern/jniLibs", "src/modernX64/jniLibs")
-            }
+            jniLibs.setSrcDirs(listOf("src/modernX64/jniLibs"))
         }
         getByName("modernXr") {
             assets {
