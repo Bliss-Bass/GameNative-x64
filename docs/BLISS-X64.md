@@ -11,6 +11,9 @@ Branch **`bliss-x64`** tracks GameNative changes for Bass:Lineout x86_64 tablets
 
 JNI prebuilts for `x86_64` are staged under `app/src/modernX64/jniLibs/x86_64/`.
 Build open-source libs with `./scripts/build-x86_64-jni.sh` (see README there).
+PulseAudio and x86_64 bionic libs (FreeType/fontconfig) use
+`./scripts/build-x86_64-pulse.sh` and `./scripts/build-x86_64-bionic-libs.sh`;
+assets land in `app/src/modernX64/assets/`.
 
 **Blockers for full runtime:** proprietary ARM-only `libredirect-bionic-wx.so`,
 `libhook_impl.so`, `libmain_hook.so`, plus `libevshim.so` (SDL2 headers) and

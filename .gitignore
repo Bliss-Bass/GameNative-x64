@@ -40,6 +40,13 @@ gen/
 app/.cxx/
 app/.cxx-bliss-x64/
 
+# x86_64 cross-build trees (tarballs fetched at build time)
+native/pulseaudio-android/.src/
+native/pulseaudio-android/root-*/
+native/pulseaudio-android/output/
+native/pulseaudio-android/.pa_src_path
+native/bionic-libs-android/
+
 # Kotlin 2.0
 .kotlin/sessions
 *.salive

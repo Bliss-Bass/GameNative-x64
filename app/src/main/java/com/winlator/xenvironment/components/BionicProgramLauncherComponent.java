@@ -53,6 +53,7 @@ import java.util.List;
 import app.gamenative.BuildConfig;
 import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
+import app.gamenative.utils.HostBionicLibs;
 import app.gamenative.utils.HostCpu;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
@@ -267,7 +268,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("LD_LIBRARY_PATH", buildLdLibraryPath(imageFs, rootDir));
         applyX86_64WineEnvVars(envVars, imageFs);
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
-        envVars.put("FONTCONFIG_PATH", rootDir.getPath() + "/usr/etc/fonts");
+        envVars.put("FONTCONFIG_PATH", resolveFontConfigPath(rootDir));
 
         envVars.put("XDG_DATA_DIRS", rootDir.getPath() + "/usr/share");
         envVars.put("XDG_CONFIG_DIRS", rootDir.getPath() + "/usr/etc/xdg");
@@ -493,6 +494,10 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (HostCpu.current().isX86_64()) {
             // imagefs/usr/lib is ARM — must not be on LD_LIBRARY_PATH for x86_64 Proton.
             path.append("/system/lib64");
+            File hostLib = HostBionicLibs.hostUsrLibDir(environment.getContext());
+            if (hostLib.isDirectory()) {
+                path.append(":").append(hostLib.getPath());
+            }
         } else {
             path.append(rootDir.getPath()).append("/usr/lib");
             path.append(":/system/lib64");
@@ -506,6 +511,16 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             }
         }
         return path.toString();
+    }
+
+    private String resolveFontConfigPath(File rootDir) {
+        if (HostCpu.current().isX86_64()) {
+            File fonts = HostBionicLibs.hostFontsConfigDir(environment.getContext());
+            if (fonts.isDirectory()) {
+                return fonts.getPath();
+            }
+        }
+        return rootDir.getPath() + "/usr/etc/fonts";
     }
 
     private void applyX86_64WineEnvVars(EnvVars envVars, ImageFs imageFs) {

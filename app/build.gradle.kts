@@ -64,7 +64,7 @@ android {
         buildConfigField("boolean", "XR_BUILD", "false")
         buildConfigField("boolean", "MODERN_XR", "false")
 
-        versionCode = 25
+        versionCode = 26
         versionName = "1.2.0"
 
         buildConfigField("boolean", "GOLD", "false")
@@ -284,7 +284,7 @@ android {
         getByName("modernX64") {
             java.srcDir("src/nonXr/java")
             assets {
-                srcDirs("src/modern/assets", "src/main/assets")
+                srcDirs("src/modern/assets", "src/modernX64/assets", "src/main/assets")
             }
             jniLibs.setSrcDirs(listOf("src/modernX64/jniLibs"))
         }

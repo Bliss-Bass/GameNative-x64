@@ -127,6 +127,7 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.downloader.CoreDriverDownloader
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
+import app.gamenative.utils.HostBionicLibs
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.LsfgQuickMenuHelper
 import app.gamenative.utils.LsfgVkManager
@@ -5176,9 +5177,12 @@ private suspend fun applyGeneralPatches(
 }
 
 private fun refreshComponentsFiles(context: Context) {
-    val extractionPairs = listOf(
-        "pulseaudio-gamenative-20260612.tzst" to File(context.filesDir, "pulseaudio")
-    )
+    val extractionPairs = buildList {
+        add(HostBionicLibs.pulseAssetName() to File(context.filesDir, "pulseaudio"))
+        if (HostCpu.current().isX86_64) {
+            add(HostBionicLibs.BIONIC_LIBS_ASSET to HostBionicLibs.hostLibsRoot(context))
+        }
+    }
 
     AssetUtils.extractComponentsWithVersionCheck(
         extractionPairs,
