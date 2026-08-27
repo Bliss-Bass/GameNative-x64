@@ -5,10 +5,18 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <cstring>
+#ifndef BLISS_HOST_X86_64
 #include "../extras/adrenotools/include/adrenotools/driver.h"
+#endif
 #include "VulkanRendererContext.h"
 
 static void* openAdrenotoolsDriver(const char* driverPath, const char* libraryName, const char* nativeLibDir) {
+#if defined(BLISS_HOST_X86_64)
+    (void)driverPath;
+    (void)libraryName;
+    (void)nativeLibDir;
+    return nullptr;
+#else
     if (!driverPath || !libraryName || !nativeLibDir) return nullptr;
     if (access(driverPath, F_OK) != 0) {
         __android_log_print(ANDROID_LOG_ERROR,"Winlator_Renderer",
@@ -48,6 +56,7 @@ static void* openAdrenotoolsDriver(const char* driverPath, const char* libraryNa
             "openAdrenotoolsDriver: SUCCESS handle=%p", handle);
     }
     return handle;
+#endif
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -59,6 +68,7 @@ Java_com_winlator_renderer_VulkanRenderer_nativeInit(
     if (!win) return 0;
     void* adrenotoolsHandle = nullptr;
     if (jDriverPath && jLibraryName && jNativeLibDir) {
+#ifndef BLISS_HOST_X86_64
         const char* dp  = env->GetStringUTFChars(jDriverPath,   nullptr);
         const char* lib = env->GetStringUTFChars(jLibraryName,  nullptr);
         const char* nld = env->GetStringUTFChars(jNativeLibDir, nullptr);
@@ -66,6 +76,7 @@ Java_com_winlator_renderer_VulkanRenderer_nativeInit(
         env->ReleaseStringUTFChars(jDriverPath,   dp);
         env->ReleaseStringUTFChars(jLibraryName,  lib);
         env->ReleaseStringUTFChars(jNativeLibDir, nld);
+#endif
     }
     try { return reinterpret_cast<jlong>(new VulkanRendererContext(win, w, h, adrenotoolsHandle)); }
     catch (...) {
