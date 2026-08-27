@@ -46,10 +46,11 @@ object ContainerUtils {
         listOf(WRAPPER_TURNIP_CAPABLE, WRAPPER_ADRENO_8ELITE_GEN5, WRAPPER_ADRENO_8ELITE, WRAPPER_ADRENO_A12)
 
     fun setContainerDefaults(context: Context) {
+        val defaultProton = HostContainerPolicy.defaultProtonWineVersion()
         // Override default driver and DXVK version based on Turnip capability
         if (GPUInformation.isTurnipCapable(context)) {
             DefaultVersion.VARIANT = Container.BIONIC
-            DefaultVersion.WINE_VERSION = "proton-10.0-arm64ec-2"
+            DefaultVersion.WINE_VERSION = defaultProton
             DefaultVersion.DEFAULT_GRAPHICS_DRIVER = "Wrapper"
             DefaultVersion.DXVK = if (GPUInformation.isAdreno6xx(context)) "1.11.1-sarek" else "2.4.1-gplasync"
             DefaultVersion.VKD3D = "2.14.1"
@@ -58,7 +59,7 @@ object ContainerUtils {
             DefaultVersion.ASYNC_CACHE = "1"
         } else if (GPUInformation.isAdrenoA12(context)) {
             DefaultVersion.VARIANT = Container.BIONIC
-            DefaultVersion.WINE_VERSION = "proton-10.0-arm64ec-2"
+            DefaultVersion.WINE_VERSION = defaultProton
             DefaultVersion.DEFAULT_GRAPHICS_DRIVER = "Wrapper"
             DefaultVersion.DXVK = "2.4.1-gplasync"
             DefaultVersion.VKD3D = "2.14.1"
@@ -67,7 +68,7 @@ object ContainerUtils {
             DefaultVersion.ASYNC_CACHE = "1"
         } else if (GPUInformation.isAdreno8EliteGen5(context)) {
             DefaultVersion.VARIANT = Container.BIONIC
-            DefaultVersion.WINE_VERSION = "proton-10.0-arm64ec-2"
+            DefaultVersion.WINE_VERSION = defaultProton
             DefaultVersion.DEFAULT_GRAPHICS_DRIVER = "Wrapper"
             DefaultVersion.DXVK = "2.4.1-gplasync"
             DefaultVersion.VKD3D = "2.14.1"
@@ -76,7 +77,7 @@ object ContainerUtils {
             DefaultVersion.ASYNC_CACHE = "1"
         } else if (GPUInformation.isAdreno8Elite(context)) {
             DefaultVersion.VARIANT = Container.BIONIC
-            DefaultVersion.WINE_VERSION = "proton-10.0-arm64ec-2"
+            DefaultVersion.WINE_VERSION = defaultProton
             DefaultVersion.DEFAULT_GRAPHICS_DRIVER = "Wrapper"
             DefaultVersion.DXVK = "2.4.1-gplasync"
             DefaultVersion.VKD3D = "2.14.1"
@@ -85,9 +86,12 @@ object ContainerUtils {
             DefaultVersion.ASYNC_CACHE = "1"
         } else {
             DefaultVersion.VARIANT = Container.BIONIC
-            DefaultVersion.WINE_VERSION = "proton-10.0-arm64ec-2"
-            DefaultVersion.DEFAULT_GRAPHICS_DRIVER =
-                if (GPUInformation.isAdrenoGPU(context)) "Wrapper" else "Wrapper-gamenative"
+            DefaultVersion.WINE_VERSION = defaultProton
+            DefaultVersion.DEFAULT_GRAPHICS_DRIVER = when {
+                GPUInformation.isAdrenoGPU(context) -> "Wrapper"
+                HostCpu.current().isX86_64 -> "System"
+                else -> "Wrapper-gamenative"
+            }
             DefaultVersion.DXVK = "async-1.10.3"
             DefaultVersion.VKD3D = "2.14.1"
             DefaultVersion.STEAM_TYPE = Container.STEAM_TYPE_LIGHT
@@ -649,7 +653,11 @@ object ContainerUtils {
     fun getContainer(context: Context, appId: String): Container {
         val containerManager = ContainerManager(context)
         return if (containerManager.hasContainer(appId)) {
-            containerManager.getContainerById(appId)
+            containerManager.getContainerById(appId).also { container ->
+                if (HostContainerPolicy.adaptContainerForHost(context, container)) {
+                    container.saveData()
+                }
+            }
         } else {
             throw Exception("Container does not exist for game $appId")
         }
