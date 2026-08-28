@@ -42,7 +42,11 @@ fetch() {
     local url
     for url in "$@"; do
         echo "fetch $url"
-        curl -fsSL --retry 3 -o "$dest" "$url" && return 0
+        # --retry-all-errors because freedesktop.org answers bursts from shared CI address
+        # ranges with HTTP 418 from its bot protection. Plain --retry only covers errors
+        # curl considers transient, so a 418 aborted the build on the first try even
+        # though the same URL succeeds moments later.
+        curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "$dest" "$url" && return 0
     done
     return 1
 }
@@ -222,7 +226,12 @@ fi
 # --- fontconfig ---
 if [[ ! -f "$OUT_LIB/libfontconfig.so" ]]; then
     cd "$SRC_DIR"
-    [[ -f fontconfig-2.15.0.tar.xz ]] || fetch fontconfig-2.15.0.tar.xz https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.xz
+    # Debian's pool carries the identical upstream tarball, and is the fallback that has
+    # actually been needed: freedesktop.org 418'd this one from a CI runner. Most of the
+    # x.org fetches below have no such alternative, since Debian pins other versions.
+    [[ -f fontconfig-2.15.0.tar.xz ]] || fetch fontconfig-2.15.0.tar.xz \
+        https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.xz \
+        http://deb.debian.org/debian/pool/main/f/fontconfig/fontconfig_2.15.0.orig.tar.xz
     rm -rf fontconfig-2.15.0 && tar xf fontconfig-2.15.0.tar.xz && cd fontconfig-2.15.0
     ./configure --host=$HOST --prefix="$PREFIX/usr" --disable-static --disable-docs \
         PKG_CONFIG_PATH="$PKG_CONFIG_PATH" \

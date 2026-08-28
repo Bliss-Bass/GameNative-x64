@@ -33,39 +33,61 @@ runs:
         [ -x "${JAVA_HOME:-/nonexistent}/bin/java" ] || {
           echo "::error::JAVA_HOME ($JAVA_HOME) was removed by the cleanup above"; exit 1; }
 
-    # Both trees are gitignored build output. Keyed on the recipes that produce them plus
+    # These trees are gitignored build output, keyed on the recipes that produce them plus
     # the Containerfile, so a toolchain change invalidates the cache rather than silently
-    # shipping stale drivers. The Termux .debs are cached too, to avoid refetching ~190MB.
-    # restore/save rather than actions/cache: the combined action only saves in its post
-    # step when the whole job succeeded, so an unrelated Gradle failure threw away the
-    # ~9 minutes of Mesa work and made every retry pay for it again. Saving right after
-    # the build keeps the trees regardless of what happens later in the job.
-    - name: Restore native cross-build trees
-      id: native-cache
+    # shipping stale drivers.
+    #
+    # Cached and saved per tree, with restore/save rather than actions/cache, because both
+    # of the combined arrangements lost work: actions/cache only saves in its post step
+    # when the job succeeded, so an unrelated Gradle failure discarded everything, and a
+    # single combined entry meant one failed download in the X11 stack also threw away a
+    # completed Mesa build. Each step now keeps whatever it finished.
+    - name: Restore X11 support libs
+      id: cache-bionic
       uses: actions/cache/restore@v4
       with:
-        path: |
-          native/bionic-libs-android
-          native/mesa-vulkan-android
-          native/vulkan-x86_64/debs
-        key: native-x64-${{ hashFiles('scripts/build-x86_64-bionic-libs.sh', 'scripts/build-x86_64-mesa-vulkan.sh', 'scripts/Containerfile.x86_64-native') }}
+        path: native/bionic-libs-android
+        key: bionic-libs-x64-${{ hashFiles('scripts/build-x86_64-bionic-libs.sh', 'scripts/Containerfile.x86_64-native') }}
 
-    - name: Build support libs and Mesa ICDs (container)
-      if: steps.native-cache.outputs.cache-hit != 'true' || inputs.force-rebuild == 'true'
+    - name: Build X11 support libs (container)
+      if: steps.cache-bionic.outputs.cache-hit != 'true' || inputs.force-rebuild == 'true'
       shell: bash
-      run: |
-        ./scripts/native-build-container.sh scripts/build-x86_64-bionic-libs.sh
-        ./scripts/native-build-container.sh scripts/build-x86_64-mesa-vulkan.sh
+      run: ./scripts/native-build-container.sh scripts/build-x86_64-bionic-libs.sh
 
-    - name: Save native cross-build trees
-      if: steps.native-cache.outputs.cache-hit != 'true'
+    - name: Save X11 support libs
+      if: steps.cache-bionic.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: |
-          native/bionic-libs-android
-          native/mesa-vulkan-android
-          native/vulkan-x86_64/debs
-        key: ${{ steps.native-cache.outputs.cache-primary-key }}
+        path: native/bionic-libs-android
+        key: ${{ steps.cache-bionic.outputs.cache-primary-key }}
+
+    - name: Restore Mesa ICDs
+      id: cache-mesa
+      uses: actions/cache/restore@v4
+      with:
+        path: native/mesa-vulkan-android
+        key: mesa-vulkan-x64-${{ hashFiles('scripts/build-x86_64-mesa-vulkan.sh', 'scripts/Containerfile.x86_64-native') }}
+
+    - name: Build Mesa ANV/RADV ICDs (container)
+      if: steps.cache-mesa.outputs.cache-hit != 'true' || inputs.force-rebuild == 'true'
+      shell: bash
+      run: ./scripts/native-build-container.sh scripts/build-x86_64-mesa-vulkan.sh
+
+    - name: Save Mesa ICDs
+      if: steps.cache-mesa.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: native/mesa-vulkan-android
+        key: ${{ steps.cache-mesa.outputs.cache-primary-key }}
+
+    # Separate from the build trees: ~190MB of upstream Termux packages that only change
+    # when the provisioning script's package list does.
+    - name: Restore Termux packages
+      id: cache-debs
+      uses: actions/cache/restore@v4
+      with:
+        path: native/vulkan-x86_64/debs
+        key: termux-debs-x64-${{ hashFiles('scripts/provision-x86_64-vulkan.sh') }}
 
     # The app resolves the payload by exact filename and uses that name as its on-device
     # staging stamp, so read the expected name from the source instead of date-stamping
@@ -80,6 +102,13 @@ runs:
         VULKAN_ASSET_NAME="$ASSET" ./scripts/provision-x86_64-vulkan.sh tarball
         cp "native/vulkan-x86_64/$ASSET" "app/src/modernX64/assets/$ASSET"
         ls -la app/src/modernX64/assets/
+
+    - name: Save Termux packages
+      if: steps.cache-debs.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: native/vulkan-x86_64/debs
+        key: ${{ steps.cache-debs.outputs.cache-primary-key }}
 
     - name: Verify payload carries the hardware ICDs
       shell: bash
