@@ -95,13 +95,15 @@ llvm-config = 'false'
 cmake = 'false'
 
 [built-in options]
-c_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include']
-cpp_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include']
+c_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include', '-I$PREFIX/usr/include/libdrm']
+cpp_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include', '-I$PREFIX/usr/include/libdrm']
 c_link_args = ['-L$OUT_LIB', '-landroid-shmem', '-llog', '$COMPAT_LIB']
 cpp_link_args = ['-L$OUT_LIB', '-landroid-shmem', '-llog', '$COMPAT_LIB']
 
 [properties]
-sys_root = '$SYSROOT'
+# No sys_root: meson would prefix the -I paths coming out of pkg-config with it,
+# and this prefix lives outside the NDK sysroot, so libdrm's headers would resolve
+# to a path that does not exist. The NDK clang wrapper already sets its own sysroot.
 pkg_config_libdir = '$PKG_CONFIG_PATH'
 needs_exe_wrapper = true
 
@@ -323,6 +325,17 @@ fetch_mesa() {
         sed -i "s|^$cond\$|$cond and host_machine.system() != 'android'|" "$p"
         echo "patched $f (drop VK_KHR_display)"
     done
+
+    # vk_image::ahb_format is declared under VK_USE_PLATFORM_ANDROID_KHR, but RADV
+    # assigns it under DETECT_OS_ANDROID. Those differ exactly in this build: an
+    # Android target with the Android WSI platform off, so the field is absent.
+    # Guard the assignment the same way the field is declared.
+    # Idempotent: once rewritten, the pattern no longer matches.
+    local radv="$SRC_DIR/mesa-$MESA_VERSION/src/amd/vulkan/radv_image.c"
+    perl -0pi -e \
+        's/#if DETECT_OS_ANDROID\n(\s*image->vk\.ahb_format)/#ifdef VK_USE_PLATFORM_ANDROID_KHR\n$1/ and $c++;
+         END { print STDERR "patched radv_image.c (ahb_format guard)\n" if $c }' \
+        "$radv"
 }
 
 # ANV is in Mesa's with_driver_using_cl list, so building it requires the OpenCL-C

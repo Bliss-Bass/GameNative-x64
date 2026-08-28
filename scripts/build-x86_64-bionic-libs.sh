@@ -72,7 +72,9 @@ build_autotools() {
 }
 
 build_x11_stack() {
-  if [[ -f "$OUT_LIB/libXext.so" ]]; then
+  # Keyed on the library built last, so an existing tree is topped up rather than
+  # skipped when this list grows.
+  if [[ -f "$OUT_LIB/libXrandr.so" ]]; then
     echo "X11 stack already built"
     return 0
   fi
@@ -122,6 +124,13 @@ build_x11_stack() {
 
   build_autotools libXrender-0.9.11.tar.xz \
     https://xorg.freedesktop.org/archive/individual/lib/libXrender-0.9.11.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no
+
+  # Mesa's X11 WSI requires xrandr for the xlib-lease path, so the hardware ICD
+  # build in build-x86_64-mesa-vulkan.sh does not configure without it.
+  build_autotools libXrandr-1.5.4.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXrandr-1.5.4.tar.xz \
     --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
     --enable-malloc0returnsnull=no
 }
