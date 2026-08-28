@@ -19,6 +19,17 @@ Produces: `libwinlator.so`, `libwinlator_11.so`, `libvulkan_renderer.so` (Mesa/s
 
 `modernX64` assets live under `app/src/modernX64/assets/` (host-specific pulse + bionic libs).
 
+## PRoot for the Linux userland (x86_64)
+
+```bash
+scripts/native-build-container.sh scripts/build-x86_64-proot-linux.sh
+```
+
+Produces `libproot-linux.so` and `libproot-linux-loader.so` from upstream (Termux) PRoot.
+Upstream rather than the fork vendored in `app/src/main/cpp/proot`: that fork was stripped
+down for Wine and has no extension subsystem, so it cannot fake root and `apt` cannot
+unpack a package under it.
+
 ## Still blocked (upstream proprietary / ARM-only)
 
 | Library | Notes |
@@ -27,6 +38,5 @@ Produces: `libwinlator.so`, `libwinlator_11.so`, `libvulkan_renderer.so` (Mesa/s
 | `libhook_impl.so`, `libmain_hook.so` | Closed-source; Turnip wrapper ICD path |
 | `libevshim.so` | Host stub only; full SDL vjoy needs `third_party/SDL2/` |
 | `libsteambootstrap.so` | Source not in public tree |
-| `libproot.so` | PRoot `arch.h` is ARM-only; modern Bionic uses `linker64` instead |
 
 Request x86_64 builds from GameNative maintainers for proprietary components.
