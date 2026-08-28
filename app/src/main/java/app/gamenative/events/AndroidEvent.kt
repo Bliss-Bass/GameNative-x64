@@ -7,6 +7,13 @@ import java.util.EnumSet
 interface AndroidEvent<T> : Event<T> {
     data object BackPressed : AndroidEvent<Unit>
     data class SetSystemUIVisibility(val visible: Boolean) : AndroidEvent<Unit>
+
+    /**
+     * Request fullscreen rather than freeform windowing, for devices in desktop windowing.
+     * Distinct from [SetSystemUIVisibility]: hiding the system bars does not resize a
+     * freeform window, so a game session needs the windowing mode itself to change.
+     */
+    data class SetFullscreenWindowing(val fullscreen: Boolean) : AndroidEvent<Unit>
     data class SetAllowedOrientation(val orientations: EnumSet<Orientation>) : AndroidEvent<Unit>
     data object StartOrientator : AndroidEvent<Unit>
     data object ActivityDestroyed : AndroidEvent<Unit>

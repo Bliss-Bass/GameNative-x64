@@ -2,6 +2,8 @@ package app.gamenative
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity.FULLSCREEN_MODE_REQUEST_ENTER
+import android.app.Activity.FULLSCREEN_MODE_REQUEST_EXIT
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
@@ -11,6 +13,7 @@ import android.graphics.Color.TRANSPARENT
 import android.hardware.input.InputManager
 import android.os.Build
 import android.os.Bundle
+import android.os.OutcomeReceiver
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.OrientationEventListener
@@ -121,11 +124,23 @@ class MainActivity : ComponentActivity() {
 
         @Volatile
         var wasLaunchedViaExternalIntent: Boolean = false
+
+        /**
+         * Whether we moved the task to fullscreen windowing via [requestDesktopFullscreen].
+         * Process-scoped because entering fullscreen is a configuration change that recreates
+         * the activity, and the exit request is rejected unless we know we made the entry.
+         */
+        @Volatile
+        var enteredFullscreenViaRequest: Boolean = false
     }
 
     private val onSetSystemUi: (AndroidEvent.SetSystemUIVisibility) -> Unit = {
         desiredSystemUiVisible = it.visible
         applyImmersiveMode()
+    }
+
+    private val onSetFullscreenWindowing: (AndroidEvent.SetFullscreenWindowing) -> Unit = {
+        requestDesktopFullscreen(enter = it.fullscreen)
     }
 
     private val onSetAllowedOrientation: (AndroidEvent.SetAllowedOrientation) -> Unit = {
@@ -228,6 +243,7 @@ class MainActivity : ComponentActivity() {
 
         // startOrientator() // causes memory leak since activity restarted every orientation change
         PluviaApp.events.on<AndroidEvent.SetSystemUIVisibility, Unit>(onSetSystemUi)
+        PluviaApp.events.on<AndroidEvent.SetFullscreenWindowing, Unit>(onSetFullscreenWindowing)
         PluviaApp.events.on<AndroidEvent.StartOrientator, Unit>(onStartOrientator)
         PluviaApp.events.on<AndroidEvent.SetAllowedOrientation, Unit>(onSetAllowedOrientation)
         PluviaApp.events.on<AndroidEvent.EndProcess, Unit>(onEndProcess)
@@ -390,6 +406,7 @@ class MainActivity : ComponentActivity() {
         controllerInputManager = null
 
         PluviaApp.events.off<AndroidEvent.SetSystemUIVisibility, Unit>(onSetSystemUi)
+        PluviaApp.events.off<AndroidEvent.SetFullscreenWindowing, Unit>(onSetFullscreenWindowing)
         PluviaApp.events.off<AndroidEvent.StartOrientator, Unit>(onStartOrientator)
         PluviaApp.events.off<AndroidEvent.SetAllowedOrientation, Unit>(onSetAllowedOrientation)
         PluviaApp.events.off<AndroidEvent.EndProcess, Unit>(onEndProcess)
@@ -649,6 +666,43 @@ class MainActivity : ComponentActivity() {
 
         // enable if possible
         orientationSensorListener?.takeIf { it.canDetectOrientation() }?.enable()
+    }
+
+    /**
+     * Move the task between freeform and fullscreen windowing on desktop-windowing devices.
+     *
+     * Hiding the system bars is not sufficient in a freeform window: the window keeps its
+     * caption and its size, so a game session ends up rendering into a small floating
+     * window instead of filling the panel. [applyImmersiveMode] deliberately leaves the
+     * bars alone in that state, so the windowing mode itself has to change.
+     *
+     * The platform only honours this for the top-most activity in response to user input;
+     * both hold here because the caller is the game launch/exit transition. An exit request
+     * is rejected unless we entered through this API, hence [enteredFullscreenViaRequest].
+     */
+    private fun requestDesktopFullscreen(enter: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+
+        val request = if (enter) FULLSCREEN_MODE_REQUEST_ENTER else FULLSCREEN_MODE_REQUEST_EXIT
+        if (enter) {
+            if (enteredFullscreenViaRequest || !isInMultiWindowMode) return
+        } else {
+            if (!enteredFullscreenViaRequest) return
+        }
+        enteredFullscreenViaRequest = enter
+
+        val outcome = object : OutcomeReceiver<Void?, Throwable> {
+            override fun onResult(result: Void?) {
+                Timber.i("Windowing mode request (enter=%b) approved", enter)
+            }
+
+            override fun onError(error: Throwable) {
+                Timber.w(error, "Windowing mode request (enter=%b) refused", enter)
+                if (enter) enteredFullscreenViaRequest = false
+            }
+        }
+        runCatching { requestFullscreenMode(request, outcome) }
+            .onFailure { Timber.w(it, "Could not request windowing mode (enter=%b)", enter) }
     }
 
     /**

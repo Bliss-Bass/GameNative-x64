@@ -382,6 +382,7 @@ fun XServerScreen(
 
     // PluviaApp.events.emit(AndroidEvent.SetAppBarVisibility(false))
     PluviaApp.events.emit(AndroidEvent.SetSystemUIVisibility(false))
+    PluviaApp.events.emit(AndroidEvent.SetFullscreenWindowing(true))
 
     // seems to be used to indicate when a custom wine is being installed (intent extra "generate_wineprefix")
     // val generateWinePrefix = false

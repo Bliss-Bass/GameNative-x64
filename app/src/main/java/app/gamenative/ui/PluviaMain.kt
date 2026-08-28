@@ -691,6 +691,7 @@ fun PluviaMain(
                 // Hide or show status bar based on if in game or not
                 val shouldShowStatusBar = !PrefManager.hideStatusBarWhenNotInGame
                 PluviaApp.events.emit(AndroidEvent.SetSystemUIVisibility(shouldShowStatusBar))
+                PluviaApp.events.emit(AndroidEvent.SetFullscreenWindowing(false))
 
                 // reset system ui visibility based on user preference
                 // TODO: add option for user to set
