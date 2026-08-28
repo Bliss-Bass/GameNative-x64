@@ -129,6 +129,9 @@ import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
 import app.gamenative.utils.HostBionicLibs
 import app.gamenative.utils.HostCpu
+import app.gamenative.utils.HostGraphicsEnv
+import app.gamenative.utils.BlissPortDebug
+import app.gamenative.utils.GameSessionMemory
 import app.gamenative.utils.LsfgQuickMenuHelper
 import app.gamenative.utils.LsfgVkManager
 import app.gamenative.utils.ManifestComponentHelper
@@ -2280,6 +2283,7 @@ fun XServerScreen(
 
                             // Autostart performance driver after environment is set up
                             PowerManager.autoStart(container.rootDir)
+                            GameSessionMemory.beginSession(context)
 
                             // Pin game process to performance cores (CPUs 4-7)
                             container.executablePath
@@ -3736,6 +3740,7 @@ private fun setupXEnvironment(
         envVars.put("VKD3D_DEBUG", "warn")
         envVars.put("DXVK_LOG_LEVEL", "info")
         envVars.put("WINEDEBUG", "+vulkan")
+        envVars.put("PROTON_LOG", "1")
     } else {
         envVars.put(
             "WINEDEBUG",
@@ -3748,6 +3753,7 @@ private fun setupXEnvironment(
     // capture debug output to file if either Wine or Box86/64 logging is enabled
     var logFile: File? = null
     val captureLogs = enableWineDebug || enableBox86Logs
+    val forwardGuestLogs = BlissPortDebug.isActive(diagnostics) || diagnostics || captureLogs
     if (captureLogs) {
         val wineLogDir = File(context.getExternalFilesDir(null), "wine_logs")
         wineLogDir.mkdirs()
@@ -3756,6 +3762,9 @@ private fun setupXEnvironment(
     }
 
     ProcessHelper.addDebugCallback { line ->
+        if (forwardGuestLogs) {
+            BlissPortDebug.logGuestLine(line)
+        }
         if (captureLogs) {
             logFile?.appendText(line + "\n")
         }
@@ -3807,8 +3816,7 @@ private fun setupXEnvironment(
         val wow64Mode = container.isWoW64Mode
         guestProgramLauncherComponent.setContainer(container);
         guestProgramLauncherComponent.setWineInfo(xServerState.value.wineInfo);
-        if (guestProgramLauncherComponent is BionicProgramLauncherComponent && container.isLaunchBionicSteam) {
-            // Bionic-Steam mode publishes SteamGameId/SteamAppId from this value.
+        if (guestProgramLauncherComponent is BionicProgramLauncherComponent) {
             val numericAppId = runCatching { ContainerUtils.extractGameIdFromContainerId(appId) }.getOrNull()
             if (numericAppId != null && numericAppId > 0) {
                 guestProgramLauncherComponent.setSteamAppId(numericAppId.toString())
@@ -3834,6 +3842,20 @@ private fun setupXEnvironment(
         envVars.remove("DXVK_FRAME_RATE")
         envVars.remove("VKD3D_FRAME_RATE")
         if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1")
+
+        if (HostCpu.current().isX86_64 && container.graphicsDriver.equals("System", ignoreCase = true)) {
+            HostGraphicsEnv.sanitizeForSystemVulkan(envVars)
+        }
+
+        if (gameSource == GameSource.STEAM) {
+            val steamAppId = runCatching { ContainerUtils.extractGameIdFromContainerId(appId) }.getOrDefault(0)
+            if (steamAppId > 0) {
+                envVars.put("SteamGameId", steamAppId.toString())
+                envVars.put("SteamAppId", steamAppId.toString())
+            }
+        }
+
+        BlissPortDebug.applyLaunchEnv(envVars, diagnostics)
 
         val ffpGameDir = runCatching {
             Container.drivesIterator(container.drives).asSequence()
@@ -5189,6 +5211,9 @@ private fun refreshComponentsFiles(context: Context) {
         context.assets,
         TarCompressorUtils.Type.ZSTD
     )
+    if (HostCpu.current().isX86_64) {
+        HostBionicLibs.ensureVulkanLoaderSymlink(context)
+    }
 }
 
 /**
@@ -5693,6 +5718,7 @@ private suspend fun extractGraphicsDriverFiles(
             } else if (dxwrapper.contains("vkd3d")) {
                 DXVKHelper.setVKD3DEnvVars(context, dxwrapperConfig, envVars)
             }
+            HostGraphicsEnv.sanitizeForSystemVulkan(envVars)
             return
         }
 

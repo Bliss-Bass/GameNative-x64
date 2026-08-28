@@ -9,7 +9,7 @@ SRC_DIR="$BUILD_DIR/.src"
 PREFIX="$BUILD_DIR/root-x86_64"
 OUT_LIB="$PREFIX/usr/lib"
 OUT_ETC="$PREFIX/usr/etc"
-ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20260827.tzst"
+ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20260828.tzst"
 
 NDK_ROOT="${NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}}"
 if [[ -z "$NDK_ROOT" ]]; then
@@ -29,9 +29,10 @@ export CXX="$TOOLCHAIN/${HOST}${API}-clang++"
 export AR="$TOOLCHAIN/llvm-ar"
 export RANLIB="$TOOLCHAIN/llvm-ranlib"
 export STRIP="$TOOLCHAIN/llvm-strip"
-export CFLAGS="-O2 -fPIC"
-export LDFLAGS="-L$PREFIX/usr/lib"
-export PKG_CONFIG_PATH="$PREFIX/usr/lib/pkgconfig"
+export CFLAGS="-O2 -fPIC -I$PREFIX/usr/include"
+export CPPFLAGS="-I$PREFIX/usr/include"
+export LDFLAGS="-L$OUT_LIB -pthread"
+export PKG_CONFIG_PATH="$PREFIX/usr/lib/pkgconfig:$PREFIX/usr/share/pkgconfig"
 export PATH="$PREFIX/usr/bin:$PATH"
 
 mkdir -p "$SRC_DIR" "$OUT_LIB" "$OUT_ETC/fonts/conf.d"
@@ -44,6 +45,91 @@ fetch() {
         curl -fsSL --retry 3 -o "$dest" "$url" && return 0
     done
     return 1
+}
+
+build_autotools() {
+  local archive="$1" url="$2"
+  shift 2
+  cd "$SRC_DIR"
+  [[ -f "$archive" ]] || fetch "$archive" "$url"
+  local dir="${archive%%.tar.*}"
+  rm -rf "$dir" && tar xf "$archive" && cd "$dir"
+  local host_build=1
+  for arg in "$@"; do
+    [[ "$arg" == --host=* ]] && host_build=0
+  done
+  if [[ $host_build -eq 1 ]]; then
+    # Proto/header packages must configure with the host toolchain.
+    CC=gcc CXX=g++ AR=ar RANLIB=ranlib ./configure "$@"
+  else
+    ./configure "$@"
+  fi
+  if [[ "$archive" == libX11-* ]]; then
+    # Bionic pthread is in libc; -lpthread does not exist on Android NDK.
+    find . -name Makefile -exec sed -i 's/-lpthread/-pthread/g' {} +
+  fi
+  make -j"$(nproc)" && make install
+}
+
+build_x11_stack() {
+  if [[ -f "$OUT_LIB/libXext.so" ]]; then
+    echo "X11 stack already built"
+    return 0
+  fi
+
+  echo "=== Building X11 client libs for winex11.drv ==="
+
+  # Headers only (build tools run on host).
+  build_autotools xorgproto-2024.1.tar.xz \
+    https://www.x.org/archive/individual/proto/xorgproto-2024.1.tar.xz \
+    --prefix="$PREFIX/usr"
+
+  build_autotools libXau-1.0.11.tar.gz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXau-1.0.11.tar.gz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static
+
+  build_autotools libXdmcp-1.1.4.tar.gz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXdmcp-1.1.4.tar.gz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static
+
+  build_autotools xcb-proto-1.17.0.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.17.0.tar.xz \
+    --prefix="$PREFIX/usr"
+
+  build_autotools xtrans-1.6.0.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/xtrans-1.6.0.tar.xz \
+    --prefix="$PREFIX/usr"
+
+  build_autotools libxcb-1.16.1.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libxcb-1.16.1.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static --without-doxygen
+
+  build_autotools libX11-1.8.10.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libX11-1.8.10.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --disable-xf86bigfont --disable-specs \
+    --enable-xthreads --enable-malloc0returnsnull=no
+
+  build_autotools libXext-1.3.6.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXext-1.3.6.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no
+
+  build_autotools libXfixes-6.0.1.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXfixes-6.0.1.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no
+
+  build_autotools libXrender-0.9.11.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXrender-0.9.11.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no
+}
+
+install_vulkan_loader_symlink() {
+  # Wine dlopen("libvulkan.so.1"); Android ships libvulkan.so without the .1 soname.
+  rm -f "$OUT_LIB/libvulkan.so.1"
+  ln -sf /system/lib64/libvulkan.so "$OUT_LIB/libvulkan.so.1"
 }
 
 # --- zlib ---
@@ -141,6 +227,15 @@ if [[ ! -f "$OUT_LIB/libfreetype.so" ]]; then
     echo "ERROR: libfreetype.so missing after build" >&2
     exit 1
 fi
+
+build_x11_stack
+
+if [[ ! -f "$OUT_LIB/libXext.so" ]]; then
+    echo "ERROR: libXext.so missing after X11 build" >&2
+    exit 1
+fi
+
+install_vulkan_loader_symlink
 
 # Fontconfig configs — reuse the ARM imagefs tree (font files stay in imagefs/usr/share/fonts).
 FONTS_REF="${FONTS_REF:-/tmp/imagefs-fonts-ref}"

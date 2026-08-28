@@ -55,6 +55,7 @@ import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
 import app.gamenative.utils.HostBionicLibs;
 import app.gamenative.utils.HostCpu;
+import app.gamenative.utils.HostGraphicsEnv;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -105,6 +106,9 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             else if (!HostCpu.current().isX86_64())
                 extractBox64Files();
             if (preUnpack != null) preUnpack.run();
+            if (HostCpu.current().isX86_64()) {
+                HostBionicLibs.ensureVulkanLoaderSymlink(environment.getContext());
+            }
             pid = execGuestProgram();
             Log.d("BionicProgramLauncherComponent", "Process " + pid + " started");
             SteamService.setKeepAlive(true);
@@ -273,11 +277,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("XDG_DATA_DIRS", rootDir.getPath() + "/usr/share");
         envVars.put("XDG_CONFIG_DIRS", rootDir.getPath() + "/usr/etc/xdg");
         envVars.put("GST_PLUGIN_PATH", rootDir.getPath() + "/usr/lib/gstreamer-1.0");
-        envVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d" + ":" + rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
+        if (!HostCpu.current().isX86_64()) {
+            envVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d" + ":" + rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
+            envVars.put("ENABLE_UTIL_LAYER", "1");
+        }
         envVars.put("WINE_NO_DUPLICATE_EXPLORER", "1");
         envVars.put("PREFIX", rootDir.getPath() + "/usr");
         envVars.put("WINE_DISABLE_FULLSCREEN_HACK", "1");
-        envVars.put("ENABLE_UTIL_LAYER", "1");
         envVars.put("GST_PLUGIN_FEATURE_RANK", "ximagesink:3000");
         envVars.put("ALSA_CONFIG_PATH", rootDir.getPath() + "/usr/share/alsa/alsa.conf" + ":" + rootDir.getPath() + "/usr/etc/alsa/conf.d/android_aserver.conf");
         envVars.put("ALSA_PLUGIN_DIR", rootDir.getPath() + "/usr/lib/alsa-lib");
@@ -345,6 +351,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             envVars.putAll(this.envVars);
         }
 
+        applySteamAppIdEnv(envVars);
+
         if (BuildConfig.XR_BUILD) {
             String shimPath = context.getApplicationInfo().nativeLibraryDir + "/libkgslshim.so";
             if (new File(shimPath).exists()) {
@@ -357,6 +365,12 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
             LsfgVkManager.writeConfig(container);
             LsfgVkManager.applyLaunchEnv(container, envVars);
+        }
+
+        if (HostCpu.current().isX86_64()
+                && container != null
+                && container.getGraphicsDriver().equalsIgnoreCase("System")) {
+            HostGraphicsEnv.sanitizeForSystemVulkan(envVars);
         }
 
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
@@ -562,6 +576,14 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
      * the Windows `C:\Program Files (x86)\Steam` install, so its `<base>/config/config.vdf`
      * read lands on the file SteamTokenLogin.phase1SteamConfig() writes.
      */
+    /** Publishes SteamGameId/SteamAppId for steamclient_loader and Bionic-Steam launches. */
+    private void applySteamAppIdEnv(EnvVars envVars) {
+        if (steamAppId != null && !steamAppId.isEmpty()) {
+            envVars.put("SteamGameId", steamAppId);
+            envVars.put("SteamAppId", steamAppId);
+        }
+    }
+
     private void addRealSteamEnvVars(EnvVars envVars, ImageFs imageFs) {
         String steamRootLinux = imageFs.wineprefix + "/drive_c/Program Files (x86)/Steam";
         String breakpadDir = imageFs.getRootDir().getPath() + "/usr/tmp/breakpad";
@@ -605,14 +627,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             envVars.put("STEAMID", Long.toString(steamId64));
         }
 
-        // Override the SteamGameId=0 set above with the actual Steam appid for
-        // this container, and publish the matching SteamAppId. Steamworks games
-        // (and the steam.exe / steam_helper handshake) require both to be set
-        // to the running game's appid for the IPC bridge to attach correctly.
-        if (steamAppId != null && !steamAppId.isEmpty()) {
-            envVars.put("SteamGameId", steamAppId);
-            envVars.put("SteamAppId", steamAppId);
-        }
+        applySteamAppIdEnv(envVars);
     }
 
     /**

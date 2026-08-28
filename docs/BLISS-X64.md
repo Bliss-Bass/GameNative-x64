@@ -11,7 +11,8 @@ Branch **`bliss-x64`** tracks GameNative changes for Bass:Lineout x86_64 tablets
 
 JNI prebuilts for `x86_64` are staged under `app/src/modernX64/jniLibs/x86_64/`.
 Build open-source libs with `./scripts/build-x86_64-jni.sh` (see README there).
-PulseAudio and x86_64 bionic libs (FreeType/fontconfig) use
+PulseAudio and x86_64 bionic libs (FreeType/fontconfig, **X11 client libs** for
+`winex11.drv`, and a `libvulkan.so.1` → `/system/lib64/libvulkan.so` symlink) use
 `./scripts/build-x86_64-pulse.sh` and `./scripts/build-x86_64-bionic-libs.sh`;
 assets land in `app/src/modernX64/assets/`.
 
@@ -42,6 +43,21 @@ When the flag is **true** (ax86 port / dev builds):
 - PostHog is not initialized; `Telemetry.capture()` is a no-op
 - Game-run / compatibility API submissions are skipped (`GameFeedbackUtils`)
 - Automatic exit-feedback prompts after a game session are suppressed
+- Guest launches enable `WINEDEBUG=+seh,+module,+d3d9,+dxgi,+vulkan`, `PROTON_LOG=1`,
+  and `DXVK_LOG_LEVEL=info`; Wine stderr is forwarded to logcat as `WineGuest`
+
+## x86_64 system Vulkan (`HostGraphicsEnv`)
+
+On x86_64 hosts with graphics driver **System**, `HostGraphicsEnv` strips ARM
+Turnip/Wrapper env vars (`TU_DEBUG`, `ZINK_*`, `VK_LAYER_PATH`, `WRAPPER_*`, …)
+so DXVK uses the device Mesa ICD (`ro.hardware.vulkan=intel` on ax86). It also
+ensures `WINEDLLOVERRIDES` includes native DXVK DLLs for D3D9–D3D11.
+
+## Game session memory (`GameSessionMemory`)
+
+While a container is running, `GameManager.setGameState(MODE_GAME_PLAYING)` is
+set and Coil bitmap caches are dropped on memory pressure. This improves survival
+under moderate pressure but does not override lmkd when RAM is critically low.
 
 When the flag is **false** (normal upstream builds), behavior is unchanged:
 user opt-out via Settings still applies to PostHog; compatibility reporting works

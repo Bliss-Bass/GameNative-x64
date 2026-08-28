@@ -41,6 +41,7 @@ import app.gamenative.mods.NexusIntegrationStatus
 import app.gamenative.mods.NexusPendingDownloadStore
 import app.gamenative.ui.screen.library.appscreen.BaseAppScreen
 import app.gamenative.service.SteamService
+import app.gamenative.utils.GameSessionMemory
 import app.gamenative.service.gog.GOGService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.ui.PluviaMain
@@ -510,6 +511,9 @@ class MainActivity : ComponentActivity() {
         // cover-art cache so the running game has more headroom.
         if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             releaseImageCaches()
+        }
+        if (SteamService.keepAlive && level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
+            GameSessionMemory.trimForGameplay(this)
         }
     }
 

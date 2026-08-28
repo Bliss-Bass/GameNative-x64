@@ -13,6 +13,7 @@ import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.events.EventDispatcher
 import app.gamenative.powercontrol.PowerManager
+import app.gamenative.utils.GameSessionMemory
 import app.gamenative.service.ActiveGameRegistry
 import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
@@ -246,6 +247,8 @@ class PluviaApp : SplitCompatApplication() {
         fun shutdownEnvironment() {
             val env = xEnvironment
             Timber.i("shutdownEnvironment: env=%s", env != null)
+
+            GameSessionMemory.endSession(instance)
 
             // per-step catch so one failing teardown doesn't prevent the rest from running
             runCatching { achievementWatcher?.stop() }
