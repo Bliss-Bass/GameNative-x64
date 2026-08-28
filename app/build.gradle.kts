@@ -51,6 +51,19 @@ android {
                 storePassword = keystoreProperties["storePassword"].toString()
                 keyAlias = keystoreProperties["keyAlias"].toString()
                 keyPassword = keystoreProperties["keyPassword"].toString()
+            } else {
+                // CI has no keystore.properties: the workflow decodes the SIGNING_KEY
+                // secret to a file and passes the rest through the environment. Without
+                // this, release builds fall back to the auto-generated debug key, which
+                // is different on every runner, so published APKs cannot upgrade each
+                // other or a locally built install.
+                val storeFileEnv = System.getenv("RELEASE_STORE_FILE")
+                if (storeFileEnv != null) {
+                    storeFile = rootProject.file(storeFileEnv)
+                    storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+                    keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                    keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+                }
             }
         }
     }
@@ -186,7 +199,15 @@ android {
             val noMinify = (project.findProperty("noMinify") as String?) == "true"
             isMinifyEnabled = !noMinify
             isShrinkResources = !noMinify
-            signingConfig = signingConfigs.getByName("debug")
+            // Prefer the real key when one is configured (keystore.properties locally, or
+            // RELEASE_STORE_FILE in CI) and fall back to the debug key otherwise, so a
+            // plain checkout still builds without any signing setup.
+            val pluviaSigning = signingConfigs.getByName("pluvia")
+            signingConfig = if (pluviaSigning.storeFile?.isFile == true) {
+                pluviaSigning
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         create("release-signed") {
             isMinifyEnabled = true

@@ -1,0 +1,51 @@
+name: Compile Debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_payload_rebuild:
+        description: 'Rebuild the Vulkan payload even if the cache hits'
+        type: boolean
+        default: false
+  push:
+    branches: [ "bliss-x64" ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'media/**'
+
+concurrency:
+  group: debug-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build x64 Vulkan payload
+      uses: ./.github/actions/x64-payload
+      with:
+        force-rebuild: ${{ inputs.force_payload_rebuild || false }}
+
+    - name: Build Debug APK
+      run: ./gradlew :app:assembleModernX64Debug
+
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: GameNative-x64-Debug
+        path: app/build/outputs/apk/modernX64/debug/*.apk
+        if-no-files-found: error

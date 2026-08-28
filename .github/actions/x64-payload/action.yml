@@ -1,0 +1,72 @@
+name: Build x64 Vulkan payload
+description: >
+  Builds the bionic x86_64 support libs and Mesa ICDs in the pinned container, then packs
+  the guest Vulkan payload into the modernX64 assets. Shared by every workflow that
+  produces an APK, since without the payload the app installs but cannot render.
+
+inputs:
+  force-rebuild:
+    description: 'Ignore the cache and rebuild the native trees'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # The toolchain image is ~4GB and the payload unpacks to ~230MB, which does not fit
+    # alongside the toolchains the runner preinstalls.
+    - name: Free disk space
+      shell: bash
+      run: |
+        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+                    /opt/ghc /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}" || true
+        docker image prune -af || true
+        df -h /
+
+    # Both trees are gitignored build output. Keyed on the recipes that produce them plus
+    # the Containerfile, so a toolchain change invalidates the cache rather than silently
+    # shipping stale drivers. The Termux .debs are cached too, to avoid refetching ~190MB.
+    - name: Cache native cross-build trees
+      id: native-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          native/bionic-libs-android
+          native/mesa-vulkan-android
+          native/vulkan-x86_64/debs
+        key: native-x64-${{ hashFiles('scripts/build-x86_64-bionic-libs.sh', 'scripts/build-x86_64-mesa-vulkan.sh', 'scripts/Containerfile.x86_64-native') }}
+
+    - name: Build support libs and Mesa ICDs (container)
+      if: steps.native-cache.outputs.cache-hit != 'true' || inputs.force-rebuild == 'true'
+      shell: bash
+      run: |
+        ./scripts/native-build-container.sh scripts/build-x86_64-bionic-libs.sh
+        ./scripts/native-build-container.sh scripts/build-x86_64-mesa-vulkan.sh
+
+    # The app resolves the payload by exact filename and uses that name as its on-device
+    # staging stamp, so read the expected name from the source instead of date-stamping
+    # one that would never be found.
+    - name: Pack guest Vulkan payload
+      shell: bash
+      run: |
+        ASSET=$(sed -n 's/.*VULKAN_ASSET *= *"\([^"]*\)".*/\1/p' \
+          app/src/main/java/app/gamenative/utils/HostBionicLibs.kt | head -1)
+        [ -n "$ASSET" ] || { echo "::error::could not parse VULKAN_ASSET"; exit 1; }
+        echo "Packing $ASSET"
+        VULKAN_ASSET_NAME="$ASSET" ./scripts/provision-x86_64-vulkan.sh tarball
+        cp "native/vulkan-x86_64/$ASSET" "app/src/modernX64/assets/$ASSET"
+        ls -la app/src/modernX64/assets/
+
+    - name: Verify payload carries the hardware ICDs
+      shell: bash
+      run: |
+        ASSET=$(sed -n 's/.*VULKAN_ASSET *= *"\([^"]*\)".*/\1/p' \
+          app/src/main/java/app/gamenative/utils/HostBionicLibs.kt | head -1)
+        ICDS=$(tar -I zstd -tf "app/src/modernX64/assets/$ASSET" \
+          | sed -n 's#.*icd\.d/\(.*\)#\1#p')
+        echo "$ICDS"
+        # A payload with only lavapipe builds fine and renders far too slowly to use, so
+        # fail here rather than shipping it.
+        echo "$ICDS" | grep -q intel_icd  || { echo "::error::ANV (intel_icd) missing from payload"; exit 1; }
+        echo "$ICDS" | grep -q radeon_icd || { echo "::error::RADV (radeon_icd) missing from payload"; exit 1; }
