@@ -68,6 +68,7 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     private final boolean capturePointerOnExternalMouse;
     private boolean pointerCaptureRequested;
     private Runnable pointerCaptureRequester;
+    private int lastMouseButtonState = 0;
 
     // Suppress spurious left-click after two-finger right-click tap
     private boolean suppressNextLeftTap;
@@ -369,7 +370,39 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         } else if (isTouchscreenMode) {
             return handleTouchscreenEvent(event);
         } else {
+            if (event.isFromSource(InputDevice.SOURCE_MOUSE)) syncMouseButtons(event);
             return handleTouchpadEvent(event);
+        }
+    }
+
+    // Buttons on the uncaptured path, for mouse sources that reach onTouchEvent while
+    // pointer capture is off: handleTouchpadEvent returns early on ACTION_DOWN for those,
+    // so their clicks would be lost. Tracking buttonState transitions covers every button
+    // without depending on ACTION_BUTTON_PRESS/RELEASE, which only arrive through
+    // onGenericMotionEvent and this view does not override it.
+    //
+    // Unverified: this has not been seen to fire on the internal trackpad, whose events do
+    // not reach onTouchEvent when uncaptured. Kept for external mice without capture.
+    private void syncMouseButtons(MotionEvent event) {
+        int state = event.getButtonState();
+        int changed = state ^ lastMouseButtonState;
+        if (changed == 0) return;
+        lastMouseButtonState = state;
+
+        injectMouseButton(changed, state, MotionEvent.BUTTON_PRIMARY, Pointer.Button.BUTTON_LEFT);
+        injectMouseButton(changed, state, MotionEvent.BUTTON_SECONDARY, Pointer.Button.BUTTON_RIGHT);
+        injectMouseButton(changed, state, MotionEvent.BUTTON_TERTIARY, Pointer.Button.BUTTON_MIDDLE);
+    }
+
+    private void injectMouseButton(int changed, int state, int mask, Pointer.Button button) {
+        if ((changed & mask) == 0) return;
+        boolean down = (state & mask) != 0;
+        if (xServer.isRelativeMouseMovement()) {
+            xServer.getWinHandler().mouseEvent(MouseEventFlags.getFlagFor(button, down), 0, 0, 0);
+        } else if (down) {
+            xServer.injectPointerButtonPress(button);
+        } else {
+            xServer.injectPointerButtonRelease(button);
         }
     }
 
@@ -2250,7 +2283,14 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
 
     @Override // android.view.View.OnCapturedPointerListener
     public boolean onCapturedPointer(View view, MotionEvent event) {
-        if (event.isFromSource(InputDevice.SOURCE_TOUCHPAD)) {
+        // Defensive, and unverified against real hardware: the trackpad tested here
+        // reports either SOURCE_MOUSE_RELATIVE or SOURCE_TOUCHPAD but never both, so this
+        // guard has not been observed to change routing. It matters only for a device that
+        // advertises MOUSE|TOUCHPAD together, where the finger-digitizer path would drop
+        // every click -- handleTouchpadEvent returns early on ACTION_DOWN for mouse sources
+        // while ACTION_MOVE still moves the cursor.
+        if (event.isFromSource(InputDevice.SOURCE_TOUCHPAD)
+                && !event.isFromSource(InputDevice.SOURCE_MOUSE)) {
             return handleTouchpadEvent(event);
         }
         if (event.getAction() == MotionEvent.ACTION_MOVE ||
