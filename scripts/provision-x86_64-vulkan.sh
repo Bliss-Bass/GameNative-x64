@@ -145,12 +145,29 @@ rewrite_icd_paths() {
     done
 }
 
+# Fold in the hardware ICDs from build-x86_64-mesa-vulkan.sh so one payload carries
+# ANV, RADV and lavapipe. Force-copies: its libdrm/xshmfence/libandroid-shmem are
+# cross-built against bionic with the shims Mesa needs, and must win over Termux's.
+# Runs after the closure so Termux packages cannot no-clobber their way in first.
+merge_mesa_icds() {
+    local mesa_stage="$REPO_ROOT/native/mesa-vulkan-android/stage"
+    if [ ! -d "$mesa_stage/usr/lib" ]; then
+        log "no mesa stage at $mesa_stage — software (lavapipe) only"
+        log "run scripts/build-x86_64-mesa-vulkan.sh for the ANV/RADV hardware path"
+        return 0
+    fi
+    cp -Pf "$mesa_stage"/usr/lib/*.so* "$STAGE/usr/lib/" 2>/dev/null || true
+    cp -f "$mesa_stage"/usr/share/vulkan/icd.d/*.json "$STAGE/usr/share/vulkan/icd.d/" 2>/dev/null || true
+    log "merged mesa hardware ICDs: $(cd "$STAGE/usr/share/vulkan/icd.d" && echo *.json)"
+}
+
 cmd_build() {
     fetch_index
     log "fetching seed packages"
     local p; for p in "${SEED_PKGS[@]}"; do fetch_pkg "$p"; done
     log "resolving dependency closure"
     resolve_closure
+    merge_mesa_icds
     rewrite_icd_paths
     log "staged $(find "$STAGE/usr/lib" -maxdepth 1 -type f | wc -l) libs, $(du -sh "$STAGE" | cut -f1)"
 }
@@ -177,7 +194,7 @@ cmd_push() {
 
 cmd_tarball() {
     cmd_build
-    local out="$WORK/vulkan-lvp-x86_64-$(date +%Y%m%d).tzst"
+    local out="$WORK/vulkan-x86_64-$(date +%Y%m%d).tzst"
     log "creating $out"
     tar -C "$STAGE" -cf - usr | zstd -19 -T0 -o "$out" -f
     ls -la "$out"
