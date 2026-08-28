@@ -43,6 +43,7 @@ import com.winlator.xenvironment.ImageFs;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
@@ -541,9 +542,40 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             // library directory: on arm64 the imagefs supplies one, but the x86_64 tree has
             // no equivalent, so mmdevapi finds no usable driver and the guest is silent.
             // Last on the path so Proton's own libraries keep winning.
-            path.append(":").append(environment.getContext().getApplicationInfo().nativeLibraryDir);
+            //
+            // Only add it if it really holds x86_64 objects. nativeLibraryDir follows the
+            // ABI the install resolved, which is not necessarily the host ABI: installing
+            // an arm64-only variant on this device yields lib/arm64, and handing that to
+            // the x86_64 guest makes Wine fail to link rather than merely lose audio.
+            File nativeDir = new File(environment.getContext().getApplicationInfo().nativeLibraryDir);
+            if (isX86_64Elf(new File(nativeDir, "libpulse.so"))) {
+                path.append(":").append(nativeDir);
+            } else {
+                Log.w("BionicProgramLauncherComponent", "Not adding " + nativeDir
+                        + " to the guest library path: no x86_64 libpulse.so, audio will be silent");
+            }
         }
         return path.toString();
+    }
+
+    /** True if the file is an ELF whose e_machine is EM_X86_64. */
+    private static boolean isX86_64Elf(File file) {
+        if (!file.isFile()) return false;
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] header = new byte[20];
+            int read = 0;
+            while (read < header.length) {
+                int n = in.read(header, read, header.length - read);
+                if (n < 0) return false;
+                read += n;
+            }
+            if (header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F') return false;
+            // e_machine: little-endian u16 at offset 18, EM_X86_64 == 62
+            return (header[18] & 0xff) == 62 && (header[19] & 0xff) == 0;
+        } catch (IOException e) {
+            Log.w("BionicProgramLauncherComponent", "Could not read ELF header of " + file, e);
+            return false;
+        }
     }
 
     private String resolveFontConfigPath(File rootDir) {
