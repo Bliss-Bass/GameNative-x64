@@ -75,10 +75,13 @@ class MainViewModel @Inject constructor(
 
         /**
          * Whether to skip the membership pitches entirely: for supporters, for Gold builds,
-         * and for debug builds, where the prompts interrupt repeated launch/exit testing.
+         * and while the x86_64 port is under test, where the prompts interrupt repeated
+         * launch/exit cycles. BLISS_PORT_DEBUG is set on the modernX64 flavor and so also
+         * covers the release APK shipped as a ROM addon, which is not a store build.
          */
         val membershipPitchSuppressed: Boolean
-            get() = PrefManager.tipped || BuildConfig.GOLD || BuildConfig.DEBUG
+            get() = PrefManager.tipped || BuildConfig.GOLD ||
+                BuildConfig.DEBUG || BuildConfig.BLISS_PORT_DEBUG
     }
 
     private var gameSessionStartTime = 0L
