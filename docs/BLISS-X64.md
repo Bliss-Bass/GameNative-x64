@@ -53,6 +53,13 @@ Turnip/Wrapper env vars (`TU_DEBUG`, `ZINK_*`, `VK_LAYER_PATH`, `WRAPPER_*`, …
 so DXVK uses the device Mesa ICD (`ro.hardware.vulkan=intel` on ax86). It also
 ensures `WINEDLLOVERRIDES` includes native DXVK DLLs for D3D9–D3D11.
 
+## x86_64 X11 display (`HostDisplayEnv`)
+
+Without ARM `libredirect-bionic-wx.so`, guest libX11 cannot reach `/tmp/.X11-unix`
+when `DISPLAY=:0`. `HostDisplayEnv` points `DISPLAY` at the absolute in-app
+socket (`{imagefs}/tmp/.X11-unix/X0`), aligns `TMPDIR`/`XDG_RUNTIME_DIR` with
+that tree, and unsets `WINE_X11FORCEGLX` (no GLX on the Android X server).
+
 ## Game session memory (`GameSessionMemory`)
 
 While a container is running, `GameManager.setGameState(MODE_GAME_PLAYING)` is

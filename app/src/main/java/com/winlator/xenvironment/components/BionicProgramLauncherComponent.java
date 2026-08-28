@@ -56,6 +56,7 @@ import app.gamenative.service.SteamService;
 import app.gamenative.utils.HostBionicLibs;
 import app.gamenative.utils.HostCpu;
 import app.gamenative.utils.HostGraphicsEnv;
+import app.gamenative.utils.HostDisplayEnv;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -365,6 +366,10 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
             LsfgVkManager.writeConfig(container);
             LsfgVkManager.applyLaunchEnv(container, envVars);
+        }
+
+        if (HostCpu.current().isX86_64()) {
+            HostDisplayEnv.applyForX86_64Guest(envVars, imageFs);
         }
 
         if (HostCpu.current().isX86_64()
@@ -765,6 +770,10 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         String emulator = container.getEmulator();
         if (this.envVars != null) envVars.putAll(this.envVars);
+
+        if (HostCpu.current().isX86_64()) {
+            HostDisplayEnv.applyForX86_64Guest(envVars, imageFs);
+        }
 
         String finalCommand = getFinalCommand(winePath, emulator, envVars, imageFs.getBinDir(), command);
 

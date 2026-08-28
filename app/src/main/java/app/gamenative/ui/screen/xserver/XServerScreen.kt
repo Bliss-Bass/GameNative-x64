@@ -130,6 +130,7 @@ import app.gamenative.utils.ExecutableSelectionUtils
 import app.gamenative.utils.HostBionicLibs
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.HostGraphicsEnv
+import app.gamenative.utils.HostDisplayEnv
 import app.gamenative.utils.BlissPortDebug
 import app.gamenative.utils.GameSessionMemory
 import app.gamenative.utils.LsfgQuickMenuHelper
@@ -3845,6 +3846,10 @@ private fun setupXEnvironment(
 
         if (HostCpu.current().isX86_64 && container.graphicsDriver.equals("System", ignoreCase = true)) {
             HostGraphicsEnv.sanitizeForSystemVulkan(envVars)
+        }
+
+        if (HostCpu.current().isX86_64) {
+            HostDisplayEnv.applyForX86_64Guest(envVars, imageFs)
         }
 
         if (gameSource == GameSource.STEAM) {
