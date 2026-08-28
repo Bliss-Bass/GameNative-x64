@@ -72,13 +72,20 @@ class MainViewModel @Inject constructor(
 
         var gamePlayedThisSession = false
             private set
+
+        /**
+         * Whether to skip the membership pitches entirely: for supporters, for Gold builds,
+         * and for debug builds, where the prompts interrupt repeated launch/exit testing.
+         */
+        val membershipPitchSuppressed: Boolean
+            get() = PrefManager.tipped || BuildConfig.GOLD || BuildConfig.DEBUG
     }
 
     private var gameSessionStartTime = 0L
     private var pendingWarmPitch: Pair<String, Boolean>? = null
 
     private fun warmPitchAllowed(): Boolean {
-        if (PrefManager.tipped || BuildConfig.GOLD) return false
+        if (membershipPitchSuppressed) return false
         return System.currentTimeMillis() - PrefManager.lastWarmPitchTime >= WARM_PITCH_COOLDOWN_MS
     }
 
