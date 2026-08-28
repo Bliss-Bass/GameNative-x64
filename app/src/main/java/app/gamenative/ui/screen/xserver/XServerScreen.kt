@@ -5222,6 +5222,9 @@ private fun refreshComponentsFiles(context: Context) {
         TarCompressorUtils.Type.ZSTD
     )
     if (HostCpu.current().isX86_64) {
+        // Before the symlink: it falls back to Android's loader, which offers no X11
+        // surface, and must only do that when no Khronos loader got staged.
+        HostBionicLibs.ensureVulkanStack(context)
         HostBionicLibs.ensureVulkanLoaderSymlink(context)
     }
 }

@@ -1,6 +1,7 @@
 package app.gamenative.utils
 
 import android.content.Context
+import com.winlator.core.TarCompressorUtils
 import com.winlator.core.envvars.EnvVars
 import timber.log.Timber
 import java.io.File
@@ -13,6 +14,12 @@ object HostBionicLibs {
     const val PULSE_ASSET_ARM = "pulseaudio-gamenative-20260612.tzst"
     const val PULSE_ASSET_X86_64 = "pulseaudio-gamenative-x86_64-20260827.tzst"
     const val BIONIC_LIBS_ASSET = "bionic-libs-x86_64-20260828.tzst"
+
+    /**
+     * Khronos loader + ICDs for ANV (Intel), RADV (AMD) and lavapipe (software).
+     * Built by scripts/provision-x86_64-vulkan.sh tarball.
+     */
+    const val VULKAN_ASSET = "vulkan-x86_64-20260828.tzst"
 
     @JvmStatic
     fun pulseAssetName(): String =
@@ -57,6 +64,59 @@ object HostBionicLibs {
     @JvmStatic
     fun hasStagedVulkanLoader(context: Context): Boolean =
         File(hostVulkanLibDir(context), "libvulkan.so.1").isFile && stagedIcdManifests(context).isNotEmpty()
+
+    private fun vulkanStampFile(context: Context): File =
+        File(hostVulkanRoot(context), ".asset_version")
+
+    /**
+     * Extract the guest Vulkan stack, once per asset version.
+     *
+     * Deliberately not part of [refreshComponentsFiles]' unconditional extraction: this
+     * tree unpacks to ~227MB (lavapipe drags in libLLVM, kept so software rendering can
+     * be forced), which is far too slow to redo on every launch. A stamp file records the
+     * staged asset name, so a new asset re-extracts and an unchanged one is skipped.
+     *
+     * Without this the stack only ever existed where it had been pushed by hand over adb,
+     * so a fresh install had no ICDs and no X11-capable loader, and DXVK could not get a
+     * surface.
+     */
+    @JvmStatic
+    fun ensureVulkanStack(context: Context) {
+        if (!HostCpu.current().isX86_64) return
+        val root = hostVulkanRoot(context)
+        val stamp = vulkanStampFile(context)
+        if (hasStagedVulkanLoader(context) &&
+            stamp.isFile && stamp.readText().trim() == VULKAN_ASSET
+        ) {
+            return
+        }
+
+        val tmp = File(root.parentFile, "${root.name}.tmp")
+        if (tmp.exists()) tmp.deleteRecursively()
+        tmp.mkdirs()
+
+        val ok = TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, context.assets, VULKAN_ASSET, tmp,
+        )
+        if (!ok) {
+            Timber.e("HostBionicLibs: failed to extract %s; guest Vulkan unavailable", VULKAN_ASSET)
+            tmp.deleteRecursively()
+            return
+        }
+
+        if (root.exists()) root.deleteRecursively()
+        if (!tmp.renameTo(root)) {
+            Timber.e("HostBionicLibs: failed to promote extracted %s", VULKAN_ASSET)
+            tmp.deleteRecursively()
+            return
+        }
+        File(root, ".asset_version").writeText(VULKAN_ASSET)
+        Timber.i(
+            "HostBionicLibs: staged guest Vulkan from %s -> %s",
+            VULKAN_ASSET,
+            stagedIcdManifests(context).joinToString { it.name },
+        )
+    }
 
     /**
      * Wine dlopen("libvulkan.so.1"); Android only provides /system/lib64/libvulkan.so.

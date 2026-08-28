@@ -48,6 +48,13 @@ native/pulseaudio-android/.pa_src_path
 native/bionic-libs-android/
 native/mesa-x86_64/
 native/mesa-vulkan-android/
+native/vulkan-x86_64/
+
+# Guest Vulkan payload: ~52MB, too large to keep in history. Regenerate with
+#   scripts/provision-x86_64-vulkan.sh tarball
+# then copy the .tzst into app/src/modernX64/assets/ (name must match
+# HostBionicLibs.VULKAN_ASSET). Required for the x86_64 build to render.
+app/src/modernX64/assets/vulkan-x86_64-*.tzst
 
 # Kotlin 2.0
 .kotlin/sessions
