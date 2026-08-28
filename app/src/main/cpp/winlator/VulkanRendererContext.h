@@ -371,7 +371,9 @@ private:
     void createSyncObjects();
     void cleanupSwapchain();
 
+    VkComponentMapping winTexSwizzle() const;
     bool  createWinTexResources(WinTex& wt, int w, int h);
+    bool  recreateWinTexView(WinTex& wt);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();

@@ -487,6 +487,50 @@ void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     vk_.CmdPipelineBarrier(cb,ss,ds,0,0,nullptr,0,nullptr,1,&b);
 }
 
+// Locally allocated window textures always hold B8G8R8A8; when the target wants RGBA
+// the exchange is done by the view's component mapping rather than by touching pixels.
+VkComponentMapping VulkanRendererContext::winTexSwizzle() const {
+    VkComponentMapping m{};
+    m.r = swapRB ? VK_COMPONENT_SWIZZLE_B : VK_COMPONENT_SWIZZLE_IDENTITY;
+    m.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    m.b = swapRB ? VK_COMPONENT_SWIZZLE_R : VK_COMPONENT_SWIZZLE_IDENTITY;
+    m.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    return m;
+}
+
+// Swaps in a view built from the current swizzle, keeping the image and the descriptor
+// set handle so anything already referencing this texture stays valid.
+bool VulkanRendererContext::recreateWinTexView(WinTex& wt) {
+    if (wt.img == VK_NULL_HANDLE) return false;
+
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = wt.img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_B8G8R8A8_UNORM;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    vi.components = winTexSwizzle();
+
+    VkImageView view = VK_NULL_HANDLE;
+    if (vk_.CreateImageView(device,&vi,nullptr,&view) != VK_SUCCESS) return false;
+
+    if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
+    wt.view = view;
+
+    if (wt.ds != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo dii{};
+        dii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        dii.imageView = wt.view; dii.sampler = sampler;
+        VkWriteDescriptorSet wr{};
+        wr.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wr.dstSet = wt.ds; wr.dstBinding = 0;
+        wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr.descriptorCount = 1; wr.pImageInfo = &dii;
+        vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
+    }
+    return true;
+}
+
 bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
 
     VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
@@ -499,7 +543,7 @@ bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
     if (vk_.AllocateMemory(device,&ai,nullptr,&wt.mem)!=VK_SUCCESS){vk_.DestroyImage(device,wt.img,nullptr);wt.img=VK_NULL_HANDLE;return false;}
     vk_.BindImageMemory(device,wt.img,wt.mem,0);
     VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    vi.components={swapRB?VK_COMPONENT_SWIZZLE_B:VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,swapRB?VK_COMPONENT_SWIZZLE_R:VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
+    vi.components=winTexSwizzle();
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){destroyWinTex(wt);return false;}
     VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
     if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){destroyWinTex(wt);return false;}
@@ -1399,11 +1443,38 @@ void VulkanRendererContext::setFilterMode(int mode) {
 }
 
 void VulkanRendererContext::setSwapRB(bool enabled) {
+    std::lock_guard<std::mutex> lk(renderMutex);
     if (swapRB == enabled) return;
     swapRB = enabled;
     RLOG("setSwapRB: %d", (int)swapRB);
 
+    // The flag is baked into resources when they are built, so everything already
+    // built has to be reworked; otherwise surfaces keep the order they were created
+    // with and the output is a mix of both.
+    vk_.DeviceWaitIdle(device);
 
+    for (auto& [id,wt] : texMap) {
+        if (wt.isAHB) continue;
+        if (!recreateWinTexView(wt))
+            RLOG_E("setSwapRB: could not rebuild view for id=%" PRId64, id);
+    }
+
+    // Imported buffers carry the order in the image format itself, which cannot be
+    // reinterpreted after the fact. Retire them through the deferred queue and drop
+    // the aliasing texMap entries; the next content update re-imports them.
+    for (auto& [ahb,wt] : ahbImportCache) {
+        WinTex deferred = wt;
+        deferred.isAHB = false;
+        deleteQueue.push_back(deferred);
+        AHardwareBuffer_release(ahb);
+    }
+    ahbImportCache.clear();
+    windowAhbs.clear();
+    for (auto it = texMap.begin(); it != texMap.end(); ) {
+        if (it->second.isAHB) it = texMap.erase(it); else ++it;
+    }
+
+    needsRender.store(true); dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::setEffect(int effectId, float sharpness, int effectMask, float brightness, float contrast, float gamma) {
