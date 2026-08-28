@@ -20,32 +20,51 @@ IMAGE_BASE="gamenative-x86_64-native"
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-detect_runtime() {
-    if command -v podman >/dev/null 2>&1; then echo podman; return 0; fi
-    # Unlike podman, a docker binary can be present with an unreachable daemon.
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        echo docker; return 0
+# Report everything missing at once with a single apt line, rather than failing on
+# each tool in turn. Never runs sudo.
+podman_missing_deps() {
+    local missing=() pkgs=()
+    # Rootless podman needs these to map uids; without them the failure surfaces as an
+    # opaque OCI error.
+    for pair in "newuidmap:uidmap" "newgidmap:uidmap"; do
+        command -v "${pair%%:*}" >/dev/null 2>&1 || {
+            missing+=("${pair%%:*}"); pkgs+=("${pair##*:}")
+        }
+    done
+    # Rootless networking is needed to fetch sources, but the helper depends on the
+    # podman version: 5.x defaults to pasta, older releases to slirp4netns. Requiring
+    # slirp4netns by name rejected hosts where pasta is the working default.
+    if ! command -v pasta >/dev/null 2>&1 && ! command -v slirp4netns >/dev/null 2>&1; then
+        missing+=("pasta or slirp4netns"); pkgs+=("passt")
     fi
+    [ ${#missing[@]} -eq 0 ] && return 0
+    printf 'podman prerequisites missing: %s\n' "${missing[*]}" >&2
+    printf 'install with:\n  sudo apt-get install -y %s\n' \
+        "$(printf '%s\n' "${pkgs[@]}" | sort -u | tr '\n' ' ')" >&2
     return 1
 }
 
-# Report everything missing at once with a single apt line, rather than failing on
-# each tool in turn. Never runs sudo.
-check_deps() {
-    local runtime="$1" missing=() pkgs=()
-    if [ "$runtime" = podman ]; then
-        # Rootless podman needs these to map uids and set up networking; without them
-        # the failure surfaces as an opaque OCI error.
-        for pair in "newuidmap:uidmap" "newgidmap:uidmap" "slirp4netns:slirp4netns"; do
-            command -v "${pair%%:*}" >/dev/null 2>&1 || {
-                missing+=("${pair%%:*}"); pkgs+=("${pair##*:}")
-            }
-        done
+docker_usable() {
+    # Unlike podman, a docker binary can be present with an unreachable daemon.
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+# Podman preferred, but fall back to docker when podman cannot actually run: an
+# incomplete rootless podman alongside a working docker is common (GitHub runners ship
+# podman without the networking helper), and refusing to build there was pointless when
+# a usable runtime was sitting right next to it.
+detect_runtime() {
+    if command -v podman >/dev/null 2>&1 && podman_missing_deps 2>/dev/null; then
+        echo podman; return 0
     fi
-    [ ${#missing[@]} -eq 0 ] && return 0
-    printf 'missing: %s\n' "${missing[*]}" >&2
-    printf 'install with:\n  sudo apt-get install -y %s\n' \
-        "$(printf '%s\n' "${pkgs[@]}" | sort -u | tr '\n' ' ')" >&2
+    if docker_usable; then
+        if command -v podman >/dev/null 2>&1; then
+            printf 'note: podman is installed but not usable; falling back to docker\n' >&2
+        fi
+        echo docker; return 0
+    fi
+    # Nothing usable: re-run the check so its apt hint reaches the user.
+    if command -v podman >/dev/null 2>&1; then podman_missing_deps || true; fi
     return 1
 }
 
@@ -62,8 +81,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# detect_runtime already validated the choice, so no separate prerequisite check here.
 RUNTIME="$(detect_runtime)" || die "podman or a working docker is required (see --help in the header)"
-check_deps "$RUNTIME" || die "container runtime prerequisites missing"
+log "container runtime: $RUNTIME"
 
 [ -f "$CONTAINERFILE" ] || die "no Containerfile at $CONTAINERFILE"
 
@@ -96,6 +116,11 @@ if [ "$RUNTIME" = docker ]; then
     # outputs land owned by them. Docker does not, and would leave root-owned files in
     # the work tree, so run as the caller there.
     RUN_OPTS+=(--user "$(id -u):$(id -g)")
+    # That uid has no passwd entry, so HOME stays /root and is unwritable; meson, pip and
+    # ninja all want a cache dir and fail on permission rather than degrading. Point HOME
+    # at the bind mount, which the caller owns.
+    mkdir -p "$ROOT/.container-home"
+    RUN_OPTS+=(-e "HOME=/src/.container-home")
 fi
 [ -t 0 ] && RUN_OPTS+=(-it)
 
