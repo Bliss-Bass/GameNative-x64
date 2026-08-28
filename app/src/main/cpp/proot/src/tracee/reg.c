@@ -56,7 +56,25 @@
 
 /* Specify the ABI registers (syscall argument passing, stack pointer).
  * See sysdeps/unix/sysv/linux/${ARCH}/syscall.S from the GNU C Library. */
-#if defined(ARCH_ARM_EABI)
+#if defined(ARCH_X86_64)
+
+    static off_t reg_offset[] = {
+	[SYSARG_NUM]    = USER_REGS_OFFSET(orig_rax),
+	[SYSARG_1]      = USER_REGS_OFFSET(rdi),
+	[SYSARG_2]      = USER_REGS_OFFSET(rsi),
+	[SYSARG_3]      = USER_REGS_OFFSET(rdx),
+	[SYSARG_4]      = USER_REGS_OFFSET(r10),
+	[SYSARG_5]      = USER_REGS_OFFSET(r8),
+	[SYSARG_6]      = USER_REGS_OFFSET(r9),
+	[SYSARG_RESULT] = USER_REGS_OFFSET(rax),
+	[STACK_POINTER] = USER_REGS_OFFSET(rsp),
+	[INSTR_POINTER] = USER_REGS_OFFSET(rip),
+	[RTLD_FINI]     = USER_REGS_OFFSET(rdx),
+	[STATE_FLAGS]   = USER_REGS_OFFSET(eflags),
+	[USERARG_1]     = USER_REGS_OFFSET(rdi),
+    };
+
+#elif defined(ARCH_ARM_EABI)
 
     static off_t reg_offset[] = {
 	[SYSARG_NUM]    = USER_REGS_OFFSET(uregs[7]),
@@ -262,9 +280,12 @@ int push_specific_regs(Tracee *tracee, bool including_sysnum)
 
 		status = ptrace(PTRACE_SETREGSET, tracee->pid, NT_PRSTATUS, &regs);
 #else
+#    if defined(ARCH_ARM_EABI)
 		/* On ARM, a special ptrace request is required to
 		 * change effectively the syscall number during a
-		 * ptrace-stop.  */
+		 * ptrace-stop.  Elsewhere -- x86_64 included -- writing
+		 * the syscall register below is enough, and this request
+		 * does not exist.  */
 		word_t current_sysnum = REG(tracee, CURRENT, SYSARG_NUM);
 		if (including_sysnum && current_sysnum != REG(tracee, ORIGINAL, SYSARG_NUM)) {
 			status = ptrace(PTRACE_SET_SYSCALL, tracee->pid, 0, current_sysnum);
@@ -273,6 +294,7 @@ int push_specific_regs(Tracee *tracee, bool including_sysnum)
 				return status;
 			}
 		}
+#    endif
 
 		status = ptrace(PTRACE_SETREGS, tracee->pid, NULL, &tracee->_regs[CURRENT]);
 #endif

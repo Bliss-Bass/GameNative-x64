@@ -49,6 +49,8 @@ native/bionic-libs-android/
 native/mesa-x86_64/
 native/mesa-vulkan-android/
 native/vulkan-x86_64/
+native/proot-x86_64/
+native/proot-linux-x86_64/
 
 # Guest Vulkan payload: ~52MB, too large to keep in history. Regenerate with
 #   scripts/provision-x86_64-vulkan.sh tarball

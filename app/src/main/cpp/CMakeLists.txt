@@ -5,6 +5,11 @@ Project(Pluvia)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function-declaration")
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
 
+# Deliberately not built. This vendored PRoot was stripped down for Wine and has no
+# extension subsystem, so it cannot provide fake root (-0) and therefore cannot run apt.
+# The Linux userland uses upstream PRoot instead, built by
+# scripts/build-x86_64-proot-linux.sh; armeabi-v7a keeps using the prebuilts under
+# src/legacy/jniLibs. The x86_64 support in proot/ is kept working for reference.
 #add_subdirectory(proot)
 add_subdirectory(virglrenderer)
 add_subdirectory(patchelf)

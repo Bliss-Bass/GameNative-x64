@@ -27,7 +27,9 @@
 #include "compat.h"
 #include "arch.h"
 
-#if defined(ARCH_ARM_EABI)
+#if defined(ARCH_X86_64)
+    #include "loader/assembly-x86_64.h"
+#elif defined(ARCH_ARM_EABI)
     #include "loader/assembly-arm.h"
 #elif defined(ARCH_ARM64)
     #include "loader/assembly-arm64.h"

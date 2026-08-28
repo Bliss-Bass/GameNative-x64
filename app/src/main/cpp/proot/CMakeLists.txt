@@ -44,5 +44,27 @@ add_executable(libproot.so
 target_link_libraries(libproot.so
                       talloc)
 
-add_library(proot-loader SHARED
-            src/loader/loader.c)
+# Despite the .so name (Android only executes files from the app's lib dir), the
+# loader is not a library: PRoot execve()s it and the kernel enters it at _start
+# with a hand-built stack. It must therefore be static, freestanding, and linked
+# at LOADER_ADDRESS. Built as a shared object it loads as ET_DYN and every guest
+# exec dies with SIGSEGV.
+#
+# LOADER_ADDRESS mirrors src/arch.h; keep the two in sync.
+set(PROOT_LOADER_ADDRESS 0x600000000000)
+
+add_executable(libproot-loader.so
+               src/loader/loader.c)
+
+target_compile_options(libproot-loader.so PRIVATE -fPIC -ffreestanding)
+
+target_link_options(libproot-loader.so PRIVATE
+                    -static -nostdlib -nostartfiles
+                    -Wl,-e,_start
+                    -Wl,-Ttext=${PROOT_LOADER_ADDRESS}
+                    # Without a separate read-only segment the linker tries to
+                    # cover address 0 through LOADER_ADDRESS in one mapping and
+                    # fails with "File too large".
+                    -Wl,--rosegment
+                    -Wl,--build-id=none
+                    -Wl,-z,noexecstack)

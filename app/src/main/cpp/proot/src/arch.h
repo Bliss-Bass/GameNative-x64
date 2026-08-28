@@ -39,6 +39,8 @@ typedef unsigned char byte_t;
     #define ARCH_ARM_EABI 1
 #elif defined(__aarch64__)
     #define ARCH_ARM64 1
+#elif defined(__x86_64__)
+    #define ARCH_X86_64 1
 #elif defined(__arm__)
     #error "Only EABI is currently supported for ARM"
 #else
@@ -46,7 +48,34 @@ typedef unsigned char byte_t;
 #endif
 
 /* Architecture specific definitions. */
-#if defined(ARCH_ARM_EABI)
+#if defined(ARCH_X86_64)
+
+    /* 64-bit only: upstream also supports i386 (ABI_2) and x32 (ABI_3) guests
+     * on x86_64, which need a 32-bit loader plus their own syscall tables. The
+     * rootfs shipped here is amd64, so those ABIs are left out rather than
+     * carried untested; adding them means restoring SYSNUMS_HEADER2/3,
+     * HAS_LOADER_32BIT and the 32-bit PIC addresses from upstream. */
+    #define SYSNUMS_HEADER1 "syscall/sysnums-x86_64.h"
+    #define SYSNUMS_ABI1    sysnums_x86_64
+
+    /* On x86_64 the syscall number is trapped through the result register. */
+    #undef  SYSTRAP_NUM
+    #define SYSTRAP_NUM SYSARG_RESULT
+    #define SYSTRAP_SIZE 2
+
+    #define SECCOMP_ARCHS { { .value = AUDIT_ARCH_X86_64, .nb_abis = 1, .abis = { ABI_DEFAULT } } }
+
+    #define HOST_ELF_MACHINE {62, 0};
+    #define RED_ZONE_SIZE 128
+    #define OFFSETOF_STAT_UID_32 24
+    #define OFFSETOF_STAT_GID_32 28
+
+    #define LOADER_ADDRESS     0x600000000000
+
+    #define EXEC_PIC_ADDRESS   0x500000000000
+    #define INTERP_PIC_ADDRESS 0x6f0000000000
+
+#elif defined(ARCH_ARM_EABI)
 
     #define SYSNUMS_HEADER1 "syscall/sysnums-arm.h"
     #define SYSNUMS_ABI1    sysnums_arm
