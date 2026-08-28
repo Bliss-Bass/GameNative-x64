@@ -170,11 +170,18 @@ public class XConnectorEpoll implements Runnable {
                     inputStream.setActivePosition(activePosition);
                     return;
                 }
+                Log.d(TAG, "Client fd=" + fd + " reached EOF; closing connection");
                 killConnection(client);
                 return;
             }
             this.requestHandler.handleRequest(client);
         } catch (IOException e) {
+            // Dropping a client is fatal to the guest: Xlib's IO error handler exits the
+            // process, so the reason must not be silent.
+            Log.w(TAG, "Dropping client fd=" + fd + " after I/O failure", e);
+            killConnection(client);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Dropping client fd=" + fd + " after unexpected failure", e);
             killConnection(client);
         }
     }
