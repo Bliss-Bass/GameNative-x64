@@ -21,6 +21,8 @@ SRC_DIR="$BUILD_DIR/.src"
 PREFIX="${PREFIX:-$ROOT/native/bionic-libs-android/root-x86_64}"
 OUT_LIB="$PREFIX/usr/lib"
 STAGE="$BUILD_DIR/stage"
+# Static, so the shimmed AOSP symbols do not become another runtime dependency.
+COMPAT_LIB="$BUILD_DIR/libmesa_bionic_compat.a"
 
 MESA_VERSION="${MESA_VERSION:-26.0.6}"
 LIBDRM_VERSION="2.4.125"
@@ -95,8 +97,8 @@ cmake = 'false'
 [built-in options]
 c_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include']
 cpp_args = ['-O2', '-fPIC', '-D__USE_GNU', '-I$PREFIX/usr/include']
-c_link_args = ['-L$OUT_LIB', '-landroid-shmem']
-cpp_link_args = ['-L$OUT_LIB', '-landroid-shmem']
+c_link_args = ['-L$OUT_LIB', '-landroid-shmem', '-llog', '$COMPAT_LIB']
+cpp_link_args = ['-L$OUT_LIB', '-landroid-shmem', '-llog', '$COMPAT_LIB']
 
 [properties]
 sys_root = '$SYSROOT'
@@ -129,6 +131,110 @@ build_android_shmem() {
     make CC="$CC" AR="$AR" CFLAGS='-fpic -std=c11 -D_PATH_TMP="\"/data/local/tmp/\""' \
         libandroid-shmem.so
     make PREFIX="$PREFIX/usr" install
+}
+
+# --- AOSP compat shims ------------------------------------------------------
+# Mesa keys tracing/logging off the *target* being Android and includes AOSP
+# platform headers that the NDK does not ship. Only these are reachable with
+# platforms=x11; the hardware/* and system/window.h includes belong to the
+# Android WSI platform, which is off. sync_merge is likewise an AOSP libsync
+# symbol, but it is a thin SYNC_IOC_MERGE wrapper over an available uapi struct.
+#
+# These land in $PREFIX/usr/include, which is already on the include path.
+build_aosp_shims() {
+    log "AOSP compat shims"
+    mkdir -p "$PREFIX/usr/include/cutils" "$PREFIX/usr/include/log"
+
+    cat > "$PREFIX/usr/include/cutils/trace.h" <<'EOF'
+#ifndef _MESA_COMPAT_CUTILS_TRACE_H
+#define _MESA_COMPAT_CUTILS_TRACE_H
+/* atrace lives in libcutils, which is not part of the NDK. */
+#define ATRACE_TAG_GRAPHICS (1 << 1)
+static inline void atrace_init(void) {}
+static inline unsigned long atrace_get_enabled_tags(void) { return 0; }
+static inline void atrace_begin_body(const char *name) { (void)name; }
+static inline void atrace_end_body(void) {}
+static inline void atrace_begin(unsigned long tag, const char *name) {
+   (void)tag; (void)name;
+}
+static inline void atrace_end(unsigned long tag) { (void)tag; }
+#endif
+EOF
+
+    # vk_android_native_buffer.h is included unconditionally on Android targets,
+    # and at ANDROID_API_LEVEL >= 28 it expects buffer_handle_t from the platform.
+    cat > "$PREFIX/usr/include/cutils/native_handle.h" <<'EOF'
+#ifndef _MESA_COMPAT_CUTILS_NATIVE_HANDLE_H
+#define _MESA_COMPAT_CUTILS_NATIVE_HANDLE_H
+typedef struct native_handle {
+   int version;
+   int numFds;
+   int numInts;
+   int data[0];
+} native_handle_t;
+typedef const native_handle_t *buffer_handle_t;
+#endif
+EOF
+
+    cat > "$PREFIX/usr/include/log/log.h" <<'EOF'
+#ifndef _MESA_COMPAT_LOG_LOG_H
+#define _MESA_COMPAT_LOG_LOG_H
+#include <android/log.h>
+#ifndef LOG_TAG
+#define LOG_TAG NULL
+#endif
+#define LOG_PRI(priority, tag, ...) \
+   ((void)__android_log_print((priority), (tag), __VA_ARGS__))
+#define ALOGE(...) LOG_PRI(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define ALOGW(...) LOG_PRI(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define ALOGI(...) LOG_PRI(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define ALOGD(...) LOG_PRI(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#endif
+EOF
+
+    cat > "$PREFIX/usr/include/cutils/properties.h" <<'EOF'
+#ifndef _MESA_COMPAT_CUTILS_PROPERTIES_H
+#define _MESA_COMPAT_CUTILS_PROPERTIES_H
+#include <string.h>
+#include <sys/system_properties.h>
+#define PROPERTY_VALUE_MAX PROP_VALUE_MAX
+#define PROPERTY_KEY_MAX PROP_NAME_MAX
+/* libcutils' property_get falls back to default_value when unset; both it and
+ * __system_property_get return the length written. */
+static inline int property_get(const char *key, char *value,
+                               const char *default_value) {
+   int len = __system_property_get(key, value);
+   if (len <= 0 && default_value)
+      len = (int)strlcpy(value, default_value, PROPERTY_VALUE_MAX);
+   return len;
+}
+#endif
+EOF
+
+    local src="$BUILD_DIR/mesa_bionic_compat.c"
+    cat > "$src" <<'EOF'
+#include <linux/sync_file.h>
+#include <string.h>
+#include <sys/ioctl.h>
+
+int sync_merge(const char *name, int fd1, int fd2);
+
+int sync_merge(const char *name, int fd1, int fd2)
+{
+   struct sync_merge_data data;
+   memset(&data, 0, sizeof(data));
+   data.fd2 = fd2;
+   strncpy(data.name, name, sizeof(data.name) - 1);
+
+   if (ioctl(fd1, SYNC_IOC_MERGE, &data) < 0)
+      return -1;
+
+   return data.fence;
+}
+EOF
+    "$CC" -O2 -fPIC -c "$src" -o "$BUILD_DIR/mesa_bionic_compat.o"
+    "$AR" rcs "$COMPAT_LIB" "$BUILD_DIR/mesa_bionic_compat.o"
+    echo "built $COMPAT_LIB"
 }
 
 # --- libpciaccess -----------------------------------------------------------
@@ -204,6 +310,19 @@ fetch_mesa() {
         # Meson wrap subprojects would try to download during a cross build.
         rm -rf "mesa-$MESA_VERSION/subprojects"
     fi
+
+    # The VK_KHR_display WSI backend is gated only on KMS/DRM being present, but
+    # it calls pthread_cancel/pthread_setcanceltype, which bionic does not
+    # implement. The guest presents through X11 and never uses that platform, so
+    # exclude it on Android rather than faking thread cancellation.
+    local cond="if system_has_kms_drm and not with_platform_android"
+    local f
+    for f in src/vulkan/meson.build src/vulkan/wsi/meson.build; do
+        local p="$SRC_DIR/mesa-$MESA_VERSION/$f"
+        grep -q "host_machine.system() != 'android'" "$p" && continue
+        sed -i "s|^$cond\$|$cond and host_machine.system() != 'android'|" "$p"
+        echo "patched $f (drop VK_KHR_display)"
+    done
 }
 
 # ANV is in Mesa's with_driver_using_cl list, so building it requires the OpenCL-C
@@ -310,6 +429,9 @@ PY
 }
 
 main() {
+    # First: the cross file references $COMPAT_LIB in its link args, so it has to
+    # exist before anything is configured.
+    build_aosp_shims
     build_android_shmem
     build_pciaccess
     build_libdrm

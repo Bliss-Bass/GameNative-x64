@@ -46,6 +46,8 @@ native/pulseaudio-android/root-*/
 native/pulseaudio-android/output/
 native/pulseaudio-android/.pa_src_path
 native/bionic-libs-android/
+native/mesa-x86_64/
+native/mesa-vulkan-android/
 
 # Kotlin 2.0
 .kotlin/sessions
