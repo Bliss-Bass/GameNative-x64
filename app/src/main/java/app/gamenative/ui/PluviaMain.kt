@@ -359,7 +359,8 @@ fun PluviaMain(
 
     // shared intent-launch path. resolves isOffline at the call site because intent launches can
     // arrive pre-login (cold-boot via stored creds) and downstream cloud-sync needs a settled answer.
-    val launchIntentApp: (resolvedAppId: String, hasTemporaryOverride: Boolean) -> Unit = { resolvedAppId, hasTemporaryOverride ->
+    val launchIntentApp: (resolvedAppId: String, hasTemporaryOverride: Boolean, bootToContainer: Boolean) -> Unit =
+        { resolvedAppId, hasTemporaryOverride, bootToContainer ->
         val requestedGameId = runCatching { ContainerUtils.extractGameIdFromContainerId(resolvedAppId) }.getOrNull()
         if (SteamService.keepAlive && requestedGameId != null && ActiveGameRegistry.get()?.appId == requestedGameId) {
             Timber.i("[PluviaMain]: Game $resolvedAppId already running; bringing XServer screen forward")
@@ -370,7 +371,7 @@ fun PluviaMain(
             MainActivity.wasLaunchedViaExternalIntent = true
             trackGameLaunched(resolvedAppId)
             viewModel.setLaunchedAppId(resolvedAppId)
-            viewModel.setBootToContainer(false)
+            viewModel.setBootToContainer(bootToContainer)
             scope.launch(Dispatchers.IO) {
                 val gameSource = ContainerUtils.extractGameSourceFromContainerId(resolvedAppId)
                 val isOffline = when {
@@ -396,6 +397,7 @@ fun PluviaMain(
                     setMessageDialogState = setMessageDialogState,
                     onSuccess = viewModel::launchApp,
                     isOffline = isOffline,
+                    bootToContainer = bootToContainer,
                 )
             }
         }
@@ -421,7 +423,11 @@ fun PluviaMain(
                             context, launchRequest.appId, launchRequest.containerConfig,
                         )
                     }
-                    launchIntentApp(resolution.finalAppId, launchRequest.containerConfig != null)
+                    launchIntentApp(
+                        resolution.finalAppId,
+                        launchRequest.containerConfig != null,
+                        launchRequest.bootToContainer,
+                    )
                 }
 
                 is GameResolutionResult.NotFound -> {
@@ -484,7 +490,11 @@ fun PluviaMain(
                         }
                     }
                     // finalAppId — track what actually launched (may differ from launchRequest.appId after resolution)
-                    launchIntentApp(resolution.finalAppId, launchRequest.containerConfig != null)
+                    launchIntentApp(
+                        resolution.finalAppId,
+                        launchRequest.containerConfig != null,
+                        launchRequest.bootToContainer,
+                    )
                 }
             }
         }
@@ -507,6 +517,7 @@ fun PluviaMain(
                             IntentLaunchManager.LaunchRequest(
                                 appId = event.appId,
                                 containerConfig = IntentLaunchManager.getTemporaryOverride(event.appId),
+                                bootToContainer = event.bootToContainer,
                             )
                         )
                         pendingLaunchGeneration++
@@ -520,6 +531,7 @@ fun PluviaMain(
                             launchIntentApp(
                                 resolution.finalAppId,
                                 IntentLaunchManager.hasTemporaryOverride(resolution.finalAppId),
+                                event.bootToContainer,
                             )
                         }
 

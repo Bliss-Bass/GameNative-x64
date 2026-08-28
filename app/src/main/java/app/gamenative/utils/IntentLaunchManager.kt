@@ -20,12 +20,15 @@ object IntentLaunchManager {
 
     private const val EXTRA_GAME_SOURCE = "game_source"
     private const val EXTRA_CONTAINER_CONFIG = "container_config"
+    private const val EXTRA_BOOT_TO_CONTAINER = "boot_to_container"
     private const val ACTION_LAUNCH_GAME = "app.gamenative.LAUNCH_GAME"
     private const val MAX_CONFIG_JSON_SIZE = 50000 // 50KB limit to prevent memory exhaustion
 
     data class LaunchRequest(
         val appId: String,
         val containerConfig: ContainerData? = null,
+        /** Bring up the container desktop and its X server without starting the game. */
+        val bootToContainer: Boolean = false,
     )
 
     fun parseLaunchIntent(intent: Intent): LaunchRequest? {
@@ -66,7 +69,9 @@ object IntentLaunchManager {
             null
         }
 
-        return LaunchRequest(appId, containerConfig)
+        val bootToContainer = intent.getBooleanExtra(EXTRA_BOOT_TO_CONTAINER, false)
+
+        return LaunchRequest(appId, containerConfig, bootToContainer)
     }
 
     fun applyTemporaryConfigOverride(context: Context, appId: String, configOverride: ContainerData) {

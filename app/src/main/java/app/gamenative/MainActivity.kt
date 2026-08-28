@@ -368,7 +368,9 @@ class MainActivity : ComponentActivity() {
                         IntentLaunchManager.applyTemporaryConfigOverride(this, launchRequest.appId, config)
                     }
                     lifecycleScope.launch {
-                        PluviaApp.events.emit(AndroidEvent.ExternalGameLaunch(launchRequest.appId))
+                        PluviaApp.events.emit(
+                            AndroidEvent.ExternalGameLaunch(launchRequest.appId, launchRequest.bootToContainer),
+                        )
                     }
                 } else {
                     // cold start — store as pending, PluviaMain consumes when UI is ready
