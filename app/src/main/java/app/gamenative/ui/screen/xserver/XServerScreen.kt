@@ -1949,6 +1949,9 @@ fun XServerScreen(
                 PluviaApp.touchpadView = TouchpadView(context, getxServer(), PrefManager.getBoolean("capture_pointer_on_external_mouse", true))
                 frameLayout.addView(PluviaApp.touchpadView)
                 PluviaApp.touchpadView?.setMoveCursorToTouchpoint(PrefManager.getBoolean("move_cursor_to_touchpoint", false))
+                // Go through tryCapturePointer so the editor/quick-menu/touchscreen gating
+                // still applies rather than grabbing the pointer unconditionally.
+                PluviaApp.touchpadView?.setPointerCaptureRequester { tryCapturePointer() }
 
                 // Wire keyboard toggle callback for gesture "Show Keyboard" action.
                 // Mirrors the QuickMenuAction.KEYBOARD external-display routing

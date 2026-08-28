@@ -67,6 +67,7 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     private boolean pressExecuted;
     private final boolean capturePointerOnExternalMouse;
     private boolean pointerCaptureRequested;
+    private Runnable pointerCaptureRequester;
 
     // Suppress spurious left-click after two-finger right-click tap
     private boolean suppressNextLeftTap;
@@ -263,11 +264,23 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         }
     }
 
+    public void setPointerCaptureRequester(Runnable requester) {
+        this.pointerCaptureRequester = requester;
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         // allow re-capture after app returns from background
         if (hasFocus) pointerCaptureRequested = false;
+        // requestPointerCapture() is a no-op without window focus, and the only other
+        // callers are device hotplug and an arriving motion event. With a trackpad that
+        // was already attached when the game started, that left capture off until the
+        // pointer was moved: the cursor tracked, but buttons were never delivered here.
+        if (hasFocus && capturePointerOnExternalMouse && pointerCaptureRequester != null
+                && !hasPointerCapture()) {
+            pointerCaptureRequester.run();
+        }
     }
 
     private static StateListDrawable createTransparentBackground() {
