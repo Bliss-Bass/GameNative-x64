@@ -1,6 +1,7 @@
 package com.winlator.xenvironment.components;
 
 import android.content.Context;
+import android.util.Log;
 import androidx.annotation.Keep;
 import com.winlator.contentdialog.VortekConfigDialog;
 import com.winlator.core.GPUHelper;
@@ -37,8 +38,25 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
 
     private native void initVulkanWrapper(String str, String str2);
 
+    private static final boolean NATIVE_AVAILABLE;
+
     static {
-        System.loadLibrary("vortekrenderer");
+        boolean available;
+        try {
+            System.loadLibrary("vortekrenderer");
+            available = true;
+        } catch (UnsatisfiedLinkError e) {
+            // No Vortek prebuilt exists for x86_64. The static helpers in this class are
+            // plain Java and are used by the X server regardless of renderer, so class
+            // init must not abort the process.
+            available = false;
+            Log.w("VortekRendererComponent", "libvortekrenderer.so unavailable: " + e.getMessage());
+        }
+        NATIVE_AVAILABLE = available;
+    }
+
+    public static boolean isNativeAvailable() {
+        return NATIVE_AVAILABLE;
     }
 
     public static class Options {
@@ -74,6 +92,9 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
     }
 
     public VortekRendererComponent(XServer xServer, UnixSocketConfig socketConfig, Options options, Context context) {
+        if (!NATIVE_AVAILABLE) {
+            throw new IllegalStateException("Vortek renderer is not available for this ABI");
+        }
         this.xServer = xServer;
         this.socketConfig = socketConfig;
         this.options = options;
