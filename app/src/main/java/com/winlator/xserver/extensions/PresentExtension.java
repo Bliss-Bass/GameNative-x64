@@ -30,8 +30,11 @@ import com.winlator.xserver.events.PresentIdleNotify;
 
 import java.io.IOException;
 
+import timber.log.Timber;
+
 public class PresentExtension implements Extension {
     public static final byte MAJOR_OPCODE = -103;
+    private static final int PRESENT_CAPABILITY_NONE = 0;
     public enum Kind { PIXMAP, MSC_NOTIFY }
     public enum Mode { COPY, FLIP, SKIP }
 
@@ -218,6 +221,7 @@ public class PresentExtension implements Extension {
         static final byte QUERY_VERSION = 0;
         static final byte PRESENT_PIXMAP = 1;
         static final byte SELECT_INPUT = 3;
+        static final byte QUERY_CAPABILITIES = 4;
     }
 
     private static class Event {
@@ -285,6 +289,24 @@ public class PresentExtension implements Extension {
             outputStream.writeInt(1);
             outputStream.writeInt(0);
             outputStream.writePad(16);
+        }
+    }
+
+    /**
+     * Present 1.0 QueryCapabilities. Mesa's X11 WSI issues this during swapchain setup and
+     * treats a protocol error as fatal, so it must be answered even though this server
+     * presents by copy: no async flips, no fences, no tearing.
+     */
+    private static void queryCapabilities(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        inputStream.skip(4);
+
+        try (XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte)0);
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt(0);
+            outputStream.writeInt(PRESENT_CAPABILITY_NONE);
+            outputStream.writePad(20);
         }
     }
 
@@ -401,7 +423,13 @@ public class PresentExtension implements Extension {
                     selectInput(client, inputStream, outputStream);
                 }
                 break;
+            case ClientOpcodes.QUERY_CAPABILITIES:
+                queryCapabilities(client, inputStream, outputStream);
+                break;
             default:
+                Timber.w("PresentExtension: unhandled minor opcode=%d, requestLength=%d",
+                        opcode, client.getRemainingRequestLength());
+                inputStream.skip(client.getRemainingRequestLength());
                 throw new BadImplementation();
         }
     }
