@@ -25,19 +25,30 @@ public class Drawable extends XResource {
     public final Visual visual;
     public final short width;
 
-    private static native void copyArea(short s, short s2, short s3, short s4, short s5, short s6, short s7, short s8, ByteBuffer byteBuffer, ByteBuffer byteBuffer2);
+    private static native void copyArea(short s, short s2, short s3, short s4, short s5, short s6, short s7, short s8, ByteBuffer byteBuffer, ByteBuffer byteBuffer2, boolean needsSwapRB);
 
-    private static native void copyAreaOp(short s, short s2, short s3, short s4, short s5, short s6, short s7, short s8, ByteBuffer byteBuffer, ByteBuffer byteBuffer2, int i);
+    private static native void copyAreaOp(short s, short s2, short s3, short s4, short s5, short s6, short s7, short s8, ByteBuffer byteBuffer, ByteBuffer byteBuffer2, int i, boolean needsSwapRB);
 
     private static native void drawAlphaMaskedBitmap(byte b, byte b2, byte b3, byte b4, byte b5, byte b6, ByteBuffer byteBuffer, ByteBuffer byteBuffer2, ByteBuffer byteBuffer3);
 
     private static native void drawBitmap(short s, short s2, ByteBuffer byteBuffer, ByteBuffer byteBuffer2);
 
-    private static native void drawLine(short s, short s2, short s3, short s4, int i, short s5, short s6, ByteBuffer byteBuffer);
+    private static native void drawLine(short s, short s2, short s3, short s4, int i, short s5, short s6, ByteBuffer byteBuffer, boolean needsSwapRB);
 
-    private static native void fillRect(short s, short s2, short s3, short s4, int i, short s5, ByteBuffer byteBuffer);
+    private static native void fillRect(short s, short s2, short s3, short s4, int i, short s5, ByteBuffer byteBuffer, boolean needsSwapRB);
 
     private static native void fromBitmap(Bitmap bitmap, ByteBuffer byteBuffer);
+
+    // The raster helpers store X11's BGRA byte order, while an AHardwareBuffer-backed
+    // drawable holds RGBA. A copy therefore has to swap R and B exactly when the two
+    // ends disagree; swapping on both ends, or on neither, would be a no-op done twice.
+    private static boolean isRgbaBacked(Texture texture) {
+        return texture instanceof AHBImage;
+    }
+
+    private boolean isRgbaBacked() {
+        return isRgbaBacked(this.texture);
+    }
 
     public static void DRAWABLE_ASR_MODE(boolean value) {
         DRAWABLE_FOR_ASR = value;
@@ -146,7 +157,8 @@ public class Drawable extends XResource {
                 if ((dstX + width) > this.width) width = (short)((this.width - dstX));
                 if ((dstY + height) > this.height) height = (short)((this.height - dstY));
 
-                copyArea(srcX, srcY, dstX, dstY, width, height, totalWidth, this.getStride(), data, this.data);
+                // Incoming X11 image data is always BGRA.
+                copyArea(srcX, srcY, dstX, dstY, width, height, totalWidth, this.getStride(), data, this.data, isRgbaBacked());
             }
         }
         this.data.rewind();
@@ -164,7 +176,8 @@ public class Drawable extends XResource {
         if ((x + width) > this.width) width = (short)(this.width - x);
         if ((y + height) > this.height) height = (short)(this.height - y);
 
-        copyArea(x, y, (short)0, (short)0, width, height, this.getStride(), width, this.data, dstData);
+        // The reply buffer is handed back to an X client, so it has to end up BGRA.
+        copyArea(x, y, (short)0, (short)0, width, height, this.getStride(), width, this.data, dstData, isRgbaBacked());
 
         this.data.rewind();
         dstData.rewind();
@@ -182,10 +195,11 @@ public class Drawable extends XResource {
             if ((dstX + width) > this.width) width = (short)(this.width - dstX);
             if ((dstY + height) > this.height) height = (short)(this.height - dstY);
 
+            boolean swapRB = drawable.isRgbaBacked() != this.isRgbaBacked();
             if (gcFunction == GraphicsContext.Function.COPY) {
-                copyArea(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), drawable.data, this.data);
+                copyArea(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), drawable.data, this.data, swapRB);
             }
-            else copyAreaOp(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), drawable.data, this.data, gcFunction.ordinal());
+            else copyAreaOp(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), drawable.data, this.data, gcFunction.ordinal(), swapRB);
 
             this.data.rewind();
             drawable.data.rewind();
@@ -206,7 +220,8 @@ public class Drawable extends XResource {
         if ((x + width) > this.width) width = (short)((this.width - x));
         if ((y + height) > this.height) height = (short)((this.height - y));
 
-        fillRect((short)x, (short)y, (short)width, (short)height, color, this.getStride(), this.data);
+        // X11 pixel values arrive in the BGRA order of the drawable's visual.
+        fillRect((short)x, (short)y, (short)width, (short)height, color, this.getStride(), this.data, isRgbaBacked());
         this.data.rewind();
         forceUpdate();
     }
@@ -226,7 +241,7 @@ public class Drawable extends XResource {
         x1 = Mathf.clamp(x1, 0, width-lineWidth);
         y1 = Mathf.clamp(y1, 0, height-lineWidth);
 
-        drawLine((short)x0, (short)y0, (short)x1, (short)y1, color, (short)lineWidth, this.getStride(), this.data);
+        drawLine((short)x0, (short)y0, (short)x1, (short)y1, color, (short)lineWidth, this.getStride(), this.data, isRgbaBacked());
 
         this.data.rewind();
         forceUpdate();
