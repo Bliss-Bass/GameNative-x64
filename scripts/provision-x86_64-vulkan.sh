@@ -161,6 +161,59 @@ merge_mesa_icds() {
     log "merged mesa hardware ICDs: $(cd "$STAGE/usr/share/vulkan/icd.d" && echo *.json)"
 }
 
+# Drop anything not reachable from the loader or an ICD.
+#
+# Termux ships several libraries per package, so the forward closure over-collects:
+# pulling libicuuc (for libxml2, for libLLVM) also lands ICU's i18n/io/tu/test libs,
+# which nothing here NEEDs. Walking backwards from the real roots instead of denying
+# names keeps this correct as upstream packaging shifts.
+#
+# Symlinks are kept when their target survives, since the loader resolves ICDs and
+# sonames through them (libvulkan.so.1 -> libvulkan.so.1.4.x).
+prune_to_closure() {
+    local lib="$STAGE/usr/lib"
+    local keep queue cur n target before after
+
+    # Roots: the loader by soname, plus every ICD the manifests point at.
+    queue=$(
+        cd "$lib"
+        ls libvulkan.so.1* 2>/dev/null
+        for j in "$STAGE"/usr/share/vulkan/icd.d/*.json; do
+            [ -f "$j" ] || continue
+            basename "$(grep -o '"library_path"[^,}]*' "$j" | sed 's/.*"\(.*\)"/\1/')"
+        done
+    )
+    keep=" "
+    while [ -n "$queue" ]; do
+        cur=$(echo "$queue" | head -1)
+        queue=$(echo "$queue" | tail -n +2)
+        [ -z "$cur" ] && continue
+        case "$keep" in *" $cur "*) continue ;; esac
+        [ -e "$lib/$cur" ] || continue
+        keep="$keep$cur "
+        # Follow the symlink so the versioned target is kept too.
+        if [ -L "$lib/$cur" ]; then
+            target=$(readlink "$lib/$cur")
+            queue="$queue"$'\n'"$(basename "$target")"
+        fi
+        for n in $(readelf -d "$lib/$cur" 2>/dev/null |
+                   awk '/NEEDED/{gsub(/[][]/,"",$5); print $5}'); do
+            case "$SYSTEM_LIBS" in *" $n "*) continue ;; esac
+            queue="$queue"$'\n'"$n"
+        done
+    done
+
+    before=$(du -sm "$STAGE" | cut -f1)
+    local f
+    for f in "$lib"/*; do
+        [ -e "$f" ] || continue
+        case "$keep" in *" $(basename "$f") "*) continue ;; esac
+        rm -f "$f"
+    done
+    after=$(du -sm "$STAGE" | cut -f1)
+    log "pruned to loader/ICD closure: ${before}M -> ${after}M"
+}
+
 cmd_build() {
     fetch_index
     log "fetching seed packages"
@@ -169,6 +222,8 @@ cmd_build() {
     resolve_closure
     merge_mesa_icds
     rewrite_icd_paths
+    # After the merge, so the hardware ICDs count as roots.
+    prune_to_closure
     log "staged $(find "$STAGE/usr/lib" -maxdepth 1 -type f | wc -l) libs, $(du -sh "$STAGE" | cut -f1)"
 }
 
@@ -194,7 +249,10 @@ cmd_push() {
 
 cmd_tarball() {
     cmd_build
-    local out="$WORK/vulkan-x86_64-$(date +%Y%m%d).tzst"
+    # The app looks the payload up by exact filename (HostBionicLibs.VULKAN_ASSET), so
+    # callers that stage it into assets/ pass the name they expect rather than having to
+    # keep a date in sync by hand.
+    local out="$WORK/${VULKAN_ASSET_NAME:-vulkan-x86_64-$(date +%Y%m%d).tzst}"
     log "creating $out"
     tar -C "$STAGE" -cf - usr | zstd -19 -T0 -o "$out" -f
     ls -la "$out"
