@@ -12,7 +12,7 @@ that:
 | Candidate | Why it doesn't work |
 |---|---|
 | `/system/lib64/libvulkan.so` (Android loader) | Exposes `VK_KHR_android_surface` only; no X11 WSI. |
-| `/vendor/lib64/hw/vulkan.*.so` (device Mesa HAL) | Has X11 WSI compiled in, but exports only the `HMI` HAL symbol, so it cannot be used as a Khronos ICD. |
+| `/vendor/lib64/hw/vulkan.*.so` (device Mesa HAL) | Android-platform build: exports only the `HMI` HAL symbol (no `vk_icdGetInstanceProcAddr`), links `libnativewindow`/`libui` with no `libxcb`/`libX11`, so it has no X11 WSI and cannot act as a Khronos ICD. |
 | Vortek (GameNative's ARM answer) | `libvortekrenderer.so` is an arm64-only prebuilt with no source. |
 
 So the guest needs its own bionic x86_64 **Khronos loader + ICD**. Termux publishes
@@ -104,17 +104,57 @@ manual user action — strictly worse than option A. **Recommend dropping this.*
 
 139 MB of `libLLVM` in the APK is not viable, and it would be dead weight on ARM.
 
-### D. Build a leaner ICD ourselves — best long-term
+### D. Build hardware ICDs ourselves — the performance path
 
 Lavapipe is a *software* rasterizer; it is the compatibility floor, not the goal.
-
-* **Mesa ANV** (Intel Vulkan) needs no LLVM, so the payload drops to roughly
-  10–20 MB, and it is hardware-accelerated on these Intel tablets. Requires an
-  NDK/meson cross-build of Mesa against bionic x86_64.
-* Keeping lavapipe as a fallback for non-Intel x86_64 hardware is still worthwhile.
+See "Hardware acceleration" below.
 
 Suggested sequence: land A with lavapipe to make x86_64 work out of the box, then
-add ANV as the preferred ICD under D and let lavapipe be the fallback.
+add hardware ICDs under D and keep lavapipe as the fallback.
+
+## Hardware acceleration
+
+PC-class x86_64 targets are overwhelmingly Intel or AMD, with NVIDIA and virtio
+in the tail, so this needs to cover several GPU vendors rather than one.
+
+### The paths do not need to be selected by hand
+
+One Mesa build produces a separate ICD per driver — `libvulkan_intel.so` (ANV),
+`libvulkan_radeon.so` (RADV), `libvulkan_nouveau.so` (NVK), `libvulkan_lvp.so`
+(lavapipe) — and each one probes DRM on its own. If several manifests are listed
+in `VK_DRIVER_FILES`, the Khronos loader enumerates them all and only the driver
+matching the hardware reports a physical device. Hardware detection is therefore
+already solved by the loader; there is no need for GameNative to branch on vendor
+to choose a driver.
+
+What still needs deciding is narrower:
+
+1. **Which payload to fetch.** Shipping every driver plus LLVM to every device is
+   wasteful, so the vendor is read from
+   `/sys/class/drm/card*/device/vendor` (`0x8086` Intel, `0x1002` AMD, `0x10de`
+   NVIDIA, `0x1af4`/`0x1b36` virtio) to pick a component.
+2. **Which device wins when more than one enumerates.** With a hardware ICD and
+   lavapipe both staged, DXVK sees two physical devices; it prefers non-CPU
+   devices, but the choice should be explicit and overridable rather than left to
+   a heuristic.
+3. **Fallback.** If the hardware ICD fails to initialise, lavapipe must still be
+   reachable, so the two components are independent rather than either/or.
+
+### Why the device's own drivers cannot be reused
+
+`/vendor/lib64/hw/vulkan.intel.so` is Mesa ANV already built for bionic x86_64,
+which looks like a free win, but it is an Android-platform build: it exports only
+`HMI`, links `libnativewindow`/`libui`, and contains no `libxcb`/`libX11`. The
+`VK_KHR_xlib_surface` string is present only because Mesa generates the full
+extension-name table regardless of the platforms enabled. So a fresh Mesa
+cross-build with `-Dplatforms=x11 -Ddri3=enabled` is unavoidable.
+
+### What makes this feasible
+
+`/dev/dri/renderD128` is `crw-rw-rw-`, so an unprivileged app can open the render
+node directly — which is what ANV and RADV need. Neither driver requires LLVM, so
+a hardware component is roughly 10–20 MB per driver rather than lavapipe's 45 MB
+compressed.
 
 ## Current status
 
