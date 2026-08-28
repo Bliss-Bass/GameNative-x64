@@ -13,16 +13,25 @@ inputs:
 runs:
   using: composite
   steps:
-    # The toolchain image is ~4GB and the payload unpacks to ~230MB, which does not fit
-    # alongside the toolchains the runner preinstalls.
+    # The toolchain image is ~4GB and the payload unpacks to ~230MB, so clear out the
+    # largest preinstalled toolchains this build never touches.
+    #
+    # Deliberately not $AGENT_TOOLSDIRECTORY (/opt/hostedtoolcache): this action runs
+    # after setup-java, and wiping the toolcache deletes the JDK out from under it,
+    # leaving Gradle to fail later with an invalid JAVA_HOME. CodeQL is the big consumer
+    # in there and is safe to drop on its own.
     - name: Free disk space
       shell: bash
       run: |
         df -h /
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
-                    /opt/ghc /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}" || true
+                    /opt/ghc /usr/local/share/boost \
+                    /opt/hostedtoolcache/CodeQL || true
         docker image prune -af || true
         df -h /
+        # Fail here rather than several minutes later in Gradle if the JDK went missing.
+        [ -x "${JAVA_HOME:-/nonexistent}/bin/java" ] || {
+          echo "::error::JAVA_HOME ($JAVA_HOME) was removed by the cleanup above"; exit 1; }
 
     # Both trees are gitignored build output. Keyed on the recipes that produce them plus
     # the Containerfile, so a toolchain change invalidates the cache rather than silently
