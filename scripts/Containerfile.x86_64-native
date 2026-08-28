@@ -1,0 +1,61 @@
+# Toolchain for the bionic x86_64 cross-builds (scripts/build-x86_64-*.sh).
+#
+# These builds are fussy about host state in ways that quietly change their output:
+# build-x86_64-mesa-vulkan.sh needs a specific NDK layout, meson >= 1.4 (Ubuntu 24.04
+# still ships 1.3.2), and mesa_clc needs LLVM and SPIRV-LLVM-Translator from the *same*
+# release, or the newest llvm-config on PATH wins and the build breaks. Pinning all of
+# it here means every developer produces the same payload instead of whatever their
+# distro happens to carry.
+#
+# Base matches the machine this was developed on, so the apt versions below are known
+# to resolve.
+FROM ubuntu:24.04
+
+ARG LLVM_VERSION=19
+# 28.2.13676358 in SDK numbering; sha1 and size are from Google's repository2-3.xml.
+ARG NDK_REVISION=r28c
+ARG NDK_SHA1=a7b54a5de87fecd125a17d54f73c446199e72a64
+# meson from pip, not apt: Mesa 26.0.6 requires >= 1.4.0.
+ARG MESON_VERSION=1.7.0
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Before the package layer: this is the largest and most stable step, and putting it
+# after apt meant every added package re-downloaded 700MB of NDK.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates unzip \
+    && curl -fsSL --retry 3 \
+        -o /tmp/ndk.zip \
+        "https://dl.google.com/android/repository/android-ndk-${NDK_REVISION}-linux.zip" \
+    && echo "${NDK_SHA1}  /tmp/ndk.zip" | sha1sum -c - \
+    && unzip -q /tmp/ndk.zip -d /opt \
+    && rm /tmp/ndk.zip \
+    && mv "/opt/android-ndk-${NDK_REVISION}" /opt/android-ndk \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        bison flex \
+        cmake ninja-build pkg-config \
+        python3 python3-pip python3-mako python3-yaml python3-setuptools \
+        "llvm-${LLVM_VERSION}" "llvm-${LLVM_VERSION}-dev" "llvm-${LLVM_VERSION}-tools" \
+        "libclang-${LLVM_VERSION}-dev" \
+        "libllvmspirvlib-${LLVM_VERSION}-dev" "llvm-spirv-${LLVM_VERSION}" \
+        "libclc-${LLVM_VERSION}" "libclc-${LLVM_VERSION}-dev" \
+        spirv-tools spirv-headers \
+        glslang-tools \
+        python3-ply \
+        zlib1g-dev libzstd-dev libexpat1-dev libelf-dev libdrm-dev \
+        curl ca-certificates unzip xz-utils zstd git \
+    && rm -rf /var/lib/apt/lists/*
+
+# --break-system-packages: PEP 668 marks the distro Python as externally managed, and
+# this is a single-purpose build image with no other Python consumer to protect.
+RUN pip3 install --no-cache-dir --break-system-packages "meson==${MESON_VERSION}"
+
+# Consumed by build-x86_64-mesa-vulkan.sh, which otherwise guesses at
+# $ANDROID_HOME/ndk/<version> paths that do not exist here.
+ENV NDK_ROOT=/opt/android-ndk
+ENV HOST_LLVM_VERSION=${LLVM_VERSION}
+
+WORKDIR /src
