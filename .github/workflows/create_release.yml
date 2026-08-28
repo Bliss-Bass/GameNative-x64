@@ -41,6 +41,13 @@ jobs:
         SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
       run: bash .github/scripts/decode-signing-keystore.sh app/keystores/release.keystore
 
+    - name: Prepare Gradle inputs
+      uses: ./.github/actions/gradle-prepare
+      with:
+        posthog-api-key: ${{ secrets.POSTHOG_API_KEY }}
+        posthog-host: ${{ secrets.POSTHOG_HOST }}
+        steamgriddb-api-key: ${{ secrets.STEAMGRIDDB_API_KEY }}
+
     - name: Build x64 Vulkan payload
       uses: ./.github/actions/x64-payload
 

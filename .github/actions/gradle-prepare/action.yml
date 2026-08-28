@@ -1,0 +1,39 @@
+name: Prepare Gradle inputs
+description: >
+  Writes the local.properties that the secrets-gradle-plugin requires. The plugin reads it
+  during project evaluation and fails configuration outright when it is absent, and the
+  file is gitignored, so every workflow has to create one before invoking Gradle.
+
+inputs:
+  posthog-api-key:
+    description: 'PostHog API key; a dummy value is used when empty (analytics stay off)'
+    required: false
+    default: ''
+  posthog-host:
+    description: 'PostHog host'
+    required: false
+    default: 'https://us.i.posthog.com'
+  steamgriddb-api-key:
+    description: 'SteamGridDB API key; only affects artwork lookups'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Write local.properties
+      shell: bash
+      env:
+        POSTHOG_API_KEY: ${{ inputs.posthog-api-key }}
+        POSTHOG_HOST: ${{ inputs.posthog-host }}
+        STEAMGRIDDB_API_KEY: ${{ inputs.steamgriddb-api-key }}
+      run: |
+        # sdk.dir is deliberately omitted: the runner exports ANDROID_HOME, and pinning a
+        # path here would break whenever the image layout changes.
+        {
+          echo "POSTHOG_API_KEY=${POSTHOG_API_KEY:-dummy}"
+          echo "POSTHOG_HOST=${POSTHOG_HOST:-https://us.i.posthog.com}"
+          echo "STEAMGRIDDB_API_KEY=${STEAMGRIDDB_API_KEY:-dummy}"
+        } > local.properties
+        # Values are secrets, so report only which keys were real.
+        echo "wrote local.properties (posthog key: ${POSTHOG_API_KEY:+provided}${POSTHOG_API_KEY:-dummy})"

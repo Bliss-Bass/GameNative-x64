@@ -36,9 +36,13 @@ runs:
     # Both trees are gitignored build output. Keyed on the recipes that produce them plus
     # the Containerfile, so a toolchain change invalidates the cache rather than silently
     # shipping stale drivers. The Termux .debs are cached too, to avoid refetching ~190MB.
-    - name: Cache native cross-build trees
+    # restore/save rather than actions/cache: the combined action only saves in its post
+    # step when the whole job succeeded, so an unrelated Gradle failure threw away the
+    # ~9 minutes of Mesa work and made every retry pay for it again. Saving right after
+    # the build keeps the trees regardless of what happens later in the job.
+    - name: Restore native cross-build trees
       id: native-cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: |
           native/bionic-libs-android
@@ -52,6 +56,16 @@ runs:
       run: |
         ./scripts/native-build-container.sh scripts/build-x86_64-bionic-libs.sh
         ./scripts/native-build-container.sh scripts/build-x86_64-mesa-vulkan.sh
+
+    - name: Save native cross-build trees
+      if: steps.native-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          native/bionic-libs-android
+          native/mesa-vulkan-android
+          native/vulkan-x86_64/debs
+        key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
     # The app resolves the payload by exact filename and uses that name as its on-device
     # staging stamp, so read the expected name from the source instead of date-stamping
