@@ -181,8 +181,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // -PnoMinify=true builds an unminified release, to tell R8 breakage apart from
+            // a genuine bug when a release-only failure shows up.
+            val noMinify = (project.findProperty("noMinify") as String?) == "true"
+            isMinifyEnabled = !noMinify
+            isShrinkResources = !noMinify
             signingConfig = signingConfigs.getByName("debug")
         }
         create("release-signed") {
