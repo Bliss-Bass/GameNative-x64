@@ -21,9 +21,12 @@ MIN_SDK="$(grep -E 'minSdk\s*=' "$GRADLE_FILE" | head -1 | grep -Eo '[0-9]+' || 
 VERSION_NAME="$(grep -E 'versionName\s*=' "$GRADLE_FILE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "${TAG#v}")"
 VERSION_CODE="$(grep -E 'versionCode\s*=' "$GRADLE_FILE" | head -1 | grep -Eo '[0-9]+' || echo "?")"
 
+# Only this fork's tags. Upstream's v1.3.x tags came along with the history, and they
+# sort above our v1.2.0-x64.N, so an unfiltered lookup produced a "Since v1.3.2" section
+# comparing against a commit this fork never released.
 PREV_TAG=""
 if git rev-parse "$TAG" >/dev/null 2>&1; then
-  PREV_TAG="$(git tag -l 'v*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
+  PREV_TAG="$(git tag -l 'v*-x64.*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
 fi
 
 COMMIT_COUNT="$(git log --since="30 days ago" --oneline --no-merges 2>/dev/null | wc -l | tr -d ' ')"

@@ -1,5 +1,8 @@
 name: Compile Release APK
 
+# Manual only. create_release.yml already builds and publishes a signed release APK on
+# every v* tag, and triggering both there meant paying for the same ~40 minute build
+# twice to produce identical output.
 on:
   workflow_dispatch:
     inputs:
@@ -7,9 +10,6 @@ on:
         description: 'Rebuild the Vulkan payload even if the cache hits'
         type: boolean
         default: false
-  push:
-    tags:
-      - 'v*'
 
 concurrency:
   group: release-apk-${{ github.ref }}
