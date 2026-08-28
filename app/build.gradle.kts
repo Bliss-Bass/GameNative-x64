@@ -312,6 +312,14 @@ android {
             }
             jniLibs.setSrcDirs(listOf("src/modernX64/jniLibs"))
         }
+        // Test source sets do not inherit from another flavor's, so this flavor was not
+        // picking up src/testModern/resources/robolectric.properties and its 43
+        // Robolectric tests failed in DefaultSdkPicker: it targets API 36, which
+        // Robolectric 4.14 has no shadows for. Same pin as modern, which this flavor is
+        // otherwise a copy of.
+        getByName("testModernX64") {
+            resources.srcDir("src/testModern/resources")
+        }
         getByName("modernXr") {
             assets {
                 srcDirs("src/modern/assets", "src/main/assets")
