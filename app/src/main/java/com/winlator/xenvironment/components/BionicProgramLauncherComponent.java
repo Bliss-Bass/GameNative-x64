@@ -378,6 +378,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             HostGraphicsEnv.sanitizeForSystemVulkan(envVars);
         }
 
+        HostBionicLibs.applyGuestVulkanEnv(envVars, context);
+
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
 
         String emulator = container.getEmulator();
@@ -512,6 +514,11 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         StringBuilder path = new StringBuilder();
         if (HostCpu.current().isX86_64()) {
             // imagefs/usr/lib is ARM — must not be on LD_LIBRARY_PATH for x86_64 Proton.
+            // Staged Vulkan stack goes first so its loader wins over /system/lib64.
+            File hostVk = HostBionicLibs.hostVulkanLibDir(environment.getContext());
+            if (HostBionicLibs.hasStagedVulkanLoader(environment.getContext()) && hostVk.isDirectory()) {
+                path.append(hostVk.getPath()).append(":");
+            }
             path.append("/system/lib64");
             File hostLib = HostBionicLibs.hostUsrLibDir(environment.getContext());
             if (hostLib.isDirectory()) {

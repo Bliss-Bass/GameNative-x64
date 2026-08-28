@@ -3850,6 +3850,7 @@ private fun setupXEnvironment(
 
         if (HostCpu.current().isX86_64) {
             HostDisplayEnv.applyForX86_64Guest(envVars, imageFs)
+            HostBionicLibs.applyGuestVulkanEnv(envVars, context)
         }
 
         if (gameSource == GameSource.STEAM) {
