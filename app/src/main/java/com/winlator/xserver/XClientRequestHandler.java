@@ -7,6 +7,8 @@ import com.winlator.xconnector.RequestHandler;
 import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
+import com.winlator.xserver.errors.BadImplementation;
+import com.winlator.xserver.errors.BadRequest;
 import com.winlator.xserver.errors.XRequestError;
 import com.winlator.xserver.extensions.Extension;
 import com.winlator.xserver.requests.AtomRequests;
@@ -404,6 +406,9 @@ public class XClientRequestHandler implements RequestHandler {
                 case ClientOpcodes.QUERY_EXTENSION:
                     ExtensionRequests.queryExtension(client, inputStream, outputStream);
                     break;
+                case ClientOpcodes.LIST_EXTENSIONS:
+                    ExtensionRequests.listExtensions(client, outputStream);
+                    break;
                 case ClientOpcodes.GET_KEYBOARD_MAPPING:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.INPUT_DEVICE)) {
                         KeyboardRequests.getKeyboardMapping(client, inputStream, outputStream);
@@ -449,20 +454,34 @@ public class XClientRequestHandler implements RequestHandler {
                 default:
                     if (opcode < 0) {
                         Extension extension = client.xServer.extensions.get(opcode);
-                        if (extension != null)
+                        if (extension != null) {
                             extension.handleRequest(client, inputStream, outputStream);
-                        else
-                            Timber.w("handleNormalRequest: unhandled opcode=%d, requestData=%d, requestLength=%d", opcode, requestData, requestLength);
-
+                            break;
+                        }
+                        Timber.w("handleNormalRequest: unhandled opcode=%d, requestData=%d, requestLength=%d", opcode, requestData, requestLength);
                     }
                     else Timber.w("handleNormalRequest: unsupported opcode " + opcode);
-                    break;
+
+                    // Dropping the request silently leaves any client that waits for a reply
+                    // hung forever. Wine only ever sends opcodes implemented above, but real
+                    // X11 clients probe for what the server supports and must get an answer.
+                    // The catch below skips the unread request body and sends the error.
+                    throw new BadRequest();
             }
         }
         catch (XRequestError e) {
             client.skipRequest();
             Timber.e("handleNormalRequest: XRequestError for opcode=%d: %s", opcode, e);
             e.sendError(client, opcode);
+        }
+        catch (RuntimeException e) {
+            // Handlers throw for corners Wine never exercises (OpenFont on anything but
+            // "cursor", for one). Letting that escape makes the connector drop the client,
+            // so a single unsupported request takes down the whole app. An X error instead
+            // lets the client fall back or carry on degraded.
+            client.skipRequest();
+            Timber.e(e, "handleNormalRequest: unexpected failure for opcode=%d", opcode);
+            new BadImplementation().sendError(client, opcode);
         }
 
         return true;

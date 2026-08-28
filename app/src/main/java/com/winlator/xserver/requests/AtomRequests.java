@@ -18,8 +18,17 @@ public abstract class AtomRequests {
         short length = inputStream.readShort();
         inputStream.skip(2);
         String name = inputStream.readString8(length);
-        int id = onlyIfExists ? Atom.getId(name) : Atom.internAtom(name);
-        if (id < 0) throw new BadAtom(id);
+        int id;
+        if (onlyIfExists) {
+            // An unknown name is not an error here: the reply is None. Returning BadAtom
+            // instead kills clients like xterm and every GTK/Qt toolkit, which probe for
+            // optional atoms this way. Wine only ever interns unconditionally.
+            id = Math.max(Atom.getId(name), 0);
+        }
+        else {
+            id = Atom.internAtom(name);
+            if (id < 0) throw new BadAtom(id);
+        }
 
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);

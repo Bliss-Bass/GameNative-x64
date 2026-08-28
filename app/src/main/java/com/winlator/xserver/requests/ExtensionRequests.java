@@ -6,6 +6,7 @@ import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.XClient;
+import com.winlator.xserver.XServer;
 import com.winlator.xserver.errors.XRequestError;
 import com.winlator.xserver.extensions.Extension;
 
@@ -37,6 +38,36 @@ public abstract class ExtensionRequests {
                 outputStream.writeByte((byte)0);
                 outputStream.writePad(23);
             }
+        }
+    }
+
+    public static void listExtensions(XClient client, XOutputStream outputStream) throws IOException {
+        int count = client.xServer.extensions.size();
+
+        // Names are sent as STRs (one length byte plus the characters), and the reply length
+        // counts the whole list padded up to a 4-byte boundary.
+        byte[][] names = new byte[count][];
+        int nameBytes = 0;
+        for (int i = 0; i < count; i++) {
+            names[i] = client.xServer.extensions.valueAt(i).getName().getBytes(XServer.LATIN1_CHARSET);
+            nameBytes += 1 + names[i].length;
+        }
+        int padding = (4 - (nameBytes % 4)) % 4;
+
+        try (XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte)count);
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt((nameBytes + padding) / 4);
+            outputStream.writePad(24);
+
+            // writeString8 pads each string to a 4-byte boundary, which would desynchronize
+            // the STR list; the padding belongs at the end of the whole list instead.
+            for (int i = 0; i < count; i++) {
+                outputStream.writeByte((byte)names[i].length);
+                outputStream.write(names[i]);
+            }
+            outputStream.writePad(padding);
         }
     }
 }
