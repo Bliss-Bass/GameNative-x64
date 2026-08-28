@@ -91,8 +91,11 @@ object HostBionicLibs {
         envVars.put("VK_DRIVER_FILES", value)
 
         // The in-app X server has no DRI3/Present buffer sharing without the Vortek
-        // renderer (arm64-only), so keep Mesa's WSI on the XPutImage/SHM path.
-        envVars.put("MESA_VK_WSI_DEBUG", "sw")
+        // renderer (arm64-only), so keep Mesa's WSI on the software XPutImage path.
+        // `noshm` additionally keeps MIT-SHM out of it: Mesa enables shm whenever DRI3
+        // and Present are advertised, which routes presentation through bionic SysV-shm
+        // emulation and costs the guest its X connection mid-frame.
+        envVars.put("MESA_VK_WSI_DEBUG", "sw,noshm")
 
         Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (WSI=sw)", value)
     }
