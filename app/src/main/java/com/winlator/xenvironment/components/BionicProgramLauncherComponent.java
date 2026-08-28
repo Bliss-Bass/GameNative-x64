@@ -536,6 +536,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 path.append(":").append(wineRoot).append("/lib/wine/x86_64-unix");
             }
         }
+        if (HostCpu.current().isX86_64()) {
+            // winepulse.so needs libpulse.so, which is only shipped in the APK's native
+            // library directory: on arm64 the imagefs supplies one, but the x86_64 tree has
+            // no equivalent, so mmdevapi finds no usable driver and the guest is silent.
+            // Last on the path so Proton's own libraries keep winning.
+            path.append(":").append(environment.getContext().getApplicationInfo().nativeLibraryDir);
+        }
         return path.toString();
     }
 
