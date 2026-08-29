@@ -43,11 +43,19 @@ object LinuxRootfs {
      *   because the screen did, they resize when a window manager configures them.
      * - xsettingsd carries DPI changes into running GTK and Qt apps, which otherwise read
      *   it once at startup.
+     * - xterm is what openbox's root menu means by a terminal, and without it the desktop
+     *   opens onto a background with no way to start anything from inside it.
+     * - The font packages are not optional here: Recommends are off, so nothing else pulls
+     *   them in, and both a bitmap font for xterm and a scalable one for everything that
+     *   draws through Xft have to be present or clients fail to start on a missing font.
      */
     private val DISPLAY_PACKAGES = listOf(
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
+        "xterm",
+        "xfonts-base",
+        "fonts-dejavu-core",
     )
 
     /**
@@ -62,11 +70,16 @@ object LinuxRootfs {
         "DEBCONF_NONINTERACTIVE_SEEN" to "true",
     )
 
+    /** Debconf answers, written at install time and fed to apt before it unpacks anything. */
+    private const val PRESEED = "root/.gamenative-preseed"
+
     /** Proof the packages above landed, checked instead of parsing apt's output. */
     private val DISPLAY_BINARIES = listOf(
         "usr/bin/Xtigervnc",
         "usr/bin/openbox",
         "usr/bin/xsettingsd",
+        "usr/bin/xterm",
+        "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 
     private const val URL =
@@ -136,6 +149,33 @@ object LinuxRootfs {
                 Timber.i("[LinuxRootfs]: installed to %s", rootfs)
             }
         }
+
+    /**
+     * Installs whatever the graphical session is still missing, and nothing if it is
+     * complete.
+     *
+     * This is what keeps [DISPLAY_PACKAGES] extensible: adding a package would otherwise
+     * mean bumping [LAYOUT_VERSION] and making everyone re-download and re-unpack a rootfs
+     * that is already correct, just to run one apt command against it.
+     */
+    suspend fun ensureDisplaySession(
+        context: Context,
+        onProgress: (Progress) -> Unit = {},
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!isInstalled(context)) throw IOException("The Linux userland is not installed")
+            val rootfs = rootfsDir(context)
+            if (hasDisplaySession(context)) {
+                // Rewritten on every start rather than only after an install: it is a few
+                // small files, and it is how a change to them reaches a userland that is
+                // otherwise complete.
+                configureSession(context, rootfs)
+            } else {
+                Timber.i("[LinuxRootfs]: completing the graphical session install")
+                installDisplaySession(context, rootfs, onProgress)
+            }
+        }
+    }
 
     fun uninstall(context: Context) {
         stampFile(context).delete()
@@ -268,6 +308,17 @@ object LinuxRootfs {
         )
         Timber.i("[LinuxRootfs]: apt-get update:\n%s", update.takeLast(2000))
 
+        // Answers the questions the packages below would otherwise ask, or in man-db's case
+        // act on. Read from a file rather than piped in, since these commands run without a
+        // shell.
+        val preseed = LinuxProgramLauncher.runWithOutput(
+            context,
+            "debconf-set-selections /$PRESEED",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 120,
+        )
+        if (preseed.isNotBlank()) Timber.w("[LinuxRootfs]: debconf-set-selections: %s", preseed)
+
         onProgress(Progress("Installing the graphical session", -1f))
         val install = LinuxProgramLauncher.runWithOutput(
             context,
@@ -288,8 +339,14 @@ object LinuxRootfs {
             throw IOException("Graphical session install incomplete, missing: ${missing.joinToString()}")
         }
 
+        configureSession(context, rootfs)
+    }
+
+    /** The session's configuration files, all of which are safe to rewrite. */
+    private fun configureSession(context: Context, rootfs: File) {
         configureWindowManager(rootfs)
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
+        writeXdefaults(rootfs)
     }
 
     /**
@@ -325,6 +382,30 @@ object LinuxRootfs {
                 Timber.w("[LinuxRootfs]: openbox rc.xml has no <applications> section")
                 text
             },
+        )
+    }
+
+    /**
+     * X resources for the toolkit that predates XSETTINGS.
+     *
+     * Read from here without running xrdb: Xt falls back to ~/.Xdefaults when the root
+     * window carries no resource manager property, and nothing in this session sets one.
+     *
+     * xterm defaults to a bitmap font, which ignores DPI entirely and so stays pixel-tiny
+     * on a dense panel however the server is configured. Naming a scalable font moves it
+     * onto Xft, where the server's DPI decides the size, and a point size is then
+     * meaningful rather than a guess.
+     */
+    private fun writeXdefaults(rootfs: File) {
+        File(rootfs, "root/.Xdefaults").writeText(
+            """
+            XTerm*faceName: DejaVu Sans Mono
+            XTerm*faceSize: 11
+            XTerm*background: black
+            XTerm*foreground: white
+            XTerm*scrollBar: false
+            XTerm*saveLines: 4096
+            """.trimIndent() + "\n",
         )
     }
 
@@ -403,6 +484,12 @@ object LinuxRootfs {
                 group.appendText(added.joinToString("") { "android_$it:x:$it:\n" })
             }
         }
+
+        // man-db's postinst rebuilds the page index as the "man" user, via setpriv, which
+        // cannot drop groups under PRoot's fake root and so fails on every install. The
+        // index is useless here anyway -- there is no pager and no one reading man pages in
+        // a session that exists to run a GUI app.
+        File(rootfs, PRESEED).writeText("man-db man-db/auto-update boolean false\n")
 
         File(rootfs, "etc/apt/apt.conf.d").mkdirs()
         File(rootfs, "etc/apt/apt.conf.d/99gamenative").writeText(

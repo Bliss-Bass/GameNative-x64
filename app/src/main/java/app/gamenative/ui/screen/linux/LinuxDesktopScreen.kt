@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.linux.LinuxDisplaySession
+import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.rfb.RfbView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,9 +50,20 @@ fun LinuxDesktopScreen(
 
     var session by remember { mutableStateOf<LinuxDisplaySession?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        LinuxDisplaySession.start(context, metrics.widthPixels, metrics.heightPixels)
+        // Covers a userland installed before a package was added to the session, which is
+        // an apt run rather than a reinstall, and can take long enough to need a message.
+        LinuxRootfs.ensureDisplaySession(context) { status = it.message }
+            .onFailure {
+                Timber.e(it, "[LinuxDesktopScreen]: could not complete the session install")
+                error = it.message
+                return@LaunchedEffect
+            }
+        status = null
+
+        LinuxDisplaySession.start(context, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
             .onSuccess { started ->
                 withContext(Dispatchers.IO) {
                     started.setDpi(metrics.densityDpi)
@@ -83,7 +95,7 @@ fun LinuxDesktopScreen(
         val active = session
         when {
             error != null -> Message(error!!)
-            active == null -> Starting()
+            active == null -> Starting(status)
             else -> AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
@@ -98,13 +110,13 @@ fun LinuxDesktopScreen(
 }
 
 @Composable
-private fun Starting() {
+private fun Starting(status: String?) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         CircularProgressIndicator()
-        Text(text = stringResource(R.string.linux_desktop_starting), color = Color.White)
+        Text(text = status ?: stringResource(R.string.linux_desktop_starting), color = Color.White)
     }
 }
 

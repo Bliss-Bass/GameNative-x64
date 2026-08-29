@@ -51,11 +51,16 @@ class LinuxDisplaySession private constructor(
          *
          * [width] and [height] are the starting size only; the presenter resizes the
          * desktop to match its surface as soon as it knows how big that is.
+         *
+         * [densityDpi] is what the server will report to clients. Every Xft client sizes
+         * type from it, so leaving it at the X default of 96 draws text at roughly half
+         * size on a panel like this one.
          */
         suspend fun start(
             context: Context,
             width: Int,
             height: Int,
+            densityDpi: Int,
         ): Result<LinuxDisplaySession> = withContext(Dispatchers.IO) {
             runCatching {
                 if (!LinuxRootfs.isInstalled(context)) {
@@ -67,7 +72,7 @@ class LinuxDisplaySession private constructor(
 
                 val port = freePort()
                 val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port)
-                session.launch(width, height)
+                session.launch(width, height, densityDpi.coerceIn(96, 400))
                 session
             }
         }
@@ -87,8 +92,11 @@ class LinuxDisplaySession private constructor(
         }
     }
 
-    private suspend fun launch(width: Int, height: Int) {
-        Timber.i("[LinuxDisplaySession]: starting display :%d on port %d (%dx%d)", display, port, width, height)
+    private suspend fun launch(width: Int, height: Int, dpi: Int) {
+        Timber.i(
+            "[LinuxDisplaySession]: starting display :%d on port %d (%dx%d at %d dpi)",
+            display, port, width, height, dpi,
+        )
         clearStaleDisplay()
 
         // -localhost so the desktop is not reachable from the network: this is a transport
@@ -97,6 +105,7 @@ class LinuxDisplaySession private constructor(
             "/usr/bin/Xtigervnc :$display" +
                 " -geometry ${width}x$height" +
                 " -depth 24" +
+                " -dpi $dpi" +
                 " -rfbport $port" +
                 " -SecurityTypes None" +
                 " -localhost" +
