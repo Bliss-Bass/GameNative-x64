@@ -89,6 +89,7 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.HomeScreen
 import app.gamenative.ui.screen.PluviaScreen
+import app.gamenative.ui.screen.linux.LinuxAppsScreen
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
@@ -1628,6 +1629,15 @@ fun PluviaMain(
                         onAppTheme = viewModel::setTheme,
                         onPaletteStyle = viewModel::setPalette,
                         onBack = { navController.navigateUp() },
+                    )
+                }
+
+                /** Linux applications **/
+                composable(route = PluviaScreen.LinuxApps.route) {
+                    LinuxAppsScreen(
+                        onBack = { navController.navigateUp() },
+                        onOpenTerminal = { navController.navigate(PluviaScreen.Terminal.route) },
+                        onLaunch = { argv -> navController.navigate(PluviaScreen.LinuxDesktop.route(argv)) },
                     )
                 }
 

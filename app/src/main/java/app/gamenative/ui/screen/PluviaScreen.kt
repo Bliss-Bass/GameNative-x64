@@ -11,6 +11,7 @@ sealed class PluviaScreen(val route: String) {
     data object XServer : PluviaScreen("xserver")
     data object Settings : PluviaScreen("settings")
     data object Terminal : PluviaScreen("terminal")
+    data object LinuxApps : PluviaScreen("linux-apps")
     data object LinuxDesktop : PluviaScreen("linux-desktop?argv={argv}") {
         /** [argv] is the guest command to run in the session, or null for a bare desktop. */
         fun route(argv: String? = null) =

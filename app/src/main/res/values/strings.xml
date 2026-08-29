@@ -2349,6 +2349,13 @@
     <string name="terminal_unsupported_abi">The Linux terminal requires an x86_64 device.</string>
     <string name="linux_desktop_title">Linux Desktop</string>
     <string name="linux_desktop_starting">Starting the Linux desktop…</string>
+    <string name="linux_apps_title">Linux Apps</string>
+    <string name="linux_apps_unsupported">Linux apps require an x86_64 device.</string>
+    <string name="linux_apps_not_installed">A Linux userland is needed before apps can be installed. Set it up in the Linux terminal, then install apps with apt.</string>
+    <string name="linux_apps_open_terminal">Open terminal</string>
+    <string name="linux_apps_empty">No Linux apps are installed yet. Install some with apt in the Linux terminal — anything with a desktop entry appears here.</string>
+    <string name="linux_apps_refresh">Refresh</string>
+    <string name="linux_apps_terminal_app">Runs in a terminal</string>
 
     <!-- Text selection in the vendored Termux terminal view (com.termux.view). -->
     <string name="copy_text">Copy</string>

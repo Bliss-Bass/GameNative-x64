@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.StarHalf
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DesktopWindows
@@ -585,6 +586,15 @@ fun SystemMenu(
                         // x86_64 only: the Linux userland it opens is not built for arm.
                         if (LinuxRootfs.isSupported()) {
                             SystemMenuItem(
+                                text = stringResource(R.string.linux_apps_title),
+                                icon = Icons.Default.Apps,
+                                onClick = {
+                                    onNavigateRoute(PluviaScreen.LinuxApps.route)
+                                    onDismiss()
+                                },
+                            )
+
+                            SystemMenuItem(
                                 text = stringResource(R.string.terminal_title),
                                 icon = Icons.Default.Terminal,
                                 onClick = {
@@ -597,7 +607,9 @@ fun SystemMenu(
                                 text = stringResource(R.string.linux_desktop_title),
                                 icon = Icons.Default.DesktopWindows,
                                 onClick = {
-                                    onNavigateRoute(PluviaScreen.LinuxDesktop.route)
+                                    // route(), not route: the latter is the pattern, which
+                                    // would arrive as a literal "{argv}" to run.
+                                    onNavigateRoute(PluviaScreen.LinuxDesktop.route())
                                     onDismiss()
                                 },
                             )
