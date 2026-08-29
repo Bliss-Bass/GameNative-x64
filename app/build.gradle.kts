@@ -265,6 +265,11 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all {
+                // Lets a test write an artefact out for inspection by tooling that a unit test
+                // cannot stand in for, such as aapt2 over a generated APK.
+                it.systemProperty("stubapk.out", System.getProperty("stubapk.out") ?: "")
+            }
         }
     }
 
