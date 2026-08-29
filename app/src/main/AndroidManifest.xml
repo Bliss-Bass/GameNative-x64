@@ -173,6 +173,11 @@
             android:name=".service.NotificationActionReceiver"
             android:exported="false" />
 
+        <!-- Where PackageInstaller reports the outcome of a generated stub install. -->
+        <receiver
+            android:name=".linux.StubInstallReceiver"
+            android:exported="false" />
+
         <!-- FileProvider for secure file sharing (for APK installation) -->
         <provider
             android:name="androidx.core.content.FileProvider"

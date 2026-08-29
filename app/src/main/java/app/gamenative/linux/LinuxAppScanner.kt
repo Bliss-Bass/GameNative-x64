@@ -55,6 +55,12 @@ object LinuxAppScanner {
     data class LinuxApp(
         /** Stable across scans, so a pinned shortcut keeps working. */
         val id: Int,
+        /**
+         * The desktop entry's file name without its extension, which is what identifies an
+         * application on a Linux system and survives reinstalls and upgrades. Used where
+         * something readable and stable is needed, such as a generated package name.
+         */
+        val entryId: String,
         val name: String,
         /** Command to run, field codes already removed. */
         val exec: String,
@@ -86,8 +92,8 @@ object LinuxAppScanner {
             for (file in files) {
                 val app = runCatching { parse(file.readText(), rootfs) }
                     .onFailure { Timber.w(it, "[LinuxAppScanner]: could not read %s", file.name) }
-                    .getOrNull() ?: continue
-                found[file.name] = app.copy(id = idFor(file.name))
+                            .getOrNull() ?: continue
+                        found[file.name] = app.copy(id = idFor(file.name), entryId = file.nameWithoutExtension)
             }
         }
 
@@ -136,7 +142,9 @@ object LinuxAppScanner {
         }
 
         return LinuxApp(
-            id = 0, // Assigned by the caller, which knows the file name.
+            // Both assigned by the caller, which is what knows the file name.
+            id = 0,
+            entryId = "",
             name = name,
             exec = exec,
             iconPath = values["Icon"]?.let { resolveIcon(rootfs, it) },

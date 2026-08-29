@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
@@ -41,16 +42,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.content.Context
 import app.gamenative.R
 import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppScanner
+import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxRootfs
+import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import app.gamenative.utils.createLinuxAppShortcut
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 /**
  * The applications installed in the Linux userland.
@@ -117,6 +122,11 @@ fun LinuxAppsScreen(
                             app = app,
                             onClick = { onLaunch(app.launchArgv) },
                             onPin = { scope.launch { createLinuxAppShortcut(context, app) } },
+                            onAddToDrawer = if (LinuxAppStubs.isSupported(context)) {
+                                { scope.launch { addToDrawer(context, app) } }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -125,8 +135,28 @@ fun LinuxAppsScreen(
     }
 }
 
+/**
+ * Builds a stub for [app] and asks for it to be installed.
+ *
+ * The prompt the user then sees is Android's, and there is no way for an unprivileged app to skip
+ * it; the ROM's privileged helper is what makes this silent.
+ */
+private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp) {
+    LinuxAppStubs.build(context, app)
+        .mapCatching { LinuxAppStubs.requestInstall(context, it).getOrThrow() }
+        .onFailure {
+            Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
+            SnackbarManager.show(context.getString(R.string.linux_apps_drawer_failed, app.name))
+        }
+}
+
 @Composable
-private fun AppRow(app: LinuxAppScanner.LinuxApp, onClick: () -> Unit, onPin: () -> Unit) {
+private fun AppRow(
+    app: LinuxAppScanner.LinuxApp,
+    onClick: () -> Unit,
+    onPin: () -> Unit,
+    onAddToDrawer: (() -> Unit)?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -159,6 +189,16 @@ private fun AppRow(app: LinuxAppScanner.LinuxApp, onClick: () -> Unit, onPin: ()
                     color = PluviaTheme.colors.textMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (onAddToDrawer != null) {
+            IconButton(onClick = onAddToDrawer, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Apps,
+                    contentDescription = stringResource(R.string.linux_apps_add_to_drawer),
+                    tint = Color.White.copy(alpha = 0.7f),
                 )
             }
         }
