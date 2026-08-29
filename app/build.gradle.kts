@@ -37,6 +37,56 @@ val copyDebugManifest by tasks.registering(Copy::class) {
     into(layout.buildDirectory.dir("generated/debugManifest"))
 }
 
+// The dex every generated stub APK carries. Built here rather than committed as a binary, and
+// separate from the app's own dex because it belongs to a different package: each stub installs
+// as its own application, and this is the code it runs.
+val stubTrampolineDex by tasks.registering {
+    val source = rootProject.file("stub/LaunchActivity.java")
+    // The asset root, so the dex is packaged as stub/trampoline.dex. Not named classes.dex:
+    // packaging drops an asset by that name, taking it for a dex of the app's own.
+    val outputDir = layout.buildDirectory.dir("generated/stubTrampoline")
+
+    inputs.file(source)
+    outputs.dir(outputDir)
+
+    doLast {
+        val sdk = android.sdkDirectory
+        val platform = File(sdk, "platforms/android-${android.compileSdk}/android.jar")
+        val d8 = File(sdk, "build-tools/${android.buildToolsVersion}/d8")
+        check(platform.isFile) { "platform jar not found: $platform" }
+        check(d8.canExecute()) { "d8 not found: $d8" }
+
+        val classes = temporaryDir.resolve("classes").apply { deleteRecursively(); mkdirs() }
+        // Compiled against the platform alone: a stub depends on nothing else, which is what
+        // keeps it a few kilobytes.
+        providers.exec {
+            commandLine(
+                "javac", "-source", "8", "-target", "8", "-nowarn",
+                "-bootclasspath", platform.absolutePath,
+                "-d", classes.absolutePath, source.absolutePath,
+            )
+        }.result.get().assertNormalExitValue()
+
+        val dexDir = temporaryDir.resolve("dex").apply { deleteRecursively(); mkdirs() }
+        providers.exec {
+            commandLine(
+                d8.absolutePath, "--min-api", "26",
+                "--output", dexDir.absolutePath,
+                "--lib", platform.absolutePath,
+                *classes.walkTopDown().filter { it.extension == "class" }
+                    .map { it.absolutePath }.toList().toTypedArray(),
+            )
+        }.result.get().assertNormalExitValue()
+
+        val out = outputDir.get().asFile.resolve("stub").apply { mkdirs() }
+        dexDir.resolve("classes.dex").copyTo(out.resolve("trampoline.dex"), overwrite = true)
+    }
+}
+
+// The asset merge for the flavor that packages the trampoline, which is the only consumer.
+tasks.matching { it.name.startsWith("mergeModernX64") && it.name.endsWith("Assets") }
+    .configureEach { dependsOn(stubTrampolineDex) }
+
 android {
     namespace = "app.gamenative"
     compileSdk = 36
@@ -316,6 +366,10 @@ android {
             java.srcDir("src/nonXr/java")
             assets {
                 srcDirs("src/modern/assets", "src/modernX64/assets", "src/main/assets")
+                // Only this flavor: the Linux userland the stubs launch into is x86_64. The
+                // producing task is depended on below, since naming a directory does not imply
+                // whatever fills it.
+                srcDir(layout.buildDirectory.dir("generated/stubTrampoline").get().asFile)
             }
             jniLibs.setSrcDirs(listOf("src/modernX64/jniLibs"))
         }
