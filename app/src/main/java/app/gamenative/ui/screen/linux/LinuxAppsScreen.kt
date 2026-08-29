@@ -1,6 +1,5 @@
 package app.gamenative.ui.screen.linux
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
@@ -28,10 +28,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -40,12 +42,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
+import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.pluviaTopSafeAreaPadding
-import java.io.File
+import app.gamenative.utils.createLinuxAppShortcut
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -62,6 +66,7 @@ fun LinuxAppsScreen(
     onLaunch: (argv: String) -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
 
     // Reading a few dozen small files, off the main thread. Rescanned on request because
@@ -108,7 +113,11 @@ fun LinuxAppsScreen(
 
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(found, key = { it.id }) { app ->
-                        AppRow(app = app, onClick = { onLaunch(app.launchArgv) })
+                        AppRow(
+                            app = app,
+                            onClick = { onLaunch(app.launchArgv) },
+                            onPin = { scope.launch { createLinuxAppShortcut(context, app) } },
+                        )
                     }
                 }
             }
@@ -117,17 +126,21 @@ fun LinuxAppsScreen(
 }
 
 @Composable
-private fun AppRow(app: LinuxAppScanner.LinuxApp, onClick: () -> Unit) {
+private fun AppRow(app: LinuxAppScanner.LinuxApp, onClick: () -> Unit, onPin: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AppIcon(iconPath = app.iconPath)
 
-        Column(modifier = Modifier.padding(start = 16.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 16.dp),
+        ) {
             Text(
                 text = app.name,
                 style = MaterialTheme.typography.bodyLarge,
@@ -149,27 +162,24 @@ private fun AppRow(app: LinuxAppScanner.LinuxApp, onClick: () -> Unit) {
                 )
             }
         }
+
+        IconButton(onClick = onPin, modifier = Modifier.size(44.dp)) {
+            Icon(
+                imageVector = Icons.Filled.AddToHomeScreen,
+                contentDescription = stringResource(R.string.linux_apps_pin),
+                tint = Color.White.copy(alpha = 0.7f),
+            )
+        }
     }
 }
 
-/**
- * The entry's icon, or a stand-in.
- *
- * Only PNG is decoded. Icon themes also use SVG, and pixmaps still use XPM, neither of
- * which Android reads, and pulling in a renderer for a list icon is not worth it.
- */
+/** The entry's icon, or a stand-in when it is missing or in a format Android cannot read. */
 @Composable
 private fun AppIcon(iconPath: String?) {
     val context = LocalContext.current
-    val rootfs = remember { LinuxRootfs.rootfsDir(context) }
 
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, iconPath) {
-        value = withContext(Dispatchers.IO) {
-            val png = iconPath?.takeIf { it.endsWith(".png", ignoreCase = true) } ?: return@withContext null
-            runCatching {
-                BitmapFactory.decodeFile(File(rootfs, png.removePrefix("/")).absolutePath)?.asImageBitmap()
-            }.getOrNull()
-        }
+    val bitmap by produceState<ImageBitmap?>(null, iconPath) {
+        value = withContext(Dispatchers.IO) { LinuxAppIcon.load(context, iconPath)?.asImageBitmap() }
     }
 
     val image = bitmap

@@ -2356,6 +2356,7 @@
     <string name="linux_apps_empty">No Linux apps are installed yet. Install some with apt in the Linux terminal — anything with a desktop entry appears here.</string>
     <string name="linux_apps_refresh">Refresh</string>
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
+    <string name="linux_apps_pin">Add to home screen</string>
 
     <!-- Text selection in the vendored Termux terminal view (com.termux.view). -->
     <string name="copy_text">Copy</string>
