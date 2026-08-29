@@ -513,6 +513,10 @@ fun PluviaMain(
                     navController.navigate(PluviaScreen.LinuxDesktop.route(event.argv))
                 }
 
+                MainViewModel.MainUiEvent.LaunchLinuxTerminal -> {
+                    navController.navigate(PluviaScreen.Terminal.route)
+                }
+
                 is MainViewModel.MainUiEvent.ExternalGameLaunch -> {
                     Timber.i("[PluviaMain]: Received ExternalGameLaunch UI event for app ${event.appId}")
 

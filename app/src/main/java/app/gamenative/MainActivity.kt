@@ -94,6 +94,9 @@ class MainActivity : ComponentActivity() {
         const val ACTION_LINUX_DESKTOP = "app.gamenative.action.LINUX_DESKTOP"
         const val EXTRA_LINUX_ARGV = "linux_argv"
 
+        /** Opens the Linux terminal, which is also where the userland is installed from. */
+        const val ACTION_LINUX_TERMINAL = "app.gamenative.action.LINUX_TERMINAL"
+
         // Store pending launch request to be processed after UI is ready
         @Volatile
         private var pendingLaunchRequest: IntentLaunchManager.LaunchRequest? = null
@@ -357,13 +360,22 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (intent.action == ACTION_LINUX_DESKTOP) {
-            // Not a game launch, so it skips IntentLaunchManager entirely. This is also the
-            // entry point a per-app launcher shortcut uses.
+        if (intent.action == ACTION_LINUX_DESKTOP || intent.action == ACTION_LINUX_TERMINAL) {
+            // Not a game launch, so these skip IntentLaunchManager entirely. The desktop
+            // action is also the entry point a per-app launcher shortcut uses.
+            val terminal = intent.action == ACTION_LINUX_TERMINAL
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
             val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
-            Timber.i("[IntentLaunch]: Linux desktop requested (argv=%s)", argv)
-            lifecycleScope.launch { PluviaApp.events.emit(AndroidEvent.LaunchLinuxApp(argv)) }
+            Timber.i("[IntentLaunch]: Linux %s requested (argv=%s)", if (terminal) "terminal" else "desktop", argv)
+            lifecycleScope.launch {
+                // Emitted separately rather than through a shared variable: the event bus
+                // dispatches on the reified type, which a common supertype would lose.
+                if (terminal) {
+                    PluviaApp.events.emit(AndroidEvent.LaunchLinuxTerminal)
+                } else {
+                    PluviaApp.events.emit(AndroidEvent.LaunchLinuxApp(argv))
+                }
+            }
             return
         }
         Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}, isNewIntent=$isNewIntent")

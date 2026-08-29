@@ -25,6 +25,9 @@ interface AndroidEvent<T> : Event<T> {
 
     /** Open the Linux desktop, optionally running [argv] in it. */
     data class LaunchLinuxApp(val argv: String? = null) : AndroidEvent<Unit>
+
+    /** Open the Linux terminal. */
+    data object LaunchLinuxTerminal : AndroidEvent<Unit>
     data class PromptSaveContainerConfig(val appId: String) : AndroidEvent<Unit>
     data class ShowGameFeedback(val appId: String) : AndroidEvent<Unit>
     data class ShowLaunchingOverlay(val appName: String) : AndroidEvent<Unit>
