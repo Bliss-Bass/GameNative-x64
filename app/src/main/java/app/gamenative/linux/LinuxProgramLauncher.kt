@@ -135,9 +135,10 @@ object LinuxProgramLauncher {
         argv: String,
         cwd: String = GUEST_HOME,
         extraEnv: Map<String, String> = emptyMap(),
+        displaySocketDir: File? = defaultDisplaySocketDir(context),
         onTerminated: ((Int) -> Unit)? = null,
     ): Int {
-        val command = buildCommand(context, argv, cwd, extraEnv)
+        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir)
         Timber.i("[LinuxProgramLauncher]: exec %s", argv)
         return ProcessHelper.exec(
             command,
@@ -145,6 +146,54 @@ object LinuxProgramLauncher {
             LinuxRootfs.rootfsDir(context),
             Callback<Int> { status -> onTerminated?.invoke(status) },
         )
+    }
+
+    /**
+     * Starts [argv] and returns the process, with its output logged under [tag].
+     *
+     * Unlike [exec] this keeps reading the child's pipes, which a long-lived process needs:
+     * nothing drains them otherwise, and a server that logs enough to fill the 64K pipe
+     * buffer would block in write() forever.
+     */
+    fun start(
+        context: Context,
+        argv: String,
+        tag: String,
+        cwd: String = GUEST_HOME,
+        extraEnv: Map<String, String> = emptyMap(),
+        displaySocketDir: File? = defaultDisplaySocketDir(context),
+    ): Process? {
+        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir)
+        Timber.i("[LinuxProgramLauncher]: start %s", argv)
+
+        val process = ProcessHelper.startProcess(
+            command,
+            prootEnv(context).toStringArray(),
+            LinuxRootfs.rootfsDir(context),
+        ) ?: return null
+
+        drain(process.inputStream, tag)
+        drain(process.errorStream, tag)
+        return process
+    }
+
+    /**
+     * The pid behind a [Process]. Android's Process.pid() needs API 33 with desugaring, so
+     * this reads the field the same way [ProcessHelper] does.
+     */
+    fun pidOf(process: Process): Int = runCatching {
+        process.javaClass.getDeclaredField("pid").let { field ->
+            field.isAccessible = true
+            field.getInt(process)
+        }
+    }.getOrDefault(-1)
+
+    private fun drain(stream: java.io.InputStream, tag: String) {
+        Thread({
+            runCatching {
+                stream.bufferedReader().forEachLine { line -> Timber.i("[%s]: %s", tag, line) }
+            }
+        }, "drain-$tag").apply { isDaemon = true }.start()
     }
 
     /** Runs [argv] to completion and returns its combined output. For short commands. */
