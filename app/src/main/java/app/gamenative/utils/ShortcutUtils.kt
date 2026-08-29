@@ -15,6 +15,8 @@ import android.os.Build
 import app.gamenative.MainActivity
 import app.gamenative.R
 import app.gamenative.data.GameSource
+import app.gamenative.linux.LinuxAppIcon
+import app.gamenative.linux.LinuxAppScanner
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
@@ -83,6 +85,57 @@ private fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
     canvas.drawBitmap(src, null, dest, paint)
 
     return outBmp
+}
+
+/**
+ * Offers to pin a launcher shortcut for a Linux application.
+ *
+ * The shortcut carries the command rather than an id, so it keeps working across a rescan and
+ * does not need the catalog to resolve it. Its icon is the entry's own, which is what makes a
+ * pinned Linux app look like any other app on the home screen.
+ */
+internal suspend fun createLinuxAppShortcut(
+    context: Context,
+    app: LinuxAppScanner.LinuxApp,
+) {
+    val appContext = context.applicationContext
+    val shortcutManager = appContext.getSystemService(ShortcutManager::class.java)
+
+    val intent = Intent(MainActivity.ACTION_LINUX_DESKTOP).apply {
+        setClass(appContext, MainActivity::class.java)
+        putExtra(MainActivity.EXTRA_LINUX_ARGV, app.launchArgv)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    }
+
+    val bitmap = withContext(Dispatchers.IO) { LinuxAppIcon.load(appContext, app.iconPath) }
+    val icon: Icon = if (bitmap != null) {
+        val adaptive = createAdaptiveIconBitmap(appContext, bitmap)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Icon.createWithAdaptiveBitmap(adaptive)
+        } else {
+            Icon.createWithBitmap(adaptive)
+        }
+    } else {
+        Icon.createWithResource(appContext, R.mipmap.ic_shortcut_filter)
+    }
+
+    val shortcut = ShortcutInfo.Builder(appContext, "linux_${app.id}")
+        .setShortLabel(app.name)
+        .setLongLabel(app.name)
+        .setIcon(icon)
+        .setIntent(intent)
+        .build()
+
+    withContext(Dispatchers.Main) {
+        if (shortcutManager?.isRequestPinShortcutSupported == true) {
+            shortcutManager.requestPinShortcut(shortcut, null)
+        } else {
+            // No pin dialog on this launcher: a dynamic shortcut at least reaches the long-press
+            // menu on the app's own icon. Capped by the platform, hence the take().
+            val existing = shortcutManager?.dynamicShortcuts?.filterNot { it.id == shortcut.id } ?: emptyList()
+            shortcutManager?.dynamicShortcuts = (existing + shortcut).take(4)
+        }
+    }
 }
 
 internal suspend fun createPinnedShortcut(context: Context, gameId: Int, label: String, gameSource: GameSource, iconUrl: String?) {
