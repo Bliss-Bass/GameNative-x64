@@ -1,0 +1,80 @@
+# Linux apps in GameNative — working notes
+
+Running notes for the Linux userland work. Not a design doc; the plan lives with the task
+list.
+
+## Where the work stands
+
+Committed: PRoot for x86_64, the Ubuntu rootfs installer, the Termux-based terminal
+screen, the graphical session packages (Xtigervnc + openbox + xsettingsd from apt), the
+session manager, the RFB client and presenter, and the Linux desktop screen.
+
+Verified end to end on the tablet: a session comes up on its own display and loopback
+port, the presenter shows it, touch and mouse reach the guest, keystrokes reach it
+(`whoami` typed from Android returned `root` in xterm), and resizing the app's freeform
+window resizes the X screen, with openbox relayouting the client to match.
+
+Remaining from the task list, in order: the app catalog (`.desktop` scanning, a Linux tab,
+launching `Exec=` lines), then the platform-signed helper that installs a stub APK per
+Linux app, then repointing the ROM `linuxwindow` addon and deleting the dead
+Debian/Wayland scaffolding.
+
+## Things that cost time, so they are worth remembering
+
+- **`Socket().apply { connect(InetSocketAddress(host, port), …) }` connects to port 0.**
+  Inside `apply` the receiver is the socket, so `port` means `Socket.getPort()`, which is
+  zero until connected. Resolve the address outside the block.
+- **PRoot's `--link2symlink` corrupts the rootfs.** It writes host-absolute targets into
+  the `.l2s` symlinks it creates, which do not resolve inside the guest; dpkg's
+  unpack-and-rename left `perl` dangling, which broke debconf and every postinst after it.
+  `/data` is ext4 and takes real hardlinks, so the flag is gone. An install made under it
+  cannot be repaired in place -- hence the layout version bump.
+- **`ProcessHelper.exec` never drains the child's pipes.** A server that logs will
+  eventually block in `write()`, and its own account of a failed start is lost. Use
+  `LinuxProgramLauncher.start`, which logs under a tag.
+- **A bare TCP connect is not proof the X server started.** A dying server from an earlier
+  session can still hold the port while the new one, unable to bind, has already exited.
+  Readiness reads the `RFB 003.008` greeting.
+- **`DisposableEffect(session)` tears the session down as it is created**, because
+  assigning the session is itself a key change. Key it on `Unit`.
+- **The window caption covers the top of the surface.** Before the inset fix, xterm's
+  prompt was invisible while everything else rendered, which looked like a decode bug for
+  far too long. A centred marker rectangle showing while a corner one did not is what
+  finally identified it.
+- **xterm takes about five seconds to map.** Sampling the framebuffer before that shows an
+  empty black root and proves nothing.
+
+## Testing notes
+
+- Screenshots from `adb exec-out screencap` are full resolution (2160x1440 here) even
+  though the chat renders them scaled. Tap coordinates must be in device pixels; using
+  coordinates read off the scaled image silently misses the window.
+
+- Injected taps do reach the app once the coordinates are right. Drive the desktop with:
+
+```
+adb shell am start -n app.gamenative/.MainActivity                      # launcher first
+adb shell am start -n app.gamenative/.MainActivity \
+  -a app.gamenative.action.LINUX_DESKTOP --es linux_argv /usr/bin/xterm
+```
+
+  The launcher intent must come first after a force-stop: on a cold start the desktop
+  intent arrives before the UI is listening and is dropped.
+
+- Build and install: `./gradlew :app:assembleModernX64Debug` then
+  `adb install -r app/build/outputs/apk/modernX64/debug/app-modernX64-debug.apk`.
+
+- To check the guest's pixels independently of the presenter, forward the port and grab a
+  frame: `adb forward tcp:15950 tcp:5950`. The throwaway scripts used for this were
+  `/tmp/rfbgrab.py` (one full frame to a PPM) and `/tmp/rfbkey.py` (click, type, report
+  damage); both are small enough to rewrite when needed.
+
+- The rootfs has `xterm`, `x11-apps` and `xfonts-base` installed by hand for testing. A
+  clean install from the app has not been re-validated since the layout bump; the device's
+  version stamp was edited to 4 to keep the repaired userland usable.
+
+- `man-db` still fails to configure under PRoot (`setpriv: initgroups failed`) but no
+  longer blocks anything now that perl works. Worth silencing in the installer.
+
+- Edit source only through the editor's tools. Shell edits (`sed`, heredocs) were silently
+  reverted by stale IDE buffers earlier in this work.
