@@ -90,6 +90,7 @@ import app.gamenative.ui.screen.HomeScreen
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
+import app.gamenative.ui.screen.terminal.TerminalScreen
 import app.gamenative.ui.screen.xserver.XServerScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.LocalSnackbarHostController
@@ -1590,6 +1591,11 @@ fun PluviaMain(
                         onPaletteStyle = viewModel::setPalette,
                         onBack = { navController.navigateUp() },
                     )
+                }
+
+                /** Linux terminal **/
+                composable(route = PluviaScreen.Terminal.route) {
+                    TerminalScreen(onBack = { navController.navigateUp() })
                 }
             }
 

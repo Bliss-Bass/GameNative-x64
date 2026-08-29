@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.R
+import app.gamenative.linux.LinuxRootfs
 import app.gamenative.data.SteamFriend
 import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
@@ -578,6 +580,18 @@ fun SystemMenu(
                             },
                             focusRequester = firstItemFocusRequester,
                         )
+
+                        // x86_64 only: the Linux userland it opens is not built for arm.
+                        if (LinuxRootfs.isSupported()) {
+                            SystemMenuItem(
+                                text = stringResource(R.string.terminal_title),
+                                icon = Icons.Default.Terminal,
+                                onClick = {
+                                    onNavigateRoute(PluviaScreen.Terminal.route)
+                                    onDismiss()
+                                },
+                            )
+                        }
 
                         SystemMenuItem(
                             text = stringResource(R.string.app_downloads),

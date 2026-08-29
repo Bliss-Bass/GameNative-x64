@@ -2,8 +2,8 @@ package app.gamenative.linux
 
 import android.content.Context
 import com.winlator.core.Callback
-import com.winlator.core.envvars.EnvVars
 import com.winlator.core.ProcessHelper
+import com.winlator.core.envvars.EnvVars
 import com.winlator.xenvironment.ImageFs
 import java.io.File
 import timber.log.Timber
@@ -35,11 +35,69 @@ object LinuxProgramLauncher {
         LinuxRootfs.isInstalled(context) && File(nativeLibraryDir(context), PROOT).canExecute()
 
     /**
-     * Builds the command line that runs [argv] in the rootfs.
+     * Builds the full argument vector -- PRoot itself at index 0 -- that runs [guestArgv]
+     * in the rootfs.
      *
      * [displaySocketDir] is bound onto the guest's /tmp/.X11-unix so an X client finds
      * the server at DISPLAY=:0. Stock libX11 does not accept a socket path in DISPLAY,
      * which is why this is a bind rather than an environment variable.
+     */
+    fun buildArgv(
+        context: Context,
+        guestArgv: List<String>,
+        cwd: String = GUEST_HOME,
+        extraEnv: Map<String, String> = emptyMap(),
+        displaySocketDir: File? = defaultDisplaySocketDir(context),
+        extraBinds: List<String> = emptyList(),
+    ): List<String> {
+        val libDir = nativeLibraryDir(context)
+        val rootfs = LinuxRootfs.rootfsDir(context)
+
+        val argv = mutableListOf("$libDir/$PROOT")
+        argv += "--kill-on-exit"
+        // dpkg chowns every file it unpacks, so without fake root apt cannot install
+        // anything -- the feature's whole point.
+        argv += "--root-id"
+        // Debian packages contain hardlinks; PRoot turns them into symlinks it tracks,
+        // which also keeps the rootfs working on filesystems that refuse hardlinks.
+        argv += "--link2symlink"
+        argv += "--rootfs=${rootfs.absolutePath}"
+        argv += "--cwd=$cwd"
+        argv += "--bind=/dev"
+        argv += "--bind=/proc"
+        argv += "--bind=/sys"
+
+        // /dev/shm is absent on Android; a directory in the rootfs stands in for it, which
+        // anything using POSIX shared memory (most toolkits) needs.
+        val shm = File(rootfs, "tmp/shm").apply { mkdirs() }
+        argv += "--bind=${shm.absolutePath}:/dev/shm"
+
+        if (displaySocketDir != null) argv += "--bind=${displaySocketDir.absolutePath}:/tmp/.X11-unix"
+        extraBinds.forEach { argv += "--bind=$it" }
+
+        // env rather than exec'ing the program directly: PRoot passes the host environment
+        // through, and the guest needs a glibc-shaped one.
+        argv += "/usr/bin/env"
+        argv += guestEnv(displaySocketDir != null, extraEnv).map { (key, value) -> "$key=$value" }
+        argv += guestArgv
+        return argv
+    }
+
+    private fun guestEnv(hasDisplay: Boolean, extraEnv: Map<String, String>): Map<String, String> =
+        buildMap {
+            put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            put("HOME", GUEST_HOME)
+            put("TERM", "xterm-256color")
+            put("LANG", "C.UTF-8")
+            // Toolkits refuse to start without a runtime dir and otherwise warn on every launch.
+            put("XDG_RUNTIME_DIR", "/tmp")
+            if (hasDisplay) put("DISPLAY", ":0")
+            putAll(extraEnv)
+        }
+
+    /**
+     * The same thing as a single command string, for [ProcessHelper]. Safe only because
+     * every path involved is under the app's data dir, which contains no spaces.
      */
     fun buildCommand(
         context: Context,
@@ -48,47 +106,15 @@ object LinuxProgramLauncher {
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
-    ): String {
-        val libDir = nativeLibraryDir(context)
-        val rootfs = LinuxRootfs.rootfsDir(context)
-
-        val guestEnv = EnvVars()
-        guestEnv.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-        guestEnv.put("HOME", GUEST_HOME)
-        guestEnv.put("TERM", "xterm-256color")
-        guestEnv.put("LANG", "C.UTF-8")
-        // Toolkits refuse to start without a runtime dir and otherwise warn on every launch.
-        guestEnv.put("XDG_RUNTIME_DIR", "/tmp")
-        if (displaySocketDir != null) guestEnv.put("DISPLAY", ":0")
-        extraEnv.forEach { (key, value) -> guestEnv.put(key, value) }
-
-        val command = StringBuilder("$libDir/$PROOT")
-        command.append(" --kill-on-exit")
-        // dpkg chowns every file it unpacks, so without fake root apt cannot install
-        // anything -- the feature's whole point.
-        command.append(" --root-id")
-        // Debian packages contain hardlinks; PRoot turns them into symlinks it tracks,
-        // which also keeps the rootfs working on filesystems that refuse hardlinks.
-        command.append(" --link2symlink")
-        command.append(" --rootfs=").append(rootfs.absolutePath)
-        command.append(" --cwd=").append(cwd)
-        command.append(" --bind=/dev")
-        command.append(" --bind=/proc")
-        command.append(" --bind=/sys")
-
-        // /dev/shm is absent on Android; a directory in the rootfs stands in for it, which
-        // anything using POSIX shared memory (most toolkits) needs.
-        val shm = File(rootfs, "tmp/shm").apply { mkdirs() }
-        command.append(" --bind=").append(shm.absolutePath).append(":/dev/shm")
-
-        if (displaySocketDir != null) {
-            command.append(" --bind=").append(displaySocketDir.absolutePath).append(":/tmp/.X11-unix")
-        }
-        extraBinds.forEach { command.append(" --bind=").append(it) }
-
-        command.append(" /usr/bin/env ").append(guestEnv.toEscapedString()).append(' ').append(argv)
-        return command.toString()
-    }
+    ): String = buildArgv(
+        context,
+        // Already a shell word list rather than an argv, since ProcessHelper takes a string.
+        listOf(argv),
+        cwd,
+        extraEnv,
+        displaySocketDir,
+        extraBinds,
+    ).joinToString(" ")
 
     /** Environment for the PRoot process itself, as opposed to the guest's. */
     fun prootEnv(context: Context): EnvVars {

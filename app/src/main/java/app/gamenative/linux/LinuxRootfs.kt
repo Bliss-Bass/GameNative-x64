@@ -28,7 +28,7 @@ import timber.log.Timber
 object LinuxRootfs {
 
     /** Bump when the tarball or the post-unpack tweaks below change; forces a re-install. */
-    private const val LAYOUT_VERSION = 1
+    private const val LAYOUT_VERSION = 2
 
     private const val URL =
         "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-amd64.tar.gz"
@@ -203,6 +203,19 @@ object LinuxRootfs {
         return File(rootfs, cleaned)
     }
 
+    /** This process's gids: the real one plus the supplementary groups Android grants. */
+    private fun androidGids(): List<Int> {
+        val supplementary = runCatching {
+            File("/proc/self/status").readLines()
+                .first { it.startsWith("Groups:") }
+                .removePrefix("Groups:")
+                .trim()
+                .split(Regex("\\s+"))
+                .mapNotNull(String::toIntOrNull)
+        }.getOrDefault(emptyList())
+        return (listOf(Os.getgid()) + supplementary).distinct()
+    }
+
     private fun chmod(file: File, mode: Int) {
         runCatching { Os.chmod(file.absolutePath, mode and 0xFFF) }
     }
@@ -227,6 +240,18 @@ object LinuxRootfs {
         val hosts = File(rootfs, "etc/hosts")
         if (!hosts.isFile) {
             hosts.writeText("127.0.0.1 localhost\n::1 localhost\n")
+        }
+
+        // PRoot fakes uid 0 but passes the app's supplementary groups through, and a login
+        // shell prints "cannot find name for group ID" for each one it cannot resolve.
+        // They are the app's own gids, so they are only knowable here, at install time.
+        val group = File(rootfs, "etc/group")
+        if (group.isFile) {
+            val known = group.readLines().mapNotNull { it.split(':').getOrNull(2) }.toSet()
+            val added = androidGids().filterNot { it.toString() in known }
+            if (added.isNotEmpty()) {
+                group.appendText(added.joinToString("") { "android_$it:x:$it:\n" })
+            }
         }
 
         File(rootfs, "etc/apt/apt.conf.d").mkdirs()
