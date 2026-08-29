@@ -2347,8 +2347,10 @@
     <string name="terminal_install">Install</string>
     <string name="terminal_install_rationale">A Linux userland is needed before the terminal can run. Setup downloads roughly 150 MB and uses about 650 MB of app storage.</string>
     <string name="terminal_unsupported_abi">The Linux terminal requires an x86_64 device.</string>
-    <string name="linux_desktop_title">Linux Desktop</string>
-    <string name="linux_desktop_starting">Starting the Linux desktop…</string>
+    <!-- "Session", not "Desktop": what starts is an X server and a window manager, not a
+         desktop environment, and the name should not promise KDE or GNOME. -->
+    <string name="linux_desktop_title">Linux Session</string>
+    <string name="linux_desktop_starting">Starting the Linux session…</string>
     <string name="linux_apps_title">Linux Apps</string>
     <string name="linux_apps_unsupported">Linux apps require an x86_64 device.</string>
     <string name="linux_apps_not_installed">A Linux userland is needed before apps can be installed. Set it up in the Linux terminal, then install apps with apt.</string>
