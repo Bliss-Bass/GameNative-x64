@@ -95,15 +95,28 @@ object LinuxAppStubs {
     }
 
     /**
-     * Asks for [apk] to be installed.
+     * Installs [apk], through the ROM's installer where there is one.
+     *
+     * On our ROM that completes silently. Elsewhere it falls back to asking, which costs the user
+     * the unknown-sources setting, a confirmation and, with Play services present, a Play Protect
+     * scan -- unavoidable for an app that is not part of the system image.
+     */
+    suspend fun install(context: Context, apk: File): Result<Unit> {
+        StubInstallerClient.install(context, apk)?.let { return it }
+
+        Timber.i("[LinuxAppStubs]: no ROM installer, asking the user instead")
+        return requestInstall(context, apk)
+    }
+
+    /**
+     * Asks the user to install [apk].
      *
      * Through a PackageInstaller session rather than by handing the file to a viewer: an intent
      * carrying an APK offers the user a choice of anything that claims the type, which on this
      * device means a file manager or a terminal before the installer. A session names the
-     * installer directly, and it is also what the privileged helper will use -- the same call
-     * completes without a prompt when the caller holds INSTALL_PACKAGES.
+     * installer directly.
      */
-    suspend fun requestInstall(context: Context, apk: File): Result<Unit> = withContext(Dispatchers.IO) {
+    private suspend fun requestInstall(context: Context, apk: File): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -143,8 +156,16 @@ object LinuxAppStubs {
             context.packageManager.getPackageInfo(packageNameFor(app), 0)
         }.isSuccess
 
-    /** Asks for the stub for [app] to be removed. */
-    fun requestUninstall(context: Context, app: LinuxAppScanner.LinuxApp) {
+    /** Removes the stub for [app], through the ROM's installer where there is one. */
+    suspend fun uninstall(context: Context, app: LinuxAppScanner.LinuxApp): Result<Unit> {
+        StubInstallerClient.uninstall(context, packageNameFor(app))?.let { return it }
+
+        requestUninstall(context, app)
+        return Result.success(Unit)
+    }
+
+    /** Asks the user to remove the stub for [app]. */
+    private fun requestUninstall(context: Context, app: LinuxAppScanner.LinuxApp) {
         val intent = Intent(Intent.ACTION_DELETE).apply {
             data = android.net.Uri.parse("package:${packageNameFor(app)}")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

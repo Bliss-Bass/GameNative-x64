@@ -143,7 +143,7 @@ fun LinuxAppsScreen(
  */
 private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp) {
     LinuxAppStubs.build(context, app)
-        .mapCatching { LinuxAppStubs.requestInstall(context, it).getOrThrow() }
+        .mapCatching { LinuxAppStubs.install(context, it).getOrThrow() }
         .onFailure {
             Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
             SnackbarManager.show(context.getString(R.string.linux_apps_drawer_failed, app.name))

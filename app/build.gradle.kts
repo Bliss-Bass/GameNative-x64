@@ -293,6 +293,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // For the ROM stub installer's interface under src/main/aidl, which is a copy of the one
+        // the service is built from: an AIDL interface is a contract, so both sides hold it.
+        aidl = true
         // Exposes the openxr_loader_for_android AAR's native headers/lib to CMake, for the
         // (not yet wired into the default build — see xrimmersive/CMakeLists.txt) immersive
         // VR native module.
