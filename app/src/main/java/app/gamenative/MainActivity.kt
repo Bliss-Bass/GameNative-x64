@@ -382,23 +382,16 @@ class MainActivity : ComponentActivity() {
             val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
             Timber.i("[IntentLaunch]: Linux %s requested (argv=%s)", if (terminal) "terminal" else "desktop", argv)
 
-            if (!isNewIntent) {
-                // Cold start: nothing is collecting yet, and the event bus does not replay,
-                // so emitting here would drop the request. A launcher shortcut always
-                // arrives this way. PluviaMain picks it up once it is composed.
-                setPendingLinuxRequest(PendingLinuxRequest(terminal, argv))
-                return
-            }
-
-            lifecycleScope.launch {
-                // Emitted separately rather than through a shared variable: the event bus
-                // dispatches on the reified type, which a common supertype would lose.
-                if (terminal) {
-                    PluviaApp.events.emit(AndroidEvent.LaunchLinuxTerminal)
-                } else {
-                    PluviaApp.events.emit(AndroidEvent.LaunchLinuxApp(argv))
-                }
-            }
+            // Always recorded, and the event only says one is waiting. The alternative --
+            // carrying the request on the event and recording it only for a cold start -- looks
+            // like it covers both cases and does not: the event bus does not replay, and whether
+            // anything is collecting yet does not follow from this being a new intent. A new
+            // intent can arrive while the activity is still being created, which is what a
+            // launcher shortcut does when its own task is already in recents, and the request
+            // was then dropped. Recording it first means the request survives either way, and is
+            // picked up by whichever of the two runs.
+            setPendingLinuxRequest(PendingLinuxRequest(terminal, argv))
+            lifecycleScope.launch { PluviaApp.events.emit(AndroidEvent.LinuxRequestPending) }
             return
         }
         Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}, isNewIntent=$isNewIntent")

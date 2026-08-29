@@ -23,11 +23,13 @@ interface AndroidEvent<T> : Event<T> {
     data object EndProcess : AndroidEvent<Unit>
     data class ExternalGameLaunch(val appId: String, val bootToContainer: Boolean = false) : AndroidEvent<Unit>
 
-    /** Open the Linux desktop, optionally running [argv] in it. */
-    data class LaunchLinuxApp(val argv: String? = null) : AndroidEvent<Unit>
-
-    /** Open the Linux terminal. */
-    data object LaunchLinuxTerminal : AndroidEvent<Unit>
+    /**
+     * A Linux screen has been asked for by intent.
+     *
+     * Carries nothing: the request itself is held on MainActivity, so it is not lost when this
+     * arrives before anything is collecting.
+     */
+    data object LinuxRequestPending : AndroidEvent<Unit>
     data class PromptSaveContainerConfig(val appId: String) : AndroidEvent<Unit>
     data class ShowGameFeedback(val appId: String) : AndroidEvent<Unit>
     data class ShowLaunchingOverlay(val appName: String) : AndroidEvent<Unit>

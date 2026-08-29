@@ -111,8 +111,7 @@ class MainViewModel @Inject constructor(
         data object OnLoggedOut : MainUiEvent()
         data object LaunchApp : MainUiEvent()
         data class ExternalGameLaunch(val appId: String, val bootToContainer: Boolean = false) : MainUiEvent()
-        data class LaunchLinuxApp(val argv: String?) : MainUiEvent()
-        data object LaunchLinuxTerminal : MainUiEvent()
+        data object LinuxRequestPending : MainUiEvent()
         data class OnLogonEnded(val result: LoginResult) : MainUiEvent()
         data class SteamDisconnected(val isTerminal: Boolean) : MainUiEvent()
         data object ShowDiscordSupportDialog : MainUiEvent()
@@ -252,12 +251,8 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private val onLaunchLinuxApp: (AndroidEvent.LaunchLinuxApp) -> Unit = {
-        viewModelScope.launch { _uiEvent.send(MainUiEvent.LaunchLinuxApp(it.argv)) }
-    }
-
-    private val onLaunchLinuxTerminal: (AndroidEvent.LaunchLinuxTerminal) -> Unit = {
-        viewModelScope.launch { _uiEvent.send(MainUiEvent.LaunchLinuxTerminal) }
+    private val onLinuxRequestPending: (AndroidEvent.LinuxRequestPending) -> Unit = {
+        viewModelScope.launch { _uiEvent.send(MainUiEvent.LinuxRequestPending) }
     }
 
     private val onServiceReady: (AndroidEvent.ServiceReady) -> Unit = {
@@ -310,8 +305,7 @@ class MainViewModel @Inject constructor(
         // Register event handlers
         PluviaApp.events.on<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.on<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
-        PluviaApp.events.on<AndroidEvent.LaunchLinuxApp, Unit>(onLaunchLinuxApp)
-        PluviaApp.events.on<AndroidEvent.LaunchLinuxTerminal, Unit>(onLaunchLinuxTerminal)
+        PluviaApp.events.on<AndroidEvent.LinuxRequestPending, Unit>(onLinuxRequestPending)
         PluviaApp.events.on<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.on<AndroidEvent.ClearBootingSplash, Unit>(onClearBootingSplash)
         PluviaApp.events.on<SteamEvent.Connected, Unit>(onSteamConnected)
@@ -339,8 +333,7 @@ class MainViewModel @Inject constructor(
     override fun onCleared() {
         PluviaApp.events.off<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.off<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
-        PluviaApp.events.off<AndroidEvent.LaunchLinuxApp, Unit>(onLaunchLinuxApp)
-        PluviaApp.events.off<AndroidEvent.LaunchLinuxTerminal, Unit>(onLaunchLinuxTerminal)
+        PluviaApp.events.off<AndroidEvent.LinuxRequestPending, Unit>(onLinuxRequestPending)
         PluviaApp.events.off<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.off<AndroidEvent.ClearBootingSplash, Unit>(onClearBootingSplash)
         PluviaApp.events.off<SteamEvent.Connected, Unit>(onSteamConnected)

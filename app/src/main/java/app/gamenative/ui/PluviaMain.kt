@@ -160,6 +160,23 @@ private fun NavHostController.navigateFromLoginIfNeeded(
 }
 
 /**
+ * Opens whichever Linux screen was asked for by intent, if one was.
+ *
+ * Called both when this screen first composes and when the event says a request arrived, because
+ * an intent can land on either side of the UI being ready. Consuming the request is what keeps
+ * the two from acting on it twice.
+ */
+private fun NavHostController.navigateToPendingLinuxRequest() {
+    val request = MainActivity.consumePendingLinuxRequest() ?: return
+    Timber.i("[PluviaMain]: Opening Linux %s", if (request.terminal) "terminal" else "session")
+    if (request.terminal) {
+        navigate(PluviaScreen.Terminal.route)
+    } else {
+        navigate(PluviaScreen.LinuxDesktop.route(request.argv))
+    }
+}
+
+/**
  * Goes back only if [entry] is still the screen on top.
  *
  * A screen that tears something down when it leaves composition reports that teardown
@@ -423,16 +440,10 @@ fun PluviaMain(
     }
 
     // Same for a Linux screen requested by intent, which needs neither Steam nor a running
-    // service and so has nothing to wait for beyond this point.
+    // service and so has nothing to wait for beyond this point. The request may also arrive
+    // while this is already composed, which the event handles; whichever runs first takes it.
     LaunchedEffect(Unit) {
-        MainActivity.consumePendingLinuxRequest()?.let { request ->
-            Timber.i("[PluviaMain]: Processing pending Linux request (terminal=${request.terminal})")
-            if (request.terminal) {
-                navController.navigate(PluviaScreen.Terminal.route)
-            } else {
-                navController.navigate(PluviaScreen.LinuxDesktop.route(request.argv))
-            }
-        }
+        navController.navigateToPendingLinuxRequest()
     }
 
     // process pending launch request from cold start (event bus has no replay)
@@ -539,12 +550,8 @@ fun PluviaMain(
                     navController.navigate(PluviaScreen.XServer.route)
                 }
 
-                is MainViewModel.MainUiEvent.LaunchLinuxApp -> {
-                    navController.navigate(PluviaScreen.LinuxDesktop.route(event.argv))
-                }
-
-                MainViewModel.MainUiEvent.LaunchLinuxTerminal -> {
-                    navController.navigate(PluviaScreen.Terminal.route)
+                MainViewModel.MainUiEvent.LinuxRequestPending -> {
+                    navController.navigateToPendingLinuxRequest()
                 }
 
                 is MainViewModel.MainUiEvent.ExternalGameLaunch -> {
