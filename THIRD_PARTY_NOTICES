@@ -342,6 +342,43 @@ for more details.
 
 Full license text: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
 
+## PRoot
+
+**Component:** `libproot-linux.so`, `libproot-linux-loader.so`
+**Location:** `app/src/modernX64/jniLibs/x86_64/`
+**Upstream:** https://github.com/termux/proot (tag `v5.1.107.76`)
+**License:** GPL-2.0-or-later
+
+PRoot provides the unprivileged Linux userland behind the Linux terminal and Linux
+apps features: it runs a glibc rootfs under ptrace, without root and without kernel
+namespaces. The binaries are built from unmodified upstream sources at the tag above
+by `scripts/build-x86_64-proot-linux.sh`, which also records the one local change it
+applies (an added `<string.h>` include that bionic, unlike glibc, does not supply
+transitively). Corresponding source is available from upstream at that tag, and on
+request under the blanket offer above.
+
+A separate, older fork of PRoot is vendored as source under
+`app/src/main/cpp/proot` and is not built or shipped.
+
+It links **libtalloc** (https://talloc.samba.org, LGPL-3.0-or-later), built from the
+unmodified 2.4.2 release tarball by the same script.
+
+## Termux terminal emulator and view
+
+**Component:** `com.termux.terminal.*`, `com.termux.view.*`, `libtermux.so`
+**Location:** `app/src/main/java/com/termux/`, `app/src/main/cpp/termux-pty/`,
+`app/src/modernX64/jniLibs/x86_64/libtermux.so`
+**Upstream:** https://github.com/termux/termux-app (tag `v0.118.3`), modules
+`terminal-emulator` and `terminal-view`
+**License:** Apache-2.0
+
+The terminal escape-sequence parser, the view that draws it, and the JNI pty helper
+are vendored as source rather than taken as a dependency, because upstream does not
+publish these modules to Maven Central. Local changes are limited to repointing two
+`R` imports at this application's resource namespace, and replacing upstream's
+`Android.mk` for the pty helper with a CMake file; the two drawables and three strings
+the view needs were copied into `app/src/main/res`.
+
 ## Achievement Sound
 
 "Achievement sound from [Pixabay](https://pixabay.com), [Pixabay Content License](https://pixabay.com/service/license-summary/).
