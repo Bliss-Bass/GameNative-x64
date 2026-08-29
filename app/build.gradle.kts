@@ -268,7 +268,9 @@ android {
             all {
                 // Lets a test write an artefact out for inspection by tooling that a unit test
                 // cannot stand in for, such as aapt2 over a generated APK.
-                it.systemProperty("stubapk.out", System.getProperty("stubapk.out") ?: "")
+                for (property in listOf("stubapk.out", "stubapk.signed.out")) {
+                    it.systemProperty(property, System.getProperty(property) ?: "")
+                }
             }
         }
     }
