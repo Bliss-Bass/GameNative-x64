@@ -47,19 +47,26 @@ Debian/Wayland scaffolding.
 ## Testing notes
 
 - Screenshots from `adb exec-out screencap` are full resolution (2160x1440 here) even
-  though the chat renders them scaled. Tap coordinates must be in device pixels; using
-  coordinates read off the scaled image silently misses the window.
+  though the chat renders them about 1024 wide. Read coordinates off a 1024-wide preview
+  and multiply by 2.109; assuming the preview matches whatever width the file was resized
+  to puts every tap ~5% off, which still hits wide text buttons and reliably misses icon
+  buttons, so it looks like the app ignoring input rather than a bad aim.
 
 - Injected taps do reach the app once the coordinates are right. Drive the desktop with:
 
 ```
 adb shell am start -n app.gamenative/.MainActivity                      # launcher first
 adb shell am start -n app.gamenative/.MainActivity \
-  -a app.gamenative.action.LINUX_DESKTOP --es linux_argv /usr/bin/xterm
+  -a app.gamenative.action.LINUX_DESKTOP --es linux_argv xterm
+adb shell am start -n app.gamenative/.MainActivity \
+  -a app.gamenative.action.LINUX_TERMINAL
 ```
 
-  The launcher intent must come first after a force-stop: on a cold start the desktop
-  intent arrives before the UI is listening and is dropped.
+  The launcher intent must come first after a force-stop. That is a bug, not just a testing
+  quirk: on a cold start the Linux intents are emitted before the UI collector registers and
+  are dropped, and a launcher shortcut always cold-starts. `MainActivity` already holds a
+  `pendingLaunchRequest` for game launches for this reason, and the Linux actions bypass it.
+  Launching the desktop over an already-open terminal also pops back after ~20s.
 
 - Build and install: `./gradlew :app:assembleModernX64Debug` then
   `adb install -r app/build/outputs/apk/modernX64/debug/app-modernX64-debug.apk`.
@@ -69,12 +76,18 @@ adb shell am start -n app.gamenative/.MainActivity \
   `/tmp/rfbgrab.py` (one full frame to a PPM) and `/tmp/rfbkey.py` (click, type, report
   damage); both are small enough to rewrite when needed.
 
-- The rootfs has `xterm`, `x11-apps` and `xfonts-base` installed by hand for testing. A
-  clean install from the app has not been re-validated since the layout bump; the device's
-  version stamp was edited to 4 to keep the repaired userland usable.
+- A clean install has been re-validated from a wiped userland: download, unpack, apt, and a
+  live prompt, with `perl` a real hardlink, no `.l2s` leftovers, and no half-configured
+  packages. `man-db` is silent now that its index rebuild is preseeded off -- the postinst
+  drops privileges with `setpriv`, which PRoot's fake root cannot do.
 
-- `man-db` still fails to configure under PRoot (`setpriv: initgroups failed`) but no
-  longer blocks anything now that perl works. Worth silencing in the installer.
+- `xterm` and the fonts are shipped rather than installed by hand, and a userland missing
+  them is repaired in place instead of re-downloaded, so the package list can grow without
+  a layout bump. The session's config files are rewritten on every start for the same
+  reason.
+
+- The X server is told the panel's density. Without it every Xft client draws at about half
+  size, and xterm ignores dpi entirely until a scalable font is named in `~/.Xdefaults`.
 
 - Edit source only through the editor's tools. Shell edits (`sed`, heredocs) were silently
   reverted by stale IDE buffers earlier in this work.
