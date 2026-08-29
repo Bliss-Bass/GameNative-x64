@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -154,6 +155,21 @@ private fun NavHostController.navigateFromLoginIfNeeded(
                 inclusive = true
             }
         }
+    }
+}
+
+/**
+ * Goes back only if [entry] is still the screen on top.
+ *
+ * A screen that tears something down when it leaves composition reports that teardown
+ * through its exit callback, which arrives after whatever replaced it is already showing.
+ * An unguarded [navigateUp] would then pop the new screen instead.
+ */
+private fun NavHostController.navigateUpFrom(entry: NavBackStackEntry) {
+    if (currentBackStackEntry?.id == entry.id) {
+        navigateUp()
+    } else {
+        Timber.d("[PluviaMain]: ignoring exit from %s, no longer on top", entry.destination.route)
     }
 }
 
@@ -401,6 +417,19 @@ fun PluviaMain(
                     isOffline = isOffline,
                     bootToContainer = bootToContainer,
                 )
+            }
+        }
+    }
+
+    // Same for a Linux screen requested by intent, which needs neither Steam nor a running
+    // service and so has nothing to wait for beyond this point.
+    LaunchedEffect(Unit) {
+        MainActivity.consumePendingLinuxRequest()?.let { request ->
+            Timber.i("[PluviaMain]: Processing pending Linux request (terminal=${request.terminal})")
+            if (request.terminal) {
+                navController.navigate(PluviaScreen.Terminal.route)
+            } else {
+                navController.navigate(PluviaScreen.LinuxDesktop.route(request.argv))
             }
         }
     }
@@ -1603,8 +1632,10 @@ fun PluviaMain(
                 }
 
                 /** Linux terminal **/
-                composable(route = PluviaScreen.Terminal.route) {
-                    TerminalScreen(onBack = { navController.navigateUp() })
+                composable(route = PluviaScreen.Terminal.route) { entry ->
+                    // Guarded because the shell dies when this screen leaves composition,
+                    // and the resulting callback would otherwise pop whatever replaced it.
+                    TerminalScreen(onBack = { navController.navigateUpFrom(entry) })
                 }
 
                 /** Linux graphical session **/
@@ -1620,7 +1651,7 @@ fun PluviaMain(
                 ) { entry ->
                     LinuxDesktopScreen(
                         argv = entry.arguments?.getString(PluviaScreen.LinuxDesktop.ARG_ARGV),
-                        onExit = { navController.navigateUp() },
+                        onExit = { navController.navigateUpFrom(entry) },
                     )
                 }
             }

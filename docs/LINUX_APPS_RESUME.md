@@ -55,18 +55,22 @@ Debian/Wayland scaffolding.
 - Injected taps do reach the app once the coordinates are right. Drive the desktop with:
 
 ```
-adb shell am start -n app.gamenative/.MainActivity                      # launcher first
 adb shell am start -n app.gamenative/.MainActivity \
   -a app.gamenative.action.LINUX_DESKTOP --es linux_argv xterm
 adb shell am start -n app.gamenative/.MainActivity \
   -a app.gamenative.action.LINUX_TERMINAL
 ```
 
-  The launcher intent must come first after a force-stop. That is a bug, not just a testing
-  quirk: on a cold start the Linux intents are emitted before the UI collector registers and
-  are dropped, and a launcher shortcut always cold-starts. `MainActivity` already holds a
-  `pendingLaunchRequest` for game launches for this reason, and the Linux actions bypass it.
-  Launching the desktop over an already-open terminal also pops back after ~20s.
+  Either works from a cold start now: the request is held and replayed once the UI is
+  composed, the way game launches already were. Before that it was emitted into an event bus
+  nobody was collecting from yet and silently dropped, which a launcher shortcut would have
+  hit every time.
+
+- A screen that tears something down on leaving composition reports it through its exit
+  callback, which arrives after its replacement is showing. That is what popped the desktop
+  ~20s after launching it over an open terminal: the terminal's shell died, and its `onBack`
+  called `navigateUp` on whatever was now on top. Exit callbacks go through
+  `navigateUpFrom(entry)`, which pops only while that entry is still current.
 
 - Build and install: `./gradlew :app:assembleModernX64Debug` then
   `adb install -r app/build/outputs/apk/modernX64/debug/app-modernX64-debug.apk`.

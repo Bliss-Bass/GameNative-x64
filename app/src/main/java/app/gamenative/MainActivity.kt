@@ -97,6 +97,20 @@ class MainActivity : ComponentActivity() {
         /** Opens the Linux terminal, which is also where the userland is installed from. */
         const val ACTION_LINUX_TERMINAL = "app.gamenative.action.LINUX_TERMINAL"
 
+        /** A Linux screen asked for by intent, held until the UI can act on it. */
+        data class PendingLinuxRequest(val terminal: Boolean, val argv: String?)
+
+        @Volatile
+        private var pendingLinuxRequest: PendingLinuxRequest? = null
+
+        fun setPendingLinuxRequest(request: PendingLinuxRequest) {
+            synchronized(this) { pendingLinuxRequest = request }
+        }
+
+        fun consumePendingLinuxRequest(): PendingLinuxRequest? = synchronized(this) {
+            pendingLinuxRequest.also { pendingLinuxRequest = null }
+        }
+
         // Store pending launch request to be processed after UI is ready
         @Volatile
         private var pendingLaunchRequest: IntentLaunchManager.LaunchRequest? = null
@@ -367,6 +381,15 @@ class MainActivity : ComponentActivity() {
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
             val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
             Timber.i("[IntentLaunch]: Linux %s requested (argv=%s)", if (terminal) "terminal" else "desktop", argv)
+
+            if (!isNewIntent) {
+                // Cold start: nothing is collecting yet, and the event bus does not replay,
+                // so emitting here would drop the request. A launcher shortcut always
+                // arrives this way. PluviaMain picks it up once it is composed.
+                setPendingLinuxRequest(PendingLinuxRequest(terminal, argv))
+                return
+            }
+
             lifecycleScope.launch {
                 // Emitted separately rather than through a shared variable: the event bus
                 // dispatches on the reified type, which a common supertype would lose.
