@@ -151,9 +151,10 @@ object LinuxProgramLauncher {
         context: Context,
         argv: String,
         cwd: String = GUEST_HOME,
+        extraEnv: Map<String, String> = emptyMap(),
         timeoutSeconds: Int = 30,
     ): String = ProcessHelper.execWithOutput(
-        buildCommand(context, argv, cwd),
+        buildCommand(context, argv, cwd, extraEnv),
         prootEnv(context).toStringArray(),
         LinuxRootfs.rootfsDir(context),
         true,

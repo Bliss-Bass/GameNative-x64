@@ -28,7 +28,44 @@ import timber.log.Timber
 object LinuxRootfs {
 
     /** Bump when the tarball or the post-unpack tweaks below change; forces a re-install. */
-    private const val LAYOUT_VERSION = 2
+    private const val LAYOUT_VERSION = 3
+
+    /**
+     * What the graphical session is built from. All of it comes from apt, which is the
+     * point of running a glibc userland: none of it has to be cross-compiled for bionic.
+     *
+     * - Xtigervnc is the X server and the RFB server in one process, so damage arrives as
+     *   the server generates it rather than through a polling screen-scraper, and the
+     *   screen can be resized at runtime -- neither of which Xvfb plus x11vnc can do.
+     * - openbox is what makes a resize reach the application: X clients do not resize
+     *   because the screen did, they resize when a window manager configures them.
+     * - xsettingsd carries DPI changes into running GTK and Qt apps, which otherwise read
+     *   it once at startup.
+     */
+    private val DISPLAY_PACKAGES = listOf(
+        "tigervnc-standalone-server",
+        "openbox",
+        "xsettingsd",
+    )
+
+    /**
+     * What apt needs to know it is running unattended.
+     *
+     * Without a frontend that never asks questions, a package whose postinst consults
+     * debconf blocks forever: there is no terminal behind this, so the prompt is invisible
+     * and unanswerable.
+     */
+    private val APT_ENV = mapOf(
+        "DEBIAN_FRONTEND" to "noninteractive",
+        "DEBCONF_NONINTERACTIVE_SEEN" to "true",
+    )
+
+    /** Proof the packages above landed, checked instead of parsing apt's output. */
+    private val DISPLAY_BINARIES = listOf(
+        "usr/bin/Xtigervnc",
+        "usr/bin/openbox",
+        "usr/bin/xsettingsd",
+    )
 
     private const val URL =
         "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-amd64.tar.gz"
@@ -52,6 +89,10 @@ object LinuxRootfs {
     fun isInstalled(context: Context): Boolean =
         stampFile(context).takeIf { it.isFile }?.readText()?.trim() == LAYOUT_VERSION.toString() &&
             File(rootfsDir(context), "bin/bash").exists()
+
+    /** Whether the graphical session can be started, as opposed to just a shell. */
+    fun hasDisplaySession(context: Context): Boolean =
+        DISPLAY_BINARIES.all { File(rootfsDir(context), it).exists() }
 
     /**
      * Fetches and unpacks the rootfs, replacing any existing one. Safe to re-run: the
@@ -83,8 +124,11 @@ object LinuxRootfs {
 
                 prepare(rootfs)
 
-                // Keep the download only if space is plentiful; it is easy to re-fetch.
+                // Freed before apt runs: the packages below need the space more than a
+                // tarball that is easy to fetch again.
                 tarball.delete()
+
+                installDisplaySession(context, rootfs, onProgress)
 
                 stampFile(context).writeText(LAYOUT_VERSION.toString())
                 Timber.i("[LinuxRootfs]: installed to %s", rootfs)
@@ -203,6 +247,108 @@ object LinuxRootfs {
         return File(rootfs, cleaned)
     }
 
+    /**
+     * Installs and configures the graphical session with apt.
+     *
+     * Done here, while the user is already waiting on a progress bar, rather than on the
+     * first launch of a Linux app: it needs the network either way, and the alternative is
+     * a surprise download at the moment someone taps an icon. The version stamp covers it,
+     * so "installed" stays a single question.
+     */
+    private fun installDisplaySession(context: Context, rootfs: File, onProgress: (Progress) -> Unit) {
+        onProgress(Progress("Fetching package lists", -1f))
+        // The base image ships no package lists at all, so this is not optional.
+        val update = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get update",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: apt-get update:\n%s", update.takeLast(2000))
+
+        onProgress(Progress("Installing the graphical session", -1f))
+        val install = LinuxProgramLauncher.runWithOutput(
+            context,
+            // Use-Pty=0 because there is no terminal here: with it on, dpkg tries to
+            // allocate one and the install stops dead, waiting on a prompt nobody can see.
+            "apt-get install -y -o Dpkg::Use-Pty=0 " + DISPLAY_PACKAGES.joinToString(" "),
+            extraEnv = APT_ENV,
+            timeoutSeconds = 1800,
+        )
+        Timber.i("[LinuxRootfs]: apt-get install:\n%s", install.takeLast(4000))
+
+        // The .debs are no use once unpacked, and this reclaims a hundred megabytes or so
+        // of the app's storage.
+        LinuxProgramLauncher.runWithOutput(context, "apt-get clean", extraEnv = APT_ENV, timeoutSeconds = 120)
+
+        val missing = DISPLAY_BINARIES.filterNot { File(rootfs, it).exists() }
+        if (missing.isNotEmpty()) {
+            throw IOException("Graphical session install incomplete, missing: ${missing.joinToString()}")
+        }
+
+        configureWindowManager(rootfs)
+        writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
+    }
+
+    /**
+     * Openbox, told to fill the screen and draw nothing of its own.
+     *
+     * Maximized so that a window follows the desktop when Android resizes it, and
+     * undecorated because a title bar inside an Android window is a second set of controls
+     * for the same window. Apps that draw their own decorations still show theirs.
+     */
+    private fun configureWindowManager(rootfs: File) {
+        val stock = File(rootfs, "etc/xdg/openbox/rc.xml")
+        val target = File(rootfs, "root/.config/openbox/rc.xml").apply { parentFile?.mkdirs() }
+        if (!stock.isFile) {
+            Timber.w("[LinuxRootfs]: no stock openbox rc.xml; leaving defaults")
+            return
+        }
+
+        val rule = """
+            <applications>
+              <application class="*">
+                <maximized>yes</maximized>
+                <decor>no</decor>
+              </application>
+        """.trimIndent() + "\n"
+
+        val text = stock.readText()
+        // Amending the shipped file rather than writing one: rc.xml carries keybindings and
+        // theme defaults that openbox needs, and a hand-written minimal one loses them.
+        target.writeText(
+            if (text.contains("<applications>")) {
+                text.replaceFirst("<applications>", rule)
+            } else {
+                Timber.w("[LinuxRootfs]: openbox rc.xml has no <applications> section")
+                text
+            },
+        )
+    }
+
+    /**
+     * Default XSETTINGS, so text is the right physical size on a dense screen.
+     *
+     * X clients assume 96 DPI and would draw at about half size on this hardware. Android's
+     * densityDpi is a bucketed approximation of the panel's real density, which is close
+     * enough for type; the session rewrites this file and signals xsettingsd if the density
+     * ever changes under it.
+     */
+    private fun writeXsettings(rootfs: File, densityDpi: Int) {
+        val dpi = densityDpi.coerceIn(96, 400)
+        File(rootfs, "root/.xsettingsd").writeText(
+            """
+            Xft/DPI ${dpi * 1024}
+            Xft/Antialias 1
+            Xft/Hinting 1
+            Xft/HintStyle "hintslight"
+            Xft/RGBA "rgb"
+            Gdk/WindowScalingFactor 1
+            """.trimIndent() + "\n",
+        )
+        Timber.i("[LinuxRootfs]: xsettingsd configured for %d dpi", dpi)
+    }
+
     /** This process's gids: the real one plus the supplementary groups Android grants. */
     private fun androidGids(): List<Int> {
         val supplementary = runCatching {
@@ -221,8 +367,10 @@ object LinuxRootfs {
     }
 
     /**
-     * Post-unpack tweaks that make the userland usable: name resolution, and letting apt
-     * run as root instead of dropping to the _apt user, which it cannot do under PRoot.
+     * Post-unpack tweaks that make the userland usable: name resolution, letting apt run as
+     * root instead of dropping to the _apt user (which it cannot do under PRoot), and
+     * skipping translated package descriptions, which are 400MB of this device's storage
+     * for text nothing here ever displays.
      */
     private fun prepare(rootfs: File) {
         File(rootfs, "etc").mkdirs()
@@ -259,6 +407,7 @@ object LinuxRootfs {
             """
             APT::Sandbox::User "root";
             APT::Install-Recommends "false";
+            Acquire::Languages "none";
             """.trimIndent() + "\n",
         )
 
