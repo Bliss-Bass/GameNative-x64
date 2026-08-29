@@ -58,9 +58,10 @@ object LinuxProgramLauncher {
         // dpkg chowns every file it unpacks, so without fake root apt cannot install
         // anything -- the feature's whole point.
         argv += "--root-id"
-        // Debian packages contain hardlinks; PRoot turns them into symlinks it tracks,
-        // which also keeps the rootfs working on filesystems that refuse hardlinks.
-        argv += "--link2symlink"
+        // Deliberately no --link2symlink: /data is ext4 and takes hardlinks, and PRoot's
+        // emulation writes host-absolute targets into the .l2s symlinks it creates, which
+        // do not resolve from inside the guest. dpkg's unpack-and-rename left perl -- and
+        // so debconf, and so every package with a postinst -- pointing at nothing.
         argv += "--rootfs=${rootfs.absolutePath}"
         argv += "--cwd=$cwd"
         argv += "--bind=/dev"

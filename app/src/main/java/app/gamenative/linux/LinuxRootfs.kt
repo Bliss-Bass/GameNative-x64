@@ -28,7 +28,9 @@ import timber.log.Timber
 object LinuxRootfs {
 
     /** Bump when the tarball or the post-unpack tweaks below change; forces a re-install. */
-    private const val LAYOUT_VERSION = 3
+    // 4: installed without PRoot's --link2symlink, which had left .l2s symlinks pointing at
+    // host paths the guest cannot resolve; an install made under it has a broken perl.
+    private const val LAYOUT_VERSION = 4
 
     /**
      * What the graphical session is built from. All of it comes from apt, which is the
