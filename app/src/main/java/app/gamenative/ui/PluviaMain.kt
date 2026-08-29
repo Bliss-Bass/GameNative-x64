@@ -88,6 +88,7 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.HomeScreen
 import app.gamenative.ui.screen.PluviaScreen
+import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
 import app.gamenative.ui.screen.terminal.TerminalScreen
@@ -506,6 +507,10 @@ fun PluviaMain(
             when (event) {
                 MainViewModel.MainUiEvent.LaunchApp -> {
                     navController.navigate(PluviaScreen.XServer.route)
+                }
+
+                is MainViewModel.MainUiEvent.LaunchLinuxApp -> {
+                    navController.navigate(PluviaScreen.LinuxDesktop.route(event.argv))
                 }
 
                 is MainViewModel.MainUiEvent.ExternalGameLaunch -> {
@@ -1596,6 +1601,23 @@ fun PluviaMain(
                 /** Linux terminal **/
                 composable(route = PluviaScreen.Terminal.route) {
                     TerminalScreen(onBack = { navController.navigateUp() })
+                }
+
+                /** Linux graphical session **/
+                composable(
+                    route = PluviaScreen.LinuxDesktop.route,
+                    arguments = listOf(
+                        navArgument(PluviaScreen.LinuxDesktop.ARG_ARGV) {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                    ),
+                ) { entry ->
+                    LinuxDesktopScreen(
+                        argv = entry.arguments?.getString(PluviaScreen.LinuxDesktop.ARG_ARGV),
+                        onExit = { navController.navigateUp() },
+                    )
                 }
             }
 

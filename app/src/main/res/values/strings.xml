@@ -2347,6 +2347,8 @@
     <string name="terminal_install">Install</string>
     <string name="terminal_install_rationale">A Linux userland is needed before the terminal can run. Setup downloads roughly 150 MB and uses about 650 MB of app storage.</string>
     <string name="terminal_unsupported_abi">The Linux terminal requires an x86_64 device.</string>
+    <string name="linux_desktop_title">Linux Desktop</string>
+    <string name="linux_desktop_starting">Starting the Linux desktop…</string>
 
     <!-- Text selection in the vendored Termux terminal view (com.termux.view). -->
     <string name="copy_text">Copy</string>

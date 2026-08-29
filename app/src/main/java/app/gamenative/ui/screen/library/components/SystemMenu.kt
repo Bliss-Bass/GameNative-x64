@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.StarHalf
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -588,6 +589,15 @@ fun SystemMenu(
                                 icon = Icons.Default.Terminal,
                                 onClick = {
                                     onNavigateRoute(PluviaScreen.Terminal.route)
+                                    onDismiss()
+                                },
+                            )
+
+                            SystemMenuItem(
+                                text = stringResource(R.string.linux_desktop_title),
+                                icon = Icons.Default.DesktopWindows,
+                                onClick = {
+                                    onNavigateRoute(PluviaScreen.LinuxDesktop.route)
                                     onDismiss()
                                 },
                             )

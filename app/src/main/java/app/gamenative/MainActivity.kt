@@ -90,6 +90,10 @@ class MainActivity : ComponentActivity() {
                 Build.MANUFACTURER.equals("Meta", true) ||
                 Build.BRAND.equals("oculus", true)
 
+        /** Opens the Linux desktop, with an optional [EXTRA_LINUX_ARGV] command to run in it. */
+        const val ACTION_LINUX_DESKTOP = "app.gamenative.action.LINUX_DESKTOP"
+        const val EXTRA_LINUX_ARGV = "linux_argv"
+
         // Store pending launch request to be processed after UI is ready
         @Volatile
         private var pendingLaunchRequest: IntentLaunchManager.LaunchRequest? = null
@@ -351,6 +355,15 @@ class MainActivity : ComponentActivity() {
                 Timber.w("[NexusDownload]: Ignoring malformed or unsigned NXM callback")
                 SnackbarManager.show(getString(R.string.nexus_invalid_nxm_callback))
             }
+            return
+        }
+        if (intent.action == ACTION_LINUX_DESKTOP) {
+            // Not a game launch, so it skips IntentLaunchManager entirely. This is also the
+            // entry point a per-app launcher shortcut uses.
+            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+            val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
+            Timber.i("[IntentLaunch]: Linux desktop requested (argv=%s)", argv)
+            lifecycleScope.launch { PluviaApp.events.emit(AndroidEvent.LaunchLinuxApp(argv)) }
             return
         }
         Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}, isNewIntent=$isNewIntent")
