@@ -61,6 +61,11 @@ object LinuxAppScanner {
          * something readable and stable is needed, such as a generated package name.
          */
         val entryId: String,
+        /**
+         * Guest-absolute path of the entry this came from. Linux desktop components take a
+         * `.desktop` path rather than a command, and this is what we hand them.
+         */
+        val desktopFile: String,
         val name: String,
         /** Command to run, field codes already removed. */
         val exec: String,
@@ -93,7 +98,11 @@ object LinuxAppScanner {
                 val app = runCatching { parse(file.readText(), rootfs) }
                     .onFailure { Timber.w(it, "[LinuxAppScanner]: could not read %s", file.name) }
                             .getOrNull() ?: continue
-                        found[file.name] = app.copy(id = idFor(file.name), entryId = file.nameWithoutExtension)
+                        found[file.name] = app.copy(
+                            id = idFor(file.name),
+                            entryId = file.nameWithoutExtension,
+                            desktopFile = "/$dir/${file.name}",
+                        )
             }
         }
 
@@ -142,9 +151,10 @@ object LinuxAppScanner {
         }
 
         return LinuxApp(
-            // Both assigned by the caller, which is what knows the file name.
+            // All assigned by the caller, which is what knows the file.
             id = 0,
             entryId = "",
+            desktopFile = "",
             name = name,
             exec = exec,
             iconPath = values["Icon"]?.let { resolveIcon(rootfs, it) },

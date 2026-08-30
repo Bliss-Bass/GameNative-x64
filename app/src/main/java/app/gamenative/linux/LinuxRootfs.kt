@@ -45,6 +45,10 @@ object LinuxRootfs {
      *   it once at startup.
      * - xterm is what openbox's root menu means by a terminal, and without it the desktop
      *   opens onto a background with no way to start anything from inside it.
+     * - tint2 is the desktop session's panel. Openbox has no panel of its own, and a root
+     *   menu alone means a long press for everything on a screen with no right button.
+     * - x11-xserver-utils is here for xsetroot, which paints the root window: the X server's
+     *   own default is a black-and-white weave from the 1980s.
      * - The font packages are not optional here: Recommends are off, so nothing else pulls
      *   them in, and both a bitmap font for xterm and a scalable one for everything that
      *   draws through Xft have to be present or clients fail to start on a missing font.
@@ -54,6 +58,8 @@ object LinuxRootfs {
         "openbox",
         "xsettingsd",
         "xterm",
+        "tint2",
+        "x11-xserver-utils",
         "xfonts-base",
         "fonts-dejavu-core",
     )
@@ -79,6 +85,8 @@ object LinuxRootfs {
         "usr/bin/openbox",
         "usr/bin/xsettingsd",
         "usr/bin/xterm",
+        "usr/bin/tint2",
+        "usr/bin/xsetroot",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 
@@ -353,45 +361,9 @@ object LinuxRootfs {
 
     /** The session's configuration files, all of which are safe to rewrite. */
     private fun configureSession(context: Context, rootfs: File) {
-        configureWindowManager(rootfs)
+        LinuxDesktopConfig.writeWindowManagerConfigs(rootfs)
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
         writeXdefaults(rootfs)
-    }
-
-    /**
-     * Openbox, told to fill the screen and draw nothing of its own.
-     *
-     * Maximized so that a window follows the desktop when Android resizes it, and
-     * undecorated because a title bar inside an Android window is a second set of controls
-     * for the same window. Apps that draw their own decorations still show theirs.
-     */
-    private fun configureWindowManager(rootfs: File) {
-        val stock = File(rootfs, "etc/xdg/openbox/rc.xml")
-        val target = File(rootfs, "root/.config/openbox/rc.xml").apply { parentFile?.mkdirs() }
-        if (!stock.isFile) {
-            Timber.w("[LinuxRootfs]: no stock openbox rc.xml; leaving defaults")
-            return
-        }
-
-        val rule = """
-            <applications>
-              <application class="*">
-                <maximized>yes</maximized>
-                <decor>no</decor>
-              </application>
-        """.trimIndent() + "\n"
-
-        val text = stock.readText()
-        // Amending the shipped file rather than writing one: rc.xml carries keybindings and
-        // theme defaults that openbox needs, and a hand-written minimal one loses them.
-        target.writeText(
-            if (text.contains("<applications>")) {
-                text.replaceFirst("<applications>", rule)
-            } else {
-                Timber.w("[LinuxRootfs]: openbox rc.xml has no <applications> section")
-                text
-            },
-        )
     }
 
     /**

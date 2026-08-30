@@ -4,13 +4,16 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.view.HapticFeedbackConstants
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.ViewConfiguration
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import timber.log.Timber
 
@@ -272,14 +275,61 @@ class RfbView(
                 // was before.
                 submit(InputEvent.Pointer(x, y, 0, coalescable = false))
                 submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
+                scheduleRightClick(x, y, event.x, event.y)
             }
-            MotionEvent.ACTION_MOVE -> submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+            MotionEvent.ACTION_MOVE -> {
+                if (movedFarFrom(event.x, event.y)) cancelRightClick()
+                submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+            }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                cancelRightClick()
                 buttonMask = buttonMask and BUTTON_LEFT.inv()
                 submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
             }
         }
         return true
+    }
+
+    // A long press as a right-click ------------------------------------------------------
+    //
+    // X has no notion of a long press, and the menus that matter here -- openbox's root menu,
+    // a file manager's context menu -- are all on button three. Without this there is no way
+    // to reach any of them from a touch screen.
+
+    private var pressX = 0f
+    private var pressY = 0f
+    private var rightClickPending: Runnable? = null
+
+    private fun scheduleRightClick(desktopX: Int, desktopY: Int, viewX: Float, viewY: Float) {
+        cancelRightClick()
+        pressX = viewX
+        pressY = viewY
+
+        val fire = Runnable {
+            rightClickPending = null
+            // The left button went down when the finger did, and a menu opened while it is
+            // still held would be dismissed by the release. Lifting it first is what a mouse
+            // user would have done.
+            buttonMask = buttonMask and BUTTON_LEFT.inv()
+            submit(InputEvent.Pointer(desktopX, desktopY, buttonMask, coalescable = false))
+            submit(InputEvent.Pointer(desktopX, desktopY, buttonMask or BUTTON_RIGHT, coalescable = false))
+            submit(InputEvent.Pointer(desktopX, desktopY, buttonMask, coalescable = false))
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        }
+
+        rightClickPending = fire
+        postDelayed(fire, ViewConfiguration.getLongPressTimeout().toLong())
+    }
+
+    /** Whether the finger has travelled far enough that this is a drag, not a press. */
+    private fun movedFarFrom(viewX: Float, viewY: Float): Boolean {
+        val slop = ViewConfiguration.get(context).scaledTouchSlop
+        return abs(viewX - pressX) > slop || abs(viewY - pressY) > slop
+    }
+
+    private fun cancelRightClick() {
+        rightClickPending?.let { removeCallbacks(it) }
+        rightClickPending = null
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {

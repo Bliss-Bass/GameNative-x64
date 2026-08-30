@@ -6,6 +6,7 @@ import com.winlator.core.ProcessHelper
 import com.winlator.core.envvars.EnvVars
 import com.winlator.xenvironment.ImageFs
 import java.io.File
+import java.util.TimeZone
 import timber.log.Timber
 
 /**
@@ -90,6 +91,9 @@ object LinuxProgramLauncher {
             put("HOME", GUEST_HOME)
             put("TERM", "xterm-256color")
             put("LANG", "C.UTF-8")
+            // The guest has no clue where it is: glibc reads /etc/localtime, which the base
+            // image leaves at UTC, so a clock in the session would be hours out.
+            put("TZ", TimeZone.getDefault().id)
             // Toolkits refuse to start without a runtime dir and otherwise warn on every launch.
             put("XDG_RUNTIME_DIR", "/tmp")
             if (hasDisplay) put("DISPLAY", ":0")

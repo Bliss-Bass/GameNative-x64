@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
+import app.gamenative.linux.LinuxDesktopConfig
 import app.gamenative.linux.LinuxDisplaySession
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.rfb.RfbView
@@ -63,7 +64,11 @@ fun LinuxDesktopScreen(
             }
         status = null
 
-        LinuxDisplaySession.start(context, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
+        // With a program to run, that program is the session and gets the display to itself.
+        // Without one, the user is here for the desktop: panel, menu and decorated windows.
+        val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
+
+        LinuxDisplaySession.start(context, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi, mode)
             .onSuccess { started ->
                 withContext(Dispatchers.IO) {
                     started.setDpi(metrics.densityDpi)

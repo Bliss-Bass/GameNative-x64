@@ -27,11 +27,14 @@ class LinuxDisplaySession private constructor(
     val display: Int,
     /** Loopback port the presenter connects to. */
     val port: Int,
+    /** Whether this session is one application or a desktop. */
+    private val mode: LinuxDesktopConfig.Mode,
 ) {
 
     private var server: Process? = null
     private var wm: Process? = null
     private var settings: Process? = null
+    private var panel: Process? = null
 
     @Volatile
     var isRunning = false
@@ -61,6 +64,7 @@ class LinuxDisplaySession private constructor(
             width: Int,
             height: Int,
             densityDpi: Int,
+            mode: LinuxDesktopConfig.Mode,
         ): Result<LinuxDisplaySession> = withContext(Dispatchers.IO) {
             runCatching {
                 if (!LinuxRootfs.isInstalled(context)) {
@@ -71,7 +75,7 @@ class LinuxDisplaySession private constructor(
                 }
 
                 val port = freePort()
-                val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port)
+                val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode)
                 session.launch(width, height, densityDpi.coerceIn(96, 400))
                 session
             }
@@ -116,11 +120,28 @@ class LinuxDisplaySession private constructor(
 
         awaitGreeting()
 
-        // Started after the server is up: both connect to it, and neither retries.
-        wm = start("/usr/bin/openbox", tag = "openbox")
+        val desktop = mode == LinuxDesktopConfig.Mode.DESKTOP
+        val rc = if (desktop) LinuxDesktopConfig.DESKTOP_RC else LinuxDesktopConfig.APP_RC
+
+        // Built from what is installed right now, since apt runs in our own terminal.
+        if (desktop) {
+            LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context), dpi)
+        }
+
+
+        // Started after the server is up: they all connect to it, and none of them retries.
+        wm = start("/usr/bin/openbox --config-file $rc", tag = "openbox")
         settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
+
+        if (desktop) {
+            // Not left to the X server, whose idea of an unset root window is a monochrome
+            // weave. Runs and exits, so it is not one of the processes we hold on to.
+            start("/usr/bin/xsetroot -solid ${LinuxDesktopConfig.BACKGROUND}", tag = "xsetroot")
+            panel = start("/usr/bin/tint2 -c ${LinuxDesktopConfig.PANEL_RC}", tag = "tint2")
+        }
+
         isRunning = true
-        Timber.i("[LinuxDisplaySession]: display :%d ready", display)
+        Timber.i("[LinuxDisplaySession]: display :%d ready (%s)", display, mode.name.lowercase())
     }
 
     /**
@@ -224,7 +245,7 @@ class LinuxDisplaySession private constructor(
         isRunning = false
         // The X server last: killing it first makes the clients die noisily on a lost
         // connection, and openbox in particular logs a fatal error.
-        for (process in listOf(settings, wm, server)) {
+        for (process in listOf(panel, settings, wm, server)) {
             val child = process ?: continue
             // TERM first so PRoot's --kill-on-exit can take the guest down with it;
             // destroyForcibly is SIGKILL, which PRoot cannot pass on.
@@ -232,6 +253,7 @@ class LinuxDisplaySession private constructor(
             if (pid > 0) runCatching { ProcessHelper.terminateProcess(pid) }
             if (!child.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) child.destroyForcibly()
         }
+        panel = null
         settings = null
         wm = null
         server = null
