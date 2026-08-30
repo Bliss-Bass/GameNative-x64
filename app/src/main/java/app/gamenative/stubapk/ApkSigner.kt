@@ -2,8 +2,11 @@ package app.gamenative.stubapk
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.InvalidKeyException
 import java.security.MessageDigest
+import java.security.NoSuchAlgorithmException
 import java.security.PrivateKey
+import java.security.Security
 import java.security.Signature
 
 /**
@@ -28,6 +31,7 @@ internal object ApkSigner {
 
     /** RSASSA-PKCS1-v1_5 with SHA2-256, the scheme's most widely supported algorithm. */
     private const val SIGNATURE_ALGORITHM_ID = 0x0103
+    private const val SIGNATURE_ALGORITHM = "SHA256withRSA"
 
     private const val EOCD_SIGNATURE = 0x06054b50
 
@@ -37,6 +41,32 @@ internal object ApkSigner {
      * [apk] must have no signing block already, which is the case for anything this package
      * produces.
      */
+    /**
+     * A signer initialised with [key], from whichever installed provider will accept it.
+     *
+     * Tried in turn rather than left to Signature's own search, which stops at the first provider
+     * offering the algorithm: a key the keystore holds is not an RSAPrivateKey, the bundled Bouncy
+     * Castle rejects it outright on that basis, and anything else in the process can put Bouncy
+     * Castle first by installing it. Naming a provider instead does not work either -- the
+     * keystore's own signer lives under a different provider name than its keys do.
+     */
+    private fun signerFor(key: PrivateKey): Signature {
+        var rejection: Exception? = null
+
+        for (provider in Security.getProviders("Signature.$SIGNATURE_ALGORITHM").orEmpty()) {
+            val candidate = runCatching { Signature.getInstance(SIGNATURE_ALGORITHM, provider) }.getOrNull()
+                ?: continue
+            try {
+                candidate.initSign(key)
+                return candidate
+            } catch (rejected: InvalidKeyException) {
+                rejection = rejected
+            }
+        }
+
+        throw rejection ?: NoSuchAlgorithmException("no provider will sign with this key")
+    }
+
     fun sign(apk: ByteArray, privateKey: PrivateKey, certificate: ByteArray): ByteArray {
         val eocdOffset = findEocd(apk)
         val directoryOffset = int(apk, eocdOffset + 16)
@@ -51,8 +81,7 @@ internal object ApkSigner {
         val digest = digest(contents, directory, eocd)
 
         val signedData = signedData(digest, certificate)
-        val signature = Signature.getInstance("SHA256withRSA").run {
-            initSign(privateKey)
+        val signature = signerFor(privateKey).run {
             update(signedData)
             sign()
         }
