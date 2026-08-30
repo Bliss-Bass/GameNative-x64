@@ -261,7 +261,7 @@ private fun AppRow(
             IconButton(onClick = onAddToDrawer, modifier = Modifier.size(44.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Apps,
-                    contentDescription = stringResource(R.string.linux_apps_add_to_drawer),
+                    contentDescription = stringResource(R.string.add_to_app_list),
                     tint = Color.White.copy(alpha = 0.7f),
                 )
             }

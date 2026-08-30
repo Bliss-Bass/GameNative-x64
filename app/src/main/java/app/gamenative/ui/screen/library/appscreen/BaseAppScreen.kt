@@ -42,6 +42,7 @@ import app.gamenative.ui.component.dialog.NexusModsDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.enums.AppOptionMenuType
+import app.gamenative.stubs.GameStubs
 import app.gamenative.ui.screen.library.components.toggleFavorite
 import app.gamenative.ui.util.ContainerConfigTransfer
 import app.gamenative.ui.util.SnackbarManager
@@ -748,6 +749,47 @@ abstract class BaseAppScreen {
     }
 
     /**
+     * Get the Add To App List menu option, or null where a launcher entry cannot be built.
+     *
+     * Beside Create shortcut rather than replacing it: a shortcut goes where the user puts it on
+     * the home screen, while this puts the game in the all-apps list and in search alongside every
+     * other installed app. Absent when the trampoline is not packaged, since nothing could be
+     * built to install.
+     */
+    @Composable
+    protected open fun getAddToAppListOption(
+        context: Context,
+        libraryItem: LibraryItem,
+    ): AppMenuOption? {
+        if (!GameStubs.isSupported(context)) return null
+
+        val gameSource = getGameSource(libraryItem)
+        val gameId = getGameId(libraryItem)
+        val gameName = getGameName(context, libraryItem)
+        val iconUrl = getIconUrl(context, libraryItem)
+
+        return AppMenuOption(
+            optionType = AppOptionMenuType.AddToAppList,
+            onClick = {
+                CoroutineScope(Dispatchers.IO).launch {
+                    GameStubs.add(
+                        context = context,
+                        gameId = gameId,
+                        source = gameSource,
+                        label = gameName,
+                        iconUrl = iconUrl,
+                    )
+                        .onSuccess { SnackbarManager.show(context.getString(R.string.stub_added, gameName)) }
+                        .onFailure { error ->
+                            Timber.w(error, "Could not add %s to the app list", gameName)
+                            SnackbarManager.show(context.getString(R.string.stub_add_failed, gameName))
+                        }
+                }
+            },
+        )
+    }
+
+    /**
      * Get source-specific menu options. Subclasses can override to add custom options.
      */
     @Composable
@@ -1131,6 +1173,7 @@ abstract class BaseAppScreen {
             getShareDiagnosticsOption(context, libraryItem)?.let { menuOptions.add(it) }
             getResetContainerOption(context, libraryItem)?.let { menuOptions.add(it) }
             getCreateShortcutOption(context, libraryItem)?.let { menuOptions.add(it) }
+            getAddToAppListOption(context, libraryItem)?.let { menuOptions.add(it) }
             getExportContainerOption(context, libraryItem, exportFrontendLauncher)?.let { menuOptions.add(it) }
         }
 

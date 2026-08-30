@@ -2359,7 +2359,8 @@
     <string name="linux_apps_refresh">Refresh</string>
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
     <string name="linux_apps_pin">Add to home screen</string>
-    <string name="linux_apps_add_to_drawer">Add to app list</string>
+    <string name="add_to_app_list">Add to app list</string>
+    <string name="stub_added">%1$s added to the app list</string>
     <string name="stub_add_failed">Could not add %1$s to the app list</string>
     <string name="stub_install_failed">The app list entry could not be installed</string>
     <string name="linux_shortcut_gone">This Linux app is no longer installed</string>

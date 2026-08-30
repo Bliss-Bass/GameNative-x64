@@ -24,7 +24,47 @@ import java.util.Arrays
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
+/**
+ * Fetches the artwork at [url], or null if there is none to be had.
+ *
+ * Games carry artwork as a remote URL, so this goes through Coil to reuse its cache: the same
+ * image is already on screen in the library, and asking again should not mean fetching again.
+ * Hardware bitmaps are refused because the result gets read pixel by pixel afterwards.
+ */
+internal suspend fun loadGameArtwork(context: Context, url: String?): Bitmap? {
+    if (url.isNullOrBlank()) return null
+
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            val request = ImageRequest.Builder(context)
+                .data(url)
+                .allowHardware(false)
+                .build()
+
+            when (val drawable = (ImageLoader(context).execute(request) as? SuccessResult)?.drawable) {
+                null -> null
+                is BitmapDrawable -> drawable.bitmap
+                else -> Bitmap.createBitmap(
+                    drawable.intrinsicWidth.coerceAtLeast(1),
+                    drawable.intrinsicHeight.coerceAtLeast(1),
+                    Bitmap.Config.ARGB_8888,
+                ).also { bitmap ->
+                    Canvas(bitmap).also { drawable.setBounds(0, 0, it.width, it.height) }
+                        .let { drawable.draw(it) }
+                }
+            }
+        }.getOrNull()
+    }
+}
+
+/**
+ * Squares [src] up for a launcher, on a background sampled from its own edges.
+ *
+ * Game artwork is wide and application icons are transparent, and a launcher wants neither: this
+ * insets the image inside a square tile and fills what is left with a colour taken from the image
+ * so the result does not read as a mistake.
+ */
+internal fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
     val density = context.resources.displayMetrics.density
     val targetSize = (108f * density).toInt().coerceAtLeast(108)
     val outBmp = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
@@ -186,44 +226,7 @@ internal suspend fun createPinnedShortcut(context: Context, gameId: Int, label: 
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 
-    // Try to load game's icon bitmap; fallback to built-in adaptive icon
-    val bitmapIcon: Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            if (!iconUrl.isNullOrBlank()) {
-                val loader = ImageLoader(appContext)
-                val request = ImageRequest.Builder(appContext)
-                    .data(iconUrl)
-                    .allowHardware(false)
-                    .build()
-                val result = loader.execute(request)
-                val drawable = (result as? SuccessResult)?.drawable
-                val rawBitmap = when (drawable) {
-                    is BitmapDrawable -> drawable.bitmap
-
-                    else -> {
-                        if (drawable != null) {
-                            val bmp = Bitmap.createBitmap(
-                                drawable.intrinsicWidth.coerceAtLeast(1),
-                                drawable.intrinsicHeight.coerceAtLeast(1),
-                                Bitmap.Config.ARGB_8888,
-                            )
-                            val canvas = Canvas(bmp)
-                            drawable.setBounds(0, 0, canvas.width, canvas.height)
-                            drawable.draw(canvas)
-                            bmp
-                        } else {
-                            null
-                        }
-                    }
-                }
-                rawBitmap
-            } else {
-                null
-            }
-        } catch (_: Throwable) {
-            null
-        }
-    }
+    val bitmapIcon = loadGameArtwork(appContext, iconUrl)
 
     val finalIcon: Icon = if (bitmapIcon != null) {
         val adaptiveBmp = createAdaptiveIconBitmap(appContext, bitmapIcon)
