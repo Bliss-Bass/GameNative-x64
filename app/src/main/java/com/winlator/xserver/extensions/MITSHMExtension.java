@@ -10,6 +10,7 @@ import com.winlator.xserver.GraphicsContext;
 import com.winlator.xserver.XClient;
 import com.winlator.xserver.XLock;
 import com.winlator.xserver.XServer;
+import com.winlator.xserver.errors.BadAccess;
 import com.winlator.xserver.errors.BadDrawable;
 import com.winlator.xserver.errors.BadGraphicsContext;
 import com.winlator.xserver.errors.BadImplementation;
@@ -77,7 +78,11 @@ public class MITSHMExtension implements Extension {
         int xid = inputStream.readInt();
         int shmid = inputStream.readInt();
         inputStream.skip(4);
-        client.xServer.getSHMSegmentManager().attach(xid, shmid);
+        boolean attached = client.xServer.getSHMSegmentManager().attach(xid, shmid);
+        android.util.Log.d("MITSHM", "attach seg=" + xid + " shmid=" + shmid + " ok=" + attached);
+        // BadAccess is what Xorg reports when it cannot attach the segment, and it is what Mesa's
+        // shm probe expects to see before it gives up on MIT-SHM.
+        if (!attached) throw new BadAccess();
     }
 
     private static void detach(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -107,6 +112,8 @@ public class MITSHMExtension implements Extension {
         if (graphicsContext == null) throw new BadGraphicsContext(gcId);
 
         ByteBuffer data = client.xServer.getSHMSegmentManager().getData(shmseg);
+        android.util.Log.d("MITSHM", "putImage seg=" + shmseg + " have=" + (data != null) + " " +
+                srcWidth + "x" + srcHeight + " depth=" + depth + " into " + drawableId);
         if (data == null) throw new BadSHMSegment(shmseg);
 
         if (graphicsContext.getFunction() != GraphicsContext.Function.COPY) {

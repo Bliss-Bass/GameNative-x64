@@ -14,10 +14,17 @@ public class SHMSegmentManager {
         this.sysVSharedMemory = sysVSharedMemory;
     }
 
-    public void attach(int xid, int shmid) {
+    /**
+     * @return false when the shmid is not one of ours and nothing was attached. Reporting that back
+     * matters: a client that believes the segment is attached goes on to ShmPutImage, which fails far
+     * from the cause, whereas a failed ShmAttach makes Mesa's own probe fall back to plain PutImage.
+     */
+    public boolean attach(int xid, int shmid) {
         if (shmSegments.indexOfKey(xid) >= 0) detach(xid);
         ByteBuffer data = sysVSharedMemory.attach(shmid);
-        if (data != null) shmSegments.put(xid, data);
+        if (data == null) return false;
+        shmSegments.put(xid, data);
+        return true;
     }
 
     public void detach(int xid) {
