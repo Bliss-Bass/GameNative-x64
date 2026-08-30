@@ -221,6 +221,8 @@ int shmget(key_t key, size_t size, int flags) {
     (void)key;
     (void)flags;
 
+    LOGD("-> shmget(size=%zu)", size);
+
     if (size == 0 || size > UINT32_MAX) {
         errno = EINVAL;
         return -1;
@@ -261,6 +263,8 @@ int shmget(key_t key, size_t size, int flags) {
 
 void *shmat(int shmid, const void *addr, int flags) {
     (void)addr;
+
+    LOGD("-> shmat(%d, flags=%d)", shmid, flags);
 
     pthread_mutex_lock(&lock);
 
@@ -304,11 +308,14 @@ void *shmat(int shmid, const void *addr, int flags) {
 }
 
 int shmdt(const void *addr) {
+    LOGD("-> shmdt(%p)", addr);
+
     pthread_mutex_lock(&lock);
 
     segment *entry = find_by_addr(addr);
     if (entry == NULL) {
         pthread_mutex_unlock(&lock);
+        LOGE("shmdt(%p) for an address we did not map", addr);
         errno = EINVAL;
         return -1;
     }
@@ -346,11 +353,14 @@ int libandroid_shmdt(const void *addr) {
 }
 
 int shmctl(int shmid, int cmd, struct shmid_ds *buf) {
+    LOGD("-> shmctl(%d, cmd=%d)", shmid, cmd);
+
     pthread_mutex_lock(&lock);
 
     segment *entry = find_by_id(shmid);
     if (entry == NULL) {
         pthread_mutex_unlock(&lock);
+        LOGE("shmctl(%d, cmd=%d) for a segment we do not know", shmid, cmd);
         errno = EINVAL;
         return -1;
     }

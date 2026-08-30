@@ -71,6 +71,9 @@ public class MITSHMExtension implements Extension {
             outputStream.writeShort((short)0);
             outputStream.writeShort((short)0);
             outputStream.writeByte((byte)0);
+            // A reply is 32 bytes and nothing here pads for us, so without this the client reads the
+            // next 15 bytes on the socket as the tail of this one and every reply after it is skewed.
+            outputStream.writePad(15);
         }
     }
 
@@ -86,7 +89,9 @@ public class MITSHMExtension implements Extension {
     }
 
     private static void detach(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
-        client.xServer.getSHMSegmentManager().detach(inputStream.readInt());
+        int xid = inputStream.readInt();
+        android.util.Log.d("MITSHM", "detach seg=" + xid);
+        client.xServer.getSHMSegmentManager().detach(xid);
     }
 
     private static void putImage(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -139,6 +144,7 @@ public class MITSHMExtension implements Extension {
     @Override
     public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int opcode = client.getRequestData();
+        android.util.Log.d("MITSHM", "request opcode=" + opcode);
         switch (opcode) {
             case ClientOpcodes.QUERY_VERSION :
                 queryVersion(client, inputStream, outputStream);
@@ -159,6 +165,7 @@ public class MITSHMExtension implements Extension {
                 }
                 break;
             default:
+                android.util.Log.w("MITSHM", "unimplemented opcode=" + opcode + "; reporting BadImplementation");
                 throw new BadImplementation();
         }
     }

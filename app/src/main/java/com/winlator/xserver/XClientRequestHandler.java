@@ -32,6 +32,8 @@ public class XClientRequestHandler implements RequestHandler {
     public static final byte RESPONSE_CODE_ERROR = 0;
     public static final byte RESPONSE_CODE_SUCCESS = 1;
     public static final int MAX_REQUEST_LENGTH = 65535;
+    /** Every request from every client, for reading what a guest did just before it gave up on us. */
+    private static final boolean TRACE_REQUESTS = false;
 
     @Override
     public boolean handleRequest(Client client) throws IOException {
@@ -171,6 +173,11 @@ public class XClientRequestHandler implements RequestHandler {
         client.generateSequenceNumber();
         client.setRequestData(requestData);
         client.setRequestLength(requestLength);
+
+        if (TRACE_REQUESTS) {
+            android.util.Log.d("XRequest", "seq=" + client.getSequenceNumber() + " opcode=" + opcode +
+                    " data=" + requestData + " length=" + requestLength);
+        }
 
         try {
             switch (opcode) {
