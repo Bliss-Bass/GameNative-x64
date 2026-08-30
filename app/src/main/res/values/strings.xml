@@ -2359,6 +2359,11 @@
     <string name="linux_apps_refresh">Refresh</string>
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
     <string name="linux_apps_pin">Add to home screen</string>
+    <string name="settings_steamgriddb_title">Look up missing game artwork</string>
+    <string name="settings_steamgriddb_subtitle">Fetch covers and icons from SteamGridDB for games whose store provides none</string>
+    <string name="settings_steamgriddb_key_title">SteamGridDB key</string>
+    <string name="settings_steamgriddb_key_subtitle">Your own key, used in place of the one built in</string>
+    <string name="settings_steamgriddb_key_missing">Needed for lookup — get a free key at steamgriddb.com</string>
     <string name="add_to_app_list">Add to app list</string>
     <string name="stub_added">%1$s added to the app list</string>
     <string name="stub_add_failed">Could not add %1$s to the app list</string>

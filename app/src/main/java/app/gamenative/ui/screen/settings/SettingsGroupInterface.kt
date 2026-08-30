@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import app.gamenative.ui.component.settings.SettingsListDropdown
+import app.gamenative.ui.component.settings.SettingsTextField
 import app.gamenative.ui.component.ACHIEVEMENT_NOTIFICATION_POSITION
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
@@ -290,6 +291,43 @@ fun SettingsGroupInterface(
             },
             colors = settingsTileColorsAlt(),
         )
+
+        var fetchGameArtwork by rememberSaveable { mutableStateOf(PrefManager.fetchSteamGridDBImages) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_steamgriddb_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_steamgriddb_subtitle)) },
+            state = fetchGameArtwork,
+            onCheckedChange = {
+                fetchGameArtwork = it
+                PrefManager.fetchSteamGridDBImages = it
+            },
+        )
+
+        if (fetchGameArtwork) {
+            var apiKey by rememberSaveable { mutableStateOf(PrefManager.steamGridDbApiKey) }
+            SettingsTextField(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.settings_steamgriddb_key_title)) },
+                subtitle = {
+                    Text(
+                        text = stringResource(
+                            if (apiKey.isEmpty() && BuildConfig.STEAMGRIDDB_API_KEY.isEmpty()) {
+                                R.string.settings_steamgriddb_key_missing
+                            } else {
+                                R.string.settings_steamgriddb_key_subtitle
+                            },
+                        ),
+                    )
+                },
+                value = apiKey,
+                fieldWidth = 200.dp,
+                onValueChange = {
+                    apiKey = it
+                    PrefManager.steamGridDbApiKey = it
+                },
+            )
+        }
 
         SettingsSwitch(
             colors = settingsTileColorsAlt(),

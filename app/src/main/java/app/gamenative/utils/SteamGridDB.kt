@@ -27,6 +27,7 @@ object SteamGridDB {
     private const val GRIDS_ENDPOINT = "/grids/game"
     private const val HEROES_ENDPOINT = "/heroes/game"
     private const val LOGOS_ENDPOINT = "/logos/game"
+    private const val ICONS_ENDPOINT = "/icons/game"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -34,19 +35,16 @@ object SteamGridDB {
         .build()
 
     /**
-     * Get the SteamGridDB API key from BuildConfig.
-     * The key should be added to local.properties as: STEAMGRIDDB_API_KEY=YOUR_API_KEY
-     * Or set as an environment variable: STEAMGRIDDB_API_KEY=YOUR_API_KEY
-     * Returns null if the key is not configured.
+     * The SteamGridDB API key, or null if there is none to use.
+     *
+     * The user's own key first, then the one built in from the STEAMGRIDDB_API_KEY gradle property
+     * or environment variable. That property is empty unless a build supplies it, which is why the
+     * setting exists: without it, artwork lookup would be off on most builds with no way to turn
+     * it on.
      */
-    private fun getApiKey(): String? {
-        val apiKey = app.gamenative.BuildConfig.STEAMGRIDDB_API_KEY
-        return if (apiKey.isNotEmpty()) {
-            apiKey
-        } else {
-            null
-        }
-    }
+    private fun getApiKey(): String? =
+        PrefManager.steamGridDbApiKey.ifEmpty { app.gamenative.BuildConfig.STEAMGRIDDB_API_KEY }
+            .takeIf { it.isNotEmpty() }
 
     /**
      * Search for a game by name and return the first match.
@@ -111,6 +109,80 @@ object SteamGridDB {
             Timber.tag("SteamGridDB").e(e, "Error searching for game '$gameName'")
             return@withContext null
         }
+    }
+
+    /**
+     * A square-ish image for [gameName], saved into [into], or null if there is none to be had.
+     *
+     * For a launcher icon rather than a cover, so it asks for icons first and falls back to grids:
+     * a store that ships no artwork usually has none of either, but a game with only cover art
+     * still gives something better than a blank tile.
+     *
+     * Kept apart from [fetchGameImages], which writes a set of cover art into a game's own install
+     * folder. A store-managed folder is the wrong place for this -- verifying a game's files would
+     * have to account for what we left there -- so the caller names a directory of its own.
+     */
+    suspend fun fetchIcon(gameName: String, into: File): String? = withContext(Dispatchers.IO) {
+        if (getApiKey() == null || !PrefManager.fetchSteamGridDBImages) return@withContext null
+
+        cachedIcon(gameName, into)?.let { return@withContext it }
+
+        val prefix = iconPrefix(gameName)
+        val game = searchGame(gameName) ?: return@withContext null
+
+        for (endpoint in listOf(ICONS_ENDPOINT, GRIDS_ENDPOINT)) {
+            val url = firstImageUrl(endpoint, game.gameId) ?: continue
+            val extension = extensionOf(url)
+
+            val bytes = runCatching {
+                httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    if (response.isSuccessful) response.body?.bytes() else null
+                }
+            }.getOrNull() ?: continue
+
+            val file = File(into.apply { mkdirs() }, "$prefix$extension")
+            runCatching { FileOutputStream(file).use { it.write(bytes) } }
+                .onSuccess {
+                    Timber.tag("SteamGridDB").i("Saved icon for '$gameName' from $endpoint")
+                    return@withContext file.absolutePath
+                }
+                .onFailure { Timber.tag("SteamGridDB").w(it, "Could not save icon for '$gameName'") }
+        }
+
+        Timber.tag("SteamGridDB").d("No icon or grid found for '$gameName'")
+        return@withContext null
+    }
+
+    /** An icon already fetched for [gameName], or null. Answers without touching the network. */
+    fun cachedIcon(gameName: String, into: File): String? =
+        into.listFiles { file -> file.name.startsWith(iconPrefix(gameName)) }?.firstOrNull()?.absolutePath
+
+    private fun iconPrefix(gameName: String): String =
+        "icon_" + gameName.lowercase().map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
+
+    /** The first image [endpoint] offers for [gameId], or null if it offers none. */
+    private fun firstImageUrl(endpoint: String, gameId: Int): String? = runCatching {
+        val request = Request.Builder()
+            .url("$API_BASE_URL$endpoint/$gameId")
+            .addHeader("Authorization", "Bearer ${getApiKey()}")
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@runCatching null
+            val json = JSONObject(response.body?.string() ?: return@runCatching null)
+            if (!json.optBoolean("success", false)) return@runCatching null
+
+            json.optJSONArray("data")
+                ?.let { data -> (0 until data.length()).map { data.getJSONObject(it) } }
+                ?.firstNotNullOfOrNull { it.optString("url", "").takeIf(String::isNotEmpty) }
+        }
+    }.getOrNull()
+
+    private fun extensionOf(url: String): String = when {
+        url.contains(".png", ignoreCase = true) -> ".png"
+        url.contains(".jpg", ignoreCase = true) || url.contains(".jpeg", ignoreCase = true) -> ".jpg"
+        url.contains(".webp", ignoreCase = true) -> ".webp"
+        else -> ".png"
     }
 
     /**

@@ -1269,6 +1269,20 @@ object PrefManager {
             setPref(FETCH_STEAMGRIDDB_IMAGES, value)
         }
 
+    /**
+     * The user's own SteamGridDB key, which takes precedence over the one built in.
+     *
+     * Held as a setting because the built-in key comes from a gradle property that is empty unless
+     * the build supplies one, so on most builds artwork lookup is simply off until someone enters
+     * a key of their own. Keys are free from steamgriddb.com.
+     */
+    private val STEAMGRIDDB_API_KEY = stringPreferencesKey("steamgriddb_api_key")
+    var steamGridDbApiKey: String
+        get() = getPref(STEAMGRIDDB_API_KEY, "")
+        set(value) {
+            setPref(STEAMGRIDDB_API_KEY, value.trim())
+        }
+
     private val EXTERNAL_STORAGE_PATH = stringPreferencesKey("external_storage_path")
     var externalStoragePath: String
         get() = getPref(EXTERNAL_STORAGE_PATH, "")

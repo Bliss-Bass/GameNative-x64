@@ -28,6 +28,8 @@ fun SettingsTextField(
     colors: SettingsTileColors = SettingsTileDefaults.colors(),
     tonalElevation: Dp = ListItemDefaults.Elevation,
     shadowElevation: Dp = ListItemDefaults.Elevation,
+    /** Wide enough for a number, which is what most of these hold. */
+    fieldWidth: Dp = 76.dp,
     onValueChange: (String) -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -42,7 +44,7 @@ fun SettingsTextField(
                 NoExtractOutlinedTextField(
                     modifier = Modifier
                         .focusRequester(focusRequester)
-                        .width(76.dp),
+                        .width(fieldWidth),
                     enabled = enabled,
                     value = value,
                     onValueChange = onValueChange,

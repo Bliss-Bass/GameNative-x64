@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import app.gamenative.data.GameSource
+import app.gamenative.utils.SteamGridDB
+import java.io.File
 import app.gamenative.utils.createAdaptiveIconBitmap
 import app.gamenative.utils.loadGameArtwork
 import java.io.ByteArrayOutputStream
@@ -48,8 +50,11 @@ object GameStubs {
      * changes the artwork changes the address. Every candidate counts, not just the one used, so
      * that a game which had nothing and later gains real artwork is noticed.
      */
-    fun contentFingerprint(label: String, artwork: List<String>): String {
-        val summary = (listOf(label) + artwork).joinToString("\u0000")
+    fun contentFingerprint(context: Context, label: String, artwork: List<String>): String {
+        // Counting what SteamGridDB found for this game as well, so that entering a key and
+        // picking up artwork republishes the entry instead of leaving its lettered tile.
+        val looked = SteamGridDB.cachedIcon(label, iconCache(context)).orEmpty()
+        val summary = (listOf(label, looked) + artwork).joinToString("\u0000")
         return MessageDigest.getInstance("SHA-256")
             .digest(summary.toByteArray())
             .joinToString("") { "%02x".format(it) }
@@ -93,7 +98,7 @@ object GameStubs {
                         entryId = entryId,
                         packageName = packageName,
                         versionCode = versionCode,
-                        fingerprint = contentFingerprint(label, artwork),
+                        fingerprint = contentFingerprint(context, label, artwork),
                     ),
                 )
             }
@@ -135,7 +140,7 @@ object GameStubs {
                 return
             }
 
-            if (contentFingerprint(label, artwork) != record.fingerprint) {
+            if (contentFingerprint(context, label, artwork) != record.fingerprint) {
                 Timber.i("[GameStubs]: %s changed, republishing its entry", entryId)
                 add(context, gameId, source, label, artwork)
                     .onFailure { Timber.w(it, "[GameStubs]: could not republish %s", entryId) }
@@ -167,18 +172,25 @@ object GameStubs {
      *
      * Tried in order because how well a game is illustrated varies by where it came from: Steam
      * gives an icon on its CDN, a custom game gives a local file extracted from its executable,
-     * and Epic, GOG or Amazon may give an empty string. Rather than refuse an entry for the last
-     * of those, the name is drawn on a plain tile -- an entry the user can find and launch beats
-     * no entry over a missing image.
+     * and Epic, GOG or Amazon may give an empty string. For the last of those, SteamGridDB is
+     * asked, and failing that the name is drawn on a plain tile -- an entry the user can find and
+     * launch beats no entry over a missing image.
      */
     private suspend fun iconPng(context: Context, label: String, artwork: List<String>): ByteArray {
+        // SteamGridDB only once the store has failed us, so a game with artwork of its own costs
+        // no lookup, and one without is asked about at most once -- the file is kept.
         val image = artwork.firstNotNullOfOrNull { loadGameArtwork(context, it) }
+            ?: SteamGridDB.fetchIcon(label, iconCache(context))?.let { loadGameArtwork(context, "file://$it") }
+
         val tile = if (image != null) createAdaptiveIconBitmap(context, image) else lettered(context, label)
 
         return ByteArrayOutputStream()
             .also { tile.compress(Bitmap.CompressFormat.PNG, 100, it) }
             .toByteArray()
     }
+
+    /** Where looked-up icons are kept, so a game is only ever looked up once. */
+    private fun iconCache(context: Context): File = File(context.filesDir, "stubs/artwork").apply { mkdirs() }
 
     /** A tile carrying [label]'s first letter, for a game with no artwork anywhere. */
     private fun lettered(context: Context, label: String): Bitmap {
