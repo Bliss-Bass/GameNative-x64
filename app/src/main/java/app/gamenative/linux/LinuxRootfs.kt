@@ -177,7 +177,16 @@ object LinuxRootfs {
         }
     }
 
-    fun uninstall(context: Context) {
+    /**
+     * Removes the userland, and everything published from it.
+     *
+     * The entries and shortcuts go first: once the rootfs is gone there are no labels or icons
+     * left to identify what they stood for, and each one would be a launcher entry for a program
+     * that no longer exists.
+     */
+    suspend fun uninstall(context: Context) {
+        LinuxAppReconciler.retireAll(context)
+
         stampFile(context).delete()
         rootfsDir(context).deleteRecursively()
     }

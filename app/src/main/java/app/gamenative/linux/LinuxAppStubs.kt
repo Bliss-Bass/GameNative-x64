@@ -9,6 +9,7 @@ import app.gamenative.stubapk.StubApk
 import app.gamenative.stubapk.StubSigningKey
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -49,6 +50,55 @@ object LinuxAppStubs {
         LinuxRootfs.isSupported() && runCatching {
             context.assets.open(TRAMPOLINE_ASSET).close()
         }.isSuccess
+
+    /**
+     * A summary of everything about [app] that ends up inside its stub, so that a later scan can
+     * tell whether the installed one is still right.
+     *
+     * The icon is summarised by its file rather than its contents: decoding every icon on every
+     * pass to hash it would cost more than the change is worth, and a package that replaces an
+     * icon replaces the file.
+     */
+    fun contentFingerprint(context: Context, app: LinuxAppScanner.LinuxApp): String {
+        val icon = app.iconPath?.let { File(LinuxRootfs.rootfsDir(context), it.removePrefix("/")) }
+
+        val summary = listOf(
+            app.name,
+            app.launchArgv,
+            app.iconPath.orEmpty(),
+            icon?.length()?.toString().orEmpty(),
+            icon?.lastModified()?.toString().orEmpty(),
+        ).joinToString("\u0000")
+
+        return MessageDigest.getInstance("SHA-256")
+            .digest(summary.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Gives [app] an entry in the all-apps list, and remembers having done so.
+     *
+     * Also the path a changed entry takes: the version code rises above the recorded one, which is
+     * what lets the install replace the stub already there.
+     */
+    suspend fun add(context: Context, app: LinuxAppScanner.LinuxApp): Result<Unit> {
+        val previous = LinuxAppStubRegistry.of(context, app.entryId)
+        val versionCode = (previous?.versionCode ?: 0) + 1
+
+        return build(context, app, versionCode)
+            .mapCatching { apk -> install(context, apk).getOrThrow() }
+            .onSuccess {
+                LinuxAppStubRegistry.record(
+                    context,
+                    LinuxAppStubRegistry.Record(
+                        entryId = app.entryId,
+                        packageName = packageNameFor(app),
+                        versionCode = versionCode,
+                        fingerprint = contentFingerprint(context, app),
+                    ),
+                )
+            }
+    }
 
     /**
      * Builds and signs a stub for [app], returning the APK.
@@ -161,33 +211,57 @@ object LinuxAppStubs {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /**
-     * Whether a stub for [app] is currently installed.
-     *
-     * Asked of the ROM's installer where there is one, because the package manager hides packages
-     * we have not declared an interest in and a generated stub cannot be named in advance.
-     */
-    suspend fun isInstalled(context: Context, app: LinuxAppScanner.LinuxApp): Boolean {
-        val packageName = packageNameFor(app)
-        StubInstallerClient.installedStubs(context)?.let { return packageName in it }
+    /** Whether a stub for [app] is currently installed. */
+    suspend fun isInstalled(context: Context, app: LinuxAppScanner.LinuxApp): Boolean =
+        packageNameFor(app) in installed(context, listOf(packageNameFor(app)))
 
-        return runCatching {
-            context.packageManager.getPackageInfo(packageName, 0)
-        }.isSuccess
+    /**
+     * Which of [packageNames] are on the device.
+     *
+     * Asked of the ROM's installer where there is one, because it owns what it installed and
+     * Android hides those packages from us. Where there is not, we installed them ourselves and
+     * the package manager will answer.
+     */
+    suspend fun installed(context: Context, packageNames: Collection<String>): Set<String> {
+        StubInstallerClient.installedStubs(context)?.let { stubs ->
+            return packageNames.intersect(stubs.toSet())
+        }
+
+        return packageNames.filterTo(mutableSetOf()) {
+            runCatching { context.packageManager.getPackageInfo(it, 0) }.isSuccess
+        }
     }
 
-    /** Removes the stub for [app], through the ROM's installer where there is one. */
-    suspend fun uninstall(context: Context, app: LinuxAppScanner.LinuxApp): Result<Unit> {
-        StubInstallerClient.uninstall(context, packageNameFor(app))?.let { return it }
+    /**
+     * Takes back the entry recorded for [entryId].
+     *
+     * The record is dropped only once the stub is known to be gone, so that a refused prompt does
+     * not leave a package behind that nothing remembers.
+     */
+    suspend fun remove(context: Context, entryId: String, packageName: String): Result<Unit> {
+        StubInstallerClient.uninstall(context, packageName)?.let { result ->
+            return result.onSuccess { LinuxAppStubRegistry.forget(context, entryId) }
+        }
 
-        requestUninstall(context, app)
+        requestUninstall(context, packageName)
         return Result.success(Unit)
     }
 
-    /** Asks the user to remove the stub for [app]. */
-    private fun requestUninstall(context: Context, app: LinuxAppScanner.LinuxApp) {
+    /** Packages the user has already been asked about, so a rescan does not ask again. */
+    private val asked = mutableSetOf<String>()
+
+    /**
+     * Asks the user to remove [packageName], at most once while we are running.
+     *
+     * Without the ROM's installer there is no way to remove a package quietly, and a removal the
+     * user declines would otherwise come back on every rescan.
+     */
+    @Synchronized
+    private fun requestUninstall(context: Context, packageName: String) {
+        if (!asked.add(packageName)) return
+
         val intent = Intent(Intent.ACTION_DELETE).apply {
-            data = android.net.Uri.parse("package:${packageNameFor(app)}")
+            data = android.net.Uri.parse("package:$packageName")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

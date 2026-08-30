@@ -87,6 +87,9 @@ private fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
     return outBmp
 }
 
+/** What a Linux application's shortcut id starts with, which is how we know one of ours. */
+private const val LINUX_SHORTCUT_PREFIX = "linux_"
+
 /**
  * Offers to pin a launcher shortcut for a Linux application.
  *
@@ -119,7 +122,7 @@ internal suspend fun createLinuxAppShortcut(
         Icon.createWithResource(appContext, R.mipmap.ic_shortcut_filter)
     }
 
-    val shortcut = ShortcutInfo.Builder(appContext, "linux_${app.id}")
+    val shortcut = ShortcutInfo.Builder(appContext, "$LINUX_SHORTCUT_PREFIX${app.id}")
         .setShortLabel(app.name)
         .setLongLabel(app.name)
         .setIcon(icon)
@@ -127,6 +130,14 @@ internal suspend fun createLinuxAppShortcut(
         .build()
 
     withContext(Dispatchers.Main) {
+        // One we disabled when the application went away is still sitting on the home screen, and
+        // pinning again would leave the user with two. Bringing that one back is what they meant.
+        if (shortcutManager?.pinnedShortcuts?.any { it.id == shortcut.id } == true) {
+            shortcutManager.enableShortcuts(listOf(shortcut.id))
+            shortcutManager.updateShortcuts(listOf(shortcut))
+            return@withContext
+        }
+
         if (shortcutManager?.isRequestPinShortcutSupported == true) {
             shortcutManager.requestPinShortcut(shortcut, null)
         } else {
@@ -135,6 +146,32 @@ internal suspend fun createLinuxAppShortcut(
             val existing = shortcutManager?.dynamicShortcuts?.filterNot { it.id == shortcut.id } ?: emptyList()
             shortcutManager?.dynamicShortcuts = (existing + shortcut).take(4)
         }
+    }
+}
+
+/**
+ * Disables the Linux shortcuts that no longer stand for an installed application.
+ *
+ * Disabled rather than removed: a pinned shortcut belongs to the home screen, and the platform
+ * gives no way to take one back. Disabling greys it out and lets us say why when it is tapped,
+ * which is better than a shortcut that silently does nothing.
+ */
+internal fun retireLinuxShortcuts(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
+    val appContext = context.applicationContext
+    val shortcutManager = appContext.getSystemService(ShortcutManager::class.java) ?: return
+
+    val live = apps.mapTo(mutableSetOf()) { "linux_${it.id}" }
+    fun stale(shortcuts: List<ShortcutInfo>) =
+        shortcuts.filter { it.id.startsWith(LINUX_SHORTCUT_PREFIX) && it.id !in live }
+
+    val pinned = stale(shortcutManager.pinnedShortcuts).filter { it.isEnabled }.map { it.id }
+    if (pinned.isNotEmpty()) {
+        shortcutManager.disableShortcuts(pinned, appContext.getString(R.string.linux_shortcut_gone))
+    }
+
+    val dynamic = stale(shortcutManager.dynamicShortcuts).map { it.id }
+    if (dynamic.isNotEmpty()) {
+        shortcutManager.removeDynamicShortcuts(dynamic)
     }
 }
 

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import android.content.Context
 import app.gamenative.R
 import app.gamenative.linux.LinuxAppIcon
+import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxRootfs
@@ -77,7 +78,12 @@ fun LinuxAppsScreen(
     // Reading a few dozen small files, off the main thread. Rescanned on request because
     // apt runs in the terminal, out of sight of this screen.
     val apps by produceState<List<LinuxAppScanner.LinuxApp>?>(initialValue = null, refreshKey) {
-        value = withContext(Dispatchers.IO) { LinuxAppScanner.scan(context) }
+        val found = withContext(Dispatchers.IO) { LinuxAppScanner.scan(context) }
+        value = found
+
+        // After the list is on screen rather than before: taking back an entry for an application
+        // that is gone can involve the package installer, and the user should not wait on it.
+        withContext(Dispatchers.IO) { LinuxAppReconciler.reconcile(context, found) }
     }
 
     Column(
@@ -142,8 +148,7 @@ fun LinuxAppsScreen(
  * it; the ROM's privileged helper is what makes this silent.
  */
 private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp) {
-    LinuxAppStubs.build(context, app)
-        .mapCatching { LinuxAppStubs.install(context, it).getOrThrow() }
+    LinuxAppStubs.add(context, app)
         .onFailure {
             Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
             SnackbarManager.show(context.getString(R.string.linux_apps_drawer_failed, app.name))
