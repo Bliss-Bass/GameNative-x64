@@ -2,6 +2,10 @@ package app.gamenative.stubs
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
 import app.gamenative.data.GameSource
 import app.gamenative.utils.createAdaptiveIconBitmap
 import app.gamenative.utils.loadGameArtwork
@@ -39,12 +43,13 @@ object GameStubs {
     /**
      * What the stub was built from, so a later pass can tell whether it is still right.
      *
-     * The artwork is summarised by its URL rather than its bytes: fetching every game's image to
-     * hash it would put the reconcile pass on the network, and a store that changes the artwork
-     * changes the URL.
+     * The artwork is summarised by where it came from rather than by its bytes: fetching every
+     * game's image to hash it would put the reconcile pass on the network, and a store that
+     * changes the artwork changes the address. Every candidate counts, not just the one used, so
+     * that a game which had nothing and later gains real artwork is noticed.
      */
-    fun contentFingerprint(label: String, iconUrl: String?): String {
-        val summary = listOf(label, iconUrl.orEmpty()).joinToString("\u0000")
+    fun contentFingerprint(label: String, artwork: List<String>): String {
+        val summary = (listOf(label) + artwork).joinToString("\u0000")
         return MessageDigest.getInstance("SHA-256")
             .digest(summary.toByteArray())
             .joinToString("") { "%02x".format(it) }
@@ -61,7 +66,7 @@ object GameStubs {
         gameId: Int,
         source: GameSource,
         label: String,
-        iconUrl: String?,
+        artwork: List<String>,
     ): Result<Unit> {
         val entryId = entryIdFor(gameId, source)
         val packageName = packageNameFor(gameId, source)
@@ -77,7 +82,7 @@ object GameStubs {
                     META_APP_ID to gameId.toString(),
                     META_GAME_SOURCE to source.name,
                 ),
-                iconPng = iconPng(context, label, iconUrl),
+                iconPng = iconPng(context, label, artwork),
             ).getOrThrow()
         }
             .mapCatching { apk -> Stubs.install(context, apk).getOrThrow() }
@@ -88,7 +93,7 @@ object GameStubs {
                         entryId = entryId,
                         packageName = packageName,
                         versionCode = versionCode,
-                        fingerprint = contentFingerprint(label, iconUrl),
+                        fingerprint = contentFingerprint(label, artwork),
                     ),
                 )
             }
@@ -110,7 +115,7 @@ object GameStubs {
         source: GameSource,
         installed: Boolean,
         label: String,
-        iconUrl: String?,
+        artwork: List<String>,
     ) {
         val entryId = entryIdFor(gameId, source)
         val record = StubRegistry.games.of(context, entryId) ?: return
@@ -130,9 +135,9 @@ object GameStubs {
                 return
             }
 
-            if (contentFingerprint(label, iconUrl) != record.fingerprint) {
+            if (contentFingerprint(label, artwork) != record.fingerprint) {
                 Timber.i("[GameStubs]: %s changed, republishing its entry", entryId)
-                add(context, gameId, source, label, iconUrl)
+                add(context, gameId, source, label, artwork)
                     .onFailure { Timber.w(it, "[GameStubs]: could not republish %s", entryId) }
             }
         }.onFailure { Timber.w(it, "[GameStubs]: could not reconcile %s", entryId) }
@@ -155,15 +160,50 @@ object GameStubs {
         }
 
     /**
-     * A game's artwork as a square PNG.
+     * A game's icon as a square PNG, from the first of [artwork] that yields an image.
      *
      * Squared here rather than left to the launcher: store artwork is wide, and an adaptive icon
      * is not something a generated package can declare, so the tile has to be baked in.
+     *
+     * Tried in order because how well a game is illustrated varies by where it came from: Steam
+     * gives an icon on its CDN, a custom game gives a local file extracted from its executable,
+     * and Epic, GOG or Amazon may give an empty string. Rather than refuse an entry for the last
+     * of those, the name is drawn on a plain tile -- an entry the user can find and launch beats
+     * no entry over a missing image.
      */
-    private suspend fun iconPng(context: Context, label: String, iconUrl: String?): ByteArray {
-        val artwork = loadGameArtwork(context, iconUrl) ?: throw IOException("no artwork for $label")
+    private suspend fun iconPng(context: Context, label: String, artwork: List<String>): ByteArray {
+        val image = artwork.firstNotNullOfOrNull { loadGameArtwork(context, it) }
+        val tile = if (image != null) createAdaptiveIconBitmap(context, image) else lettered(context, label)
+
         return ByteArrayOutputStream()
-            .also { createAdaptiveIconBitmap(context, artwork).compress(Bitmap.CompressFormat.PNG, 100, it) }
+            .also { tile.compress(Bitmap.CompressFormat.PNG, 100, it) }
             .toByteArray()
     }
+
+    /** A tile carrying [label]'s first letter, for a game with no artwork anywhere. */
+    private fun lettered(context: Context, label: String): Bitmap {
+        val size = (108f * context.resources.displayMetrics.density).toInt().coerceAtLeast(108)
+        val letter = label.trim().firstOrNull()?.uppercase() ?: "?"
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = size * 0.5f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+
+        // Offset from the centre by the glyph's own extents, since drawText places the baseline.
+        val metrics = paint.fontMetrics
+        val baseline = size / 2f - (metrics.ascent + metrics.descent) / 2f
+
+        return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+            Canvas(bitmap).apply {
+                drawColor(BACKGROUND)
+                drawText(letter, size / 2f, baseline, paint)
+            }
+        }
+    }
+
+    /** Behind a lettered tile. Matches the launcher's own placeholder tone rather than shouting. */
+    private const val BACKGROUND = 0xFF37474F.toInt()
 }

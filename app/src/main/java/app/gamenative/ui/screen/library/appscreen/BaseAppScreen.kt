@@ -749,6 +749,19 @@ abstract class BaseAppScreen {
     }
 
     /**
+     * Where to look for this game's launcher icon, best first.
+     *
+     * Two sources because neither covers every store: the screen's own icon is what the library
+     * shows but is absent for a custom game, whose icon is a local file extracted from its
+     * executable, and present-but-empty for some Epic, GOG and Amazon entries.
+     */
+    @Composable
+    protected fun stubArtwork(context: Context, libraryItem: LibraryItem): List<String> =
+        listOfNotNull(getIconUrl(context, libraryItem), libraryItem.clientIconUrl)
+            .filter { it.isNotBlank() }
+            .distinct()
+
+    /**
      * Get the Add To App List menu option, or null where a launcher entry cannot be built.
      *
      * Beside Create shortcut rather than replacing it: a shortcut goes where the user puts it on
@@ -766,7 +779,7 @@ abstract class BaseAppScreen {
         val gameSource = getGameSource(libraryItem)
         val gameId = getGameId(libraryItem)
         val gameName = getGameName(context, libraryItem)
-        val iconUrl = getIconUrl(context, libraryItem)
+        val artwork = stubArtwork(context, libraryItem)
 
         return AppMenuOption(
             optionType = AppOptionMenuType.AddToAppList,
@@ -777,7 +790,7 @@ abstract class BaseAppScreen {
                         gameId = gameId,
                         source = gameSource,
                         label = gameName,
-                        iconUrl = iconUrl,
+                        artwork = artwork,
                     )
                         .onSuccess { SnackbarManager.show(context.getString(R.string.stub_added, gameName)) }
                         .onFailure { error ->
@@ -1296,15 +1309,15 @@ abstract class BaseAppScreen {
         // Nothing tells us a game was uninstalled, or renamed by its store, so an entry in the
         // all-apps list is checked when the game is on screen and the answer is already to hand.
         val stubLabel = getGameName(context, libraryItem)
-        val stubIconUrl = getIconUrl(context, libraryItem)
-        LaunchedEffect(libraryItem.appId, isInstalledState, stubLabel, stubIconUrl) {
+        val stubArtwork = stubArtwork(context, libraryItem)
+        LaunchedEffect(libraryItem.appId, isInstalledState, stubLabel, stubArtwork) {
             GameStubs.reconcile(
                 context = context,
                 gameId = getGameId(libraryItem),
                 source = getGameSource(libraryItem),
                 installed = isInstalledState,
                 label = stubLabel,
-                iconUrl = stubIconUrl,
+                artwork = stubArtwork,
             )
         }
 

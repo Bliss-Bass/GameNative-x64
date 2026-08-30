@@ -17,7 +17,7 @@ import app.gamenative.R
 import app.gamenative.data.GameSource
 import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppScanner
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import java.util.Arrays
@@ -41,7 +41,10 @@ internal suspend fun loadGameArtwork(context: Context, url: String?): Bitmap? {
                 .allowHardware(false)
                 .build()
 
-            when (val drawable = (ImageLoader(context).execute(request) as? SuccessResult)?.drawable) {
+            // The app's loader rather than a fresh one: a custom game's artwork is a local .ico,
+            // which only decodes with the components registered there, and store artwork is
+            // usually in its caches already.
+            when (val drawable = (context.imageLoader.execute(request) as? SuccessResult)?.drawable) {
                 null -> null
                 is BitmapDrawable -> drawable.bitmap
                 else -> Bitmap.createBitmap(

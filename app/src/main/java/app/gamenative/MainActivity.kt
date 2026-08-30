@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
+import coil.Coil
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
@@ -318,7 +319,13 @@ class MainActivity : ComponentActivity() {
                         add(AnimatedPngDecoder.Factory())
                     }
                     .build()
-                    .also { appImageLoader = it }
+                    .also {
+                        appImageLoader = it
+                        // Also as Coil's process-wide loader, so code outside the composition gets
+                        // this one -- with its ICO decoder and its caches -- rather than a default
+                        // loader that can decode neither a game's .ico nor anything already cached.
+                        Coil.setImageLoader(it)
+                    }
             }
 
             val snackbarController = remember { SnackbarHostController() }
