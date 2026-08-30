@@ -1053,6 +1053,13 @@
     <string name="settings_performance_title">Performance</string>
     <string name="settings_performance_power_control_title">Power Control</string>
     <string name="settings_performance_power_control_subtitle">Enable in-game power control by default (enabled on tested devices: AYN Odin 3, Retroid Pocket 6/Nova)</string>
+    <string name="settings_performance_presentation_title">Frame presentation</string>
+    <string name="present_software">Software copy</string>
+    <string name="present_software_summary">Every frame is copied to the CPU and sent over the X socket. Slowest, but always works.</string>
+    <string name="present_shm">Shared memory</string>
+    <string name="present_shm_summary">Still copied to the CPU, but handed over in shared memory instead of the socket.</string>
+    <string name="present_dri3">Direct (DRI3)</string>
+    <string name="present_dri3_summary">No copy at all: the game\'s image is shared with the display directly. Fastest, needs driver support.</string>
 
     <!-- Settings: Emulation Group -->
     <string name="settings_emulation_title">Emulation</string>

@@ -70,7 +70,25 @@ add_library(winlator_11 SHARED
 target_link_libraries(winlator_11 log android jnigraphics vulkan dl)
 target_link_options(winlator_11 PRIVATE -Wl,-z,max-page-size=16384)
 
-add_library(android-sysvshm SHARED ${GN_CPP}/winlator/sysvshared_memory.c)
+# Preloaded into guest processes as well as loaded by SysVSharedMemory, so it carries both the JNI
+# entry points and the shmget/shmat interposers that give MIT-SHM ids the X server recognises.
+add_library(android-sysvshm SHARED
+    ${GN_CPP}/winlator/sysvshared_memory.c
+    ${GN_CPP}/winlator/sysvshm_interposer.c)
 set_target_properties(android-sysvshm PROPERTIES OUTPUT_NAME "android-sysvshm")
 target_link_libraries(android-sysvshm log android)
 target_link_options(android-sysvshm PRIVATE -Wl,-z,max-page-size=16384)
+
+# The same code again under the name Mesa's ICDs were linked against.
+#
+# LD_PRELOAD is not enough for them: libvulkan_intel.so carries a DT_NEEDED on
+# libandroid-shmem.so, and bionic resolves a symbol referenced from a dlopen'd library out of that
+# library's own group before it looks at the preloads, so Termux's implementation wins and hands
+# out shmids the X server never issued. Staging this over the shipped libandroid-shmem.so puts our
+# broker behind the name Mesa already asks for.
+add_library(android-shmem SHARED
+    ${GN_CPP}/winlator/sysvshared_memory.c
+    ${GN_CPP}/winlator/sysvshm_interposer.c)
+set_target_properties(android-shmem PROPERTIES OUTPUT_NAME "android-shmem")
+target_link_libraries(android-shmem log android)
+target_link_options(android-shmem PRIVATE -Wl,-z,max-page-size=16384)

@@ -164,13 +164,26 @@ tablet on 2026-08-30, launched from a generated app-drawer entry. `vkQueueSubmit
 `vkQueuePresentKHR` cycle continuously and the menu's background scene animates, so
 frames are genuinely being produced and presented rather than a single frame sticking.
 
-Which driver serves it is not currently recorded: DXVK logging is off in this
-configuration, so there is no `hl2_dxgi.log` to read, and all three ICDs (ANV, RADV,
-lavapipe) are staged. Earlier in the port a DXVK log reported `llvmpipe (LLVM 21.1.8)`,
-Vulkan 1.4.335, 7788 MiB heap, with a `1280x800` `VK_FORMAT_B8G8R8A8_UNORM` swapchain of
-3 images — but that predates the hardware ICDs being staged, so it should not be taken as
-current. Turning DXVK logging on to confirm whether ANV wins on this Intel part is worth
-doing before any performance claim is made.
+**ANV serves it, on real hardware.** Confirmed on 2026-08-30 by capturing logcat across a
+cold HL2 launch: winevulkan's `fill_luid_property` reports a single physical device,
+`Intel(R) UHD Graphics (AML-CFL)`, `vendorID=0x8086`. Lavapipe and RADV are staged and
+listed in `VK_DRIVER_FILES` but neither enumerates a device, so the loader's own probing
+picks the hardware driver with nothing for us to configure. The earlier
+`llvmpipe (LLVM 21.1.8)` reading predates the hardware ICDs and is obsolete.
+
+DXVK's own log is not the way to read this: `DXVKHelper.setEnvVars` sets
+`DXVK_LOG_LEVEL=none` after `BlissPortDebug` has asked for `info`, so no `hl2_d3d9.log`
+is written. The winevulkan traces under `WINEDEBUG=+vulkan` answer the same question and
+are already in logcat under the `WineGuest` tag.
+
+This matters for presentation, because the same capture shows guest ANV offering
+`VK_EXT_external_memory_dma_buf`, `VK_EXT_image_drm_format_modifier`,
+`VK_KHR_external_memory_fd` and `VK_EXT_queue_family_foreign` — the whole set a real
+dma-buf export needs. The Android side of the app presents through ANV too (a
+`MESA-INTEL: anv_get_image_format_properties` line accompanies `Winlator_Renderer`
+creating its swapchain), so both ends of a zero-copy handoff would be the same driver on
+the same device. DRI3 is therefore worth the effort here rather than being blocked on
+hardware that cannot export.
 
 Three app-side fixes were needed alongside the staging:
 

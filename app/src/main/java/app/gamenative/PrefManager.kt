@@ -16,6 +16,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.autotuning.DeviceGate
 import app.gamenative.enums.AppTheme
+import app.gamenative.enums.PresentationPath
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.HomeDestination
 import app.gamenative.ui.enums.Orientation
@@ -1281,6 +1282,18 @@ object PrefManager {
         get() = getPref(STEAMGRIDDB_API_KEY, "")
         set(value) {
             setPref(STEAMGRIDDB_API_KEY, value.trim())
+        }
+
+    /**
+     * Which route a guest Vulkan frame takes to the X server on x86_64. See [PresentationPath];
+     * stored by key so an unknown value from an older or newer build falls back to the default
+     * rather than throwing.
+     */
+    private val PRESENTATION_PATH = stringPreferencesKey("presentation_path")
+    var presentationPath: PresentationPath
+        get() = PresentationPath.fromKey(getPref(PRESENTATION_PATH, PresentationPath.DEFAULT.key))
+        set(value) {
+            setPref(PRESENTATION_PATH, value.key)
         }
 
     private val EXTERNAL_STORAGE_PATH = stringPreferencesKey("external_storage_path")

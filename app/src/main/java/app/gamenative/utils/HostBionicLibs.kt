@@ -1,6 +1,7 @@
 package app.gamenative.utils
 
 import android.content.Context
+import app.gamenative.PrefManager
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.envvars.EnvVars
 import timber.log.Timber
@@ -140,29 +141,62 @@ object HostBionicLibs {
         Files.createSymbolicLink(link.toPath(), systemVulkan.toPath())
     }
 
+    /**
+     * Puts our SysV shm broker behind the name Mesa's ICDs were linked against.
+     *
+     * They carry a DT_NEEDED on `libandroid-shmem.so`, and bionic resolves a symbol referenced from a
+     * dlopen'd library out of that library's own group before it consults LD_PRELOAD, so the shipped
+     * Termux implementation answers `shmget` however we preload. Its ids are process-local and mean
+     * nothing to the X server, which then refuses the attach. Both files are replaced because
+     * LD_LIBRARY_PATH lists the two trees and only their order decides which one is found.
+     */
+    @JvmStatic
+    fun overrideGuestShmemLib(context: Context) {
+        val ours = File(context.applicationInfo.nativeLibraryDir, "libandroid-shmem.so")
+        if (!ours.isFile) {
+            Timber.w("HostBionicLibs: no libandroid-shmem.so to stage; guest shm stays Termux's")
+            return
+        }
+
+        for (root in listOf(hostLibsRoot(context), hostVulkanRoot(context))) {
+            val staged = File(root, "usr/lib/libandroid-shmem.so")
+            if (!staged.isFile || staged.length() == ours.length()) continue
+            runCatching { ours.copyTo(staged, overwrite = true) }
+                .onSuccess { Timber.i("HostBionicLibs: staged our shm broker over %s", staged.path) }
+                .onFailure { Timber.e(it, "HostBionicLibs: could not replace %s", staged.path) }
+        }
+    }
+
     /** Points the guest Vulkan loader at staged ICDs so DXVK can get an X11 surface. */
     @JvmStatic
     fun applyGuestVulkanEnv(envVars: EnvVars, context: Context) {
         if (!HostCpu.current().isX86_64) return
         val manifests = stagedIcdManifests(context)
         if (manifests.isEmpty()) return
+
+        overrideGuestShmemLib(context)
         val value = manifests.joinToString(":") { it.absolutePath }
         envVars.put("VK_ICD_FILENAMES", value)
         envVars.put("VK_DRIVER_FILES", value)
 
-        // The in-app X server has no DRI3/Present buffer sharing without the Vortek
-        // renderer (arm64-only), so keep Mesa's WSI on the software XPutImage path.
+        // How the frame gets from the guest to the X server is the user's choice, because each route
+        // needs a different part of the stack to be present and none of them degrades gracefully:
         //
-        // `noshm` additionally keeps MIT-SHM out of it. Mesa enables shm whenever DRI3 and
-        // Present are advertised, and the server's MIT-SHM is the 1.1 shmid variant, which
-        // needs the guest's shmget to come from our own SysV broker. On x86_64 the preloaded
-        // libandroid-sysvshm.so has no shmget at all -- only JNI entry points -- so the call
-        // lands in Termux's libandroid-shmem and yields a shmid the server never issued.
-        // Attach quietly fails, PutImage then raises BadSHMSegment, and Xlib's IO error
-        // handler exits the guest mid-frame. Writing that interposer is what lets shm return;
-        // see docs/X86_64_VULKAN_PROVISIONING.md.
-        envVars.put("MESA_VK_WSI_DEBUG", "sw,noshm")
+        //   software  every frame read back to the CPU and pushed with PutImage. `noshm` is what keeps
+        //             MIT-SHM out of it -- Mesa enables shm whenever DRI3 and Present are advertised,
+        //             and the server's MIT-SHM is the 1.1 shmid variant, which needs the guest's
+        //             shmget to come from our own SysV broker. Without the x86_64 interposer that
+        //             call lands in Termux's libandroid-shmem and yields a shmid the server never
+        //             issued, so ShmAttach fails and PutImage raises BadSHMSegment.
+        //   shm       the same copy, but read out of a shared segment rather than the socket.
+        //   dri3      no copy: the guest exports the image and the server imports the dma-buf.
+        //
+        // See docs/X86_64_VULKAN_PROVISIONING.md.
+        val path = PrefManager.presentationPath
+        if (path.wsiDebug.isNotEmpty()) {
+            envVars.put("MESA_VK_WSI_DEBUG", path.wsiDebug)
+        }
 
-        Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (WSI=sw)", value)
+        Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (presentation=%s)", value, path.key)
     }
 }
