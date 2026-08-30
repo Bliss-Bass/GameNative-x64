@@ -1,6 +1,8 @@
 package app.gamenative.linux
 
 import android.content.Context
+import app.gamenative.stubs.StubRegistry
+import app.gamenative.stubs.Stubs
 import app.gamenative.utils.retireLinuxShortcuts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,10 +44,10 @@ object LinuxAppReconciler {
 
     /** Takes back the all-apps entries that no longer match an entry in the userland. */
     private suspend fun reconcileStubs(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
-        val records = LinuxAppStubRegistry.all(context)
+        val records = StubRegistry.linux.all(context)
         if (records.isEmpty()) return
 
-        val installed = LinuxAppStubs.installed(context, records.map { it.packageName })
+        val installed = Stubs.installed(context, records.map { it.packageName })
         val byEntry = apps.associateBy { it.entryId }
 
         for (record in records) {
@@ -53,7 +55,7 @@ object LinuxAppReconciler {
             // what stops a later change to the entry from quietly reinstalling it.
             if (record.packageName !in installed) {
                 Timber.i("[LinuxAppReconciler]: %s is gone from the device, forgetting it", record.packageName)
-                LinuxAppStubRegistry.forget(context, record.entryId)
+                StubRegistry.linux.forget(context, record.entryId)
                 continue
             }
 

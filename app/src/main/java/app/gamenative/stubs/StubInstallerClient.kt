@@ -1,4 +1,4 @@
-package app.gamenative.linux
+package app.gamenative.stubs
 
 import android.content.ComponentName
 import android.content.Context
@@ -7,8 +7,6 @@ import android.content.ServiceConnection
 import android.content.pm.PackageInstaller
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
-import app.gamenative.stubs.IStubInstaller
-import app.gamenative.stubs.IStubInstallerCallback
 import java.io.File
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -18,10 +16,10 @@ import timber.log.Timber
 /**
  * The ROM's stub installer, when the ROM has one.
  *
- * A system service holding INSTALL_PACKAGES, which is what lets a Linux application's launcher
- * entry appear without the user first allowing installs from GameNative, then confirming, then
- * getting past a Play Protect scan. Absent on a plain Android device, where those three prompts
- * are the only way through and [LinuxAppStubs] asks for them instead.
+ * A system service holding INSTALL_PACKAGES, which is what lets a launcher entry appear without
+ * the user first allowing installs from GameNative, then confirming, then getting past a Play
+ * Protect scan. Absent on a plain Android device, where those three prompts are the only way
+ * through and [Stubs] asks for them instead.
  *
  * It will only install a package that is a launcher entry and nothing else, so a failure here is
  * worth reporting rather than papering over: it means the stub we built is not the shape the

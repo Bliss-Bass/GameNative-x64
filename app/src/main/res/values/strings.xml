@@ -2360,8 +2360,8 @@
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
     <string name="linux_apps_pin">Add to home screen</string>
     <string name="linux_apps_add_to_drawer">Add to app list</string>
-    <string name="linux_apps_drawer_failed">Could not add %1$s to the app list</string>
-    <string name="linux_apps_drawer_install_failed">The app list entry could not be installed</string>
+    <string name="stub_add_failed">Could not add %1$s to the app list</string>
+    <string name="stub_install_failed">The app list entry could not be installed</string>
     <string name="linux_shortcut_gone">This Linux app is no longer installed</string>
     <string name="linux_storage_title">Linux apps cannot see your files</string>
     <string name="linux_storage_body">Tap to allow file access, then start a session to pick it up.</string>

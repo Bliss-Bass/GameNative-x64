@@ -1,4 +1,4 @@
-package app.gamenative.linux
+package app.gamenative.stubs
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -46,7 +46,7 @@ class StubInstallReceiver : BroadcastReceiver() {
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                 Timber.e("[StubInstall]: install of %s failed (%d): %s", packageName, status, message)
-                SnackbarManager.show(context.getString(R.string.linux_apps_drawer_install_failed))
+                SnackbarManager.show(context.getString(R.string.stub_install_failed))
             }
         }
     }

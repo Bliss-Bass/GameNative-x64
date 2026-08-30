@@ -190,7 +190,7 @@
 
         <!-- Where PackageInstaller reports the outcome of a generated stub install. -->
         <receiver
-            android:name=".linux.StubInstallReceiver"
+            android:name=".stubs.StubInstallReceiver"
             android:exported="false" />
 
         <!-- FileProvider for secure file sharing (for APK installation) -->
