@@ -5,19 +5,29 @@ list.
 
 ## Where the work stands
 
+Tagged `linux-apps-phase4-app-entries` in both this repo and `vendor_ax86-lite`.
+
 Committed: PRoot for x86_64, the Ubuntu rootfs installer, the Termux-based terminal
 screen, the graphical session packages (Xtigervnc + openbox + xsettingsd from apt), the
-session manager, the RFB client and presenter, and the Linux desktop screen.
+session manager, the RFB client and presenter, the Linux session screen with both an app
+and a minimal-desktop profile, `.desktop` scanning with a Linux Apps screen, shared-storage
+binding into the guest, and app-drawer entries for both Linux apps and installed games.
 
 Verified end to end on the tablet: a session comes up on its own display and loopback
 port, the presenter shows it, touch and mouse reach the guest, keystrokes reach it
 (`whoami` typed from Android returned `root` in xterm), and resizing the app's freeform
-window resizes the X screen, with openbox relayouting the client to match.
+window resizes the X screen, with openbox relayouting the client to match. A guest process
+can write to `/mnt/storage/internal/Download` and the file appears in `/sdcard/Download`.
+Galculator and Half-Life 2 both have drawer entries that launch them, and **HL2 reaches its
+main menu and keeps rendering** when started from its entry.
 
-Remaining from the task list, in order: the app catalog (`.desktop` scanning, a Linux tab,
-launching `Exec=` lines), then the platform-signed helper that installs a stub APK per
-Linux app, then repointing the ROM `linuxwindow` addon and deleting the dead
-Debian/Wayland scaffolding.
+Remaining, in rough order: presentation latency (see
+`X86_64_VULKAN_PROVISIONING.md` — the missing x86_64 SysV interposer is the near-term
+item), repointing the ROM `linuxwindow` addon and deleting the dead Debian/Wayland
+scaffolding, then the userland gaps that have no bridge yet at all: audio, GL for demanding
+apps, camera and Bluetooth. Session polish is queued separately (double cursor, colours
+arriving lighter than sent, panel noise, a wallpaper, and the app's own name and icon in
+Android's title bar).
 
 ## Things that cost time, so they are worth remembering
 
@@ -43,6 +53,39 @@ Debian/Wayland scaffolding.
   finally identified it.
 - **xterm takes about five seconds to map.** Sampling the framebuffer before that shows an
   empty black root and proves nothing.
+- **Signing with an AndroidKeyStore key depends on provider order, which is not stable.**
+  `Signature.getInstance("SHA256withRSA")` picked the bundled Bouncy Castle provider, which
+  rejects a keystore-backed key outright (`not a RSAPrivateKey instance`). It worked for
+  Linux app stubs and failed for game stubs purely because other libraries had loaded by
+  then and shifted the order. `ApkSigner.signerFor` now walks the providers and takes the
+  first that accepts the key.
+- **A `sharedUserId="android.uid.system"` app signed with the wrong key bootloops the
+  device**, and needs a full OS reinstall to recover. Incremental builds silently used AOSP
+  test-keys unless `TARGET_USE_CUSTOM_KEYS=true`. Verify certs match before pushing to
+  `/system`; there is no soft failure mode here.
+- **`USER_ACTION_NOT_REQUIRED` does not skip Play Protect.** It suppresses the confirmation
+  prompt, not verification, so installs still stall on a scan. Only running as system uid
+  and calling the hidden `disableVerificationForUid` makes it genuinely silent.
+- **A `PendingIntent` for a non-exported receiver has to name the class.** An implicit one
+  never arrives, and the session then looks like it committed into nothing.
+- **An asset called `classes.dex` is silently dropped from the APK.** It collides with the
+  app's own dex; the trampoline ships as `stub/trampoline.dex` instead.
+- **`am broadcast` from a shell is not equivalent to a system broadcast.** Simulated
+  `PACKAGE_FULLY_REMOVED` never reached the receiver even with
+  `FLAG_INCLUDE_STOPPED_PACKAGES`; a real `adb uninstall` did. Test removal paths for real.
+- **A custom game's icon is a local `.ico`, and only the app's own Coil loader can decode
+  it** — the ICO decoder is registered there. Building a throwaway `ImageLoader(context)`
+  per call, as `loadGameArtwork` used to, cannot read it and shares none of the caches.
+- **`canRead()` on the storage root returns true without `MANAGE_EXTERNAL_STORAGE`**, which
+  yields a bind mount that exists and reads nothing. `isExternalStorageManager()` is the
+  only honest check. Granting it via `appops` takes effect without an app restart, but the
+  banner needs a window-focus trigger to notice.
+- **tint2 resolves background ids while parsing**, so a config that references one before
+  defining it segfaults rather than complaining. Ordering is load-bearing.
+- **`adb shell input` coordinates are device pixels, not screenshot pixels** — the trap
+  already noted under Testing, hit again while driving HL2's menu. Taps land silently
+  nowhere and read as the app ignoring input. Multiply by 2.109 on this panel, or read
+  bounds straight out of `uiautomator dump`.
 
 ## Testing notes
 

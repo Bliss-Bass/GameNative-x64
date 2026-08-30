@@ -39,7 +39,8 @@ The app wires this up automatically once present:
 * `buildLdLibraryPath` puts `host_vk_x86_64/usr/lib` **before** `/system/lib64` so the
   Khronos loader wins over Android's.
 * `HostBionicLibs.applyGuestVulkanEnv` sets `VK_ICD_FILENAMES` / `VK_DRIVER_FILES` to
-  the staged manifests and pins `MESA_VK_WSI_DEBUG=sw`.
+  the staged manifests and pins `MESA_VK_WSI_DEBUG=sw,noshm` (see "How frames are
+  presented" for why `noshm` is there, and what it costs).
 * `ensureVulkanLoaderSymlink` skips its `/system/lib64/libvulkan.so` symlink when a
   real loader is staged.
 
@@ -158,11 +159,20 @@ compressed.
 
 ## Current status
 
-With the stack staged, the guest gets a fully working Vulkan device: the DXVK
-`hl2_dxgi.log` reports `llvmpipe (LLVM 21.1.8)`, Vulkan 1.4.335, 7788 MiB heap, and
-DXVK creates a `1280x800` `VK_FORMAT_B8G8R8A8_UNORM` swapchain with 3 images.
+**Half-Life 2 runs.** It reaches its main menu and keeps rendering, verified on the ax86
+tablet on 2026-08-30, launched from a generated app-drawer entry. `vkQueueSubmit` and
+`vkQueuePresentKHR` cycle continuously and the menu's background scene animates, so
+frames are genuinely being produced and presented rather than a single frame sticking.
 
-Two app-side fixes were needed alongside the staging:
+Which driver serves it is not currently recorded: DXVK logging is off in this
+configuration, so there is no `hl2_dxgi.log` to read, and all three ICDs (ANV, RADV,
+lavapipe) are staged. Earlier in the port a DXVK log reported `llvmpipe (LLVM 21.1.8)`,
+Vulkan 1.4.335, 7788 MiB heap, with a `1280x800` `VK_FORMAT_B8G8R8A8_UNORM` swapchain of
+3 images — but that predates the hardware ICDs being staged, so it should not be taken as
+current. Turning DXVK logging on to confirm whether ANV wins on this Intel part is worth
+doing before any performance claim is made.
+
+Three app-side fixes were needed alongside the staging:
 
 * `VortekRendererComponent`'s static initializer aborted the process on x86_64 because
   `libvortekrenderer.so` does not exist. The load is now non-fatal, since the class's
@@ -170,8 +180,59 @@ Two app-side fixes were needed alongside the staging:
 * The X server's Present extension did not implement `QueryCapabilities` (minor
   opcode 4). Mesa's X11 WSI issues it during swapchain setup and treats the protocol
   error as fatal.
+* MIT-SHM had to be disabled; see below. Before that, Source died with status 1 shortly
+  after its first queue submits, because the guest lost its X connection mid-frame and
+  Xlib's IO error handler exits the process.
 
-Remaining blocker: Source requests fullscreen (`Windowed: false`), queries `RANDR`,
-gets `present=false` from the X server, and exits. Next step is either forcing
-windowed mode for the title or implementing a minimal RANDR extension exposing one
-fixed mode.
+## How frames are presented
+
+Every presented frame currently takes the slow path: Mesa's software WSI copies the
+GPU-rendered image back to the CPU and pushes the whole thing to the X server as an
+`XPutImage` request over the unix socket. That is two costs — a readback per frame, and a
+full frame of pixels through a socket — and it is the main lever left on presentation
+latency.
+
+`MESA_VK_WSI_DEBUG=sw,noshm` is what pins it there. The `sw` half is unavoidable for now:
+Mesa would otherwise use DRI3 with buffer sharing, and this X server has no DRI3/Present
+buffer sharing without the Vortek renderer, which is an arm64-only prebuilt. The `noshm`
+half is the interesting one, because it is working around something fixable.
+
+**Why `noshm` is needed, precisely.** Mesa enables MIT-SHM whenever the X server
+advertises DRI3 and Present, which this one does. The X server implements MIT-SHM 1.1 —
+the variant where the client passes a *SysV shmid*, an integer, and the server looks it up
+(`MITSHMExtension.attach` -> `SHMSegmentManager.attach`). Bionic has no SysV shared
+memory, so the shmid has to come from an emulation layer that both sides agree on: the app
+runs a broker over a unix socket (`SysVSharedMemoryComponent`, at
+`/tmp/.sysvshm/SM0`, path exported to the guest as `ANDROID_SYSVSHM_SERVER`), and the
+guest is supposed to reach it through an `LD_PRELOAD` interposer that turns `shmget` and
+`shmat` into broker requests.
+
+On x86_64 that interposer does not exist. The preloaded `libandroid-sysvshm.so` is built
+from `app/src/main/cpp/winlator/sysvshared_memory.c`, which defines only four JNI entry
+points and **no `shmget`/`shmat`/`shmdt`/`shmctl`** — confirmed with `nm -D`. So Mesa's
+`shmget` binds instead to Termux's `libandroid-shmem`, which hands back a shmid from its
+own process-local table. That shmid means nothing to the server, `SHMSegmentManager.attach`
+silently does nothing when the lookup fails, and the failure surfaces later as
+`BadSHMSegment` — which is what costs the guest its X connection.
+
+Note that arm64 does not have this problem only because it preloads a real interposer
+shipped in imagefs. Both copies of that library on the device (`libandroid-sysvshm.so` and
+`libandroid-shmem.so` under `imagefs/usr/lib`) are AArch64 binaries, useless here, and no
+source for the interposer is in the tree.
+
+**Two routes forward**, cheapest first:
+
+1. **Write the x86_64 interposer** and re-enable MIT-SHM. It implements `shmget`, `shmat`,
+   `shmdt` and `shmctl` against the existing broker protocol (`SHMGET`, `GET_FD`,
+   `DELETE`, one byte plus a 32-bit argument per request, replies big-endian, the fd
+   arriving as `SCM_RIGHTS` ancillary data). This keeps the CPU readback but stops whole
+   frames travelling through the X socket. It also brings `ShmFramePacer` back to life,
+   which only runs on the MIT-SHM path and is dead code today.
+2. **DRI3 + Present with dma-buf**, the zero-copy path and the real answer — the x86_64
+   counterpart of what Vortek does on arm64. Note the fd-passing machinery this needs
+   already exists on both sides: the transport handles `SCM_RIGHTS` in both directions and
+   `DRI3Extension.pixmapFromFd` already maps a received fd. What MIT-SHM is missing is
+   the 1.2 protocol requests (`ShmAttachFd`, `ShmCreateSegment`), not the plumbing.
+
+Whichever lands, the route should become a user-visible Settings choice with a per-device
+default, since the right answer will vary by GPU and driver.

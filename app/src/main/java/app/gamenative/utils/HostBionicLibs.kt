@@ -152,9 +152,15 @@ object HostBionicLibs {
 
         // The in-app X server has no DRI3/Present buffer sharing without the Vortek
         // renderer (arm64-only), so keep Mesa's WSI on the software XPutImage path.
-        // `noshm` additionally keeps MIT-SHM out of it: Mesa enables shm whenever DRI3
-        // and Present are advertised, which routes presentation through bionic SysV-shm
-        // emulation and costs the guest its X connection mid-frame.
+        //
+        // `noshm` additionally keeps MIT-SHM out of it. Mesa enables shm whenever DRI3 and
+        // Present are advertised, and the server's MIT-SHM is the 1.1 shmid variant, which
+        // needs the guest's shmget to come from our own SysV broker. On x86_64 the preloaded
+        // libandroid-sysvshm.so has no shmget at all -- only JNI entry points -- so the call
+        // lands in Termux's libandroid-shmem and yields a shmid the server never issued.
+        // Attach quietly fails, PutImage then raises BadSHMSegment, and Xlib's IO error
+        // handler exits the guest mid-frame. Writing that interposer is what lets shm return;
+        // see docs/X86_64_VULKAN_PROVISIONING.md.
         envVars.put("MESA_VK_WSI_DEBUG", "sw,noshm")
 
         Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (WSI=sw)", value)
