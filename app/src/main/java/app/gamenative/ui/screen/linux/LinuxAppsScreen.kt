@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
@@ -25,19 +26,23 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +54,7 @@ import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxRootfs
+import app.gamenative.linux.LinuxStorage
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.pluviaTopSafeAreaPadding
@@ -75,6 +81,15 @@ fun LinuxAppsScreen(
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
 
+    // All-files access is granted in Settings, so the answer only changes while attention is
+    // elsewhere. Keyed on window focus rather than the lifecycle: in desktop windowing both
+    // windows are on screen at once and this one is never paused, so ON_RESUME never comes.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    var storageGranted by remember { mutableStateOf(LinuxStorage.isGranted(context)) }
+    LaunchedEffect(windowFocused) {
+        if (windowFocused) storageGranted = LinuxStorage.isGranted(context)
+    }
+
     // Reading a few dozen small files, off the main thread. Rescanned on request because
     // apt runs in the terminal, out of sight of this screen.
     val apps by produceState<List<LinuxAppScanner.LinuxApp>?>(initialValue = null, refreshKey) {
@@ -99,6 +114,10 @@ fun LinuxAppsScreen(
                 null
             }
         Header(onBack = onBack, onRefresh = onRefresh)
+
+        if (LinuxRootfs.isInstalled(context) && !storageGranted) {
+            StorageBanner(onGrant = { LinuxStorage.requestAccess(context) })
+        }
 
         Box(modifier = Modifier.fillMaxSize()) {
             val found = apps
@@ -153,6 +172,46 @@ private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp)
             Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
             SnackbarManager.show(context.getString(R.string.linux_apps_drawer_failed, app.name))
         }
+}
+
+/**
+ * Offers the all-files grant, without which the userland sees none of Android's files.
+ *
+ * A banner rather than a prompt on entry: the userland is useful without it, and this is a
+ * special access that only Settings can give, so interrupting someone who came here to launch
+ * something would be the wrong trade.
+ */
+@Composable
+private fun StorageBanner(onGrant: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onGrant)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.FolderOff,
+            contentDescription = null,
+            tint = PluviaTheme.colors.accentCyan,
+            modifier = Modifier.size(24.dp),
+        )
+        Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+            Text(
+                text = stringResource(R.string.linux_storage_title),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(R.string.linux_storage_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = PluviaTheme.colors.textMuted,
+            )
+        }
+    }
 }
 
 @Composable

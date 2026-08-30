@@ -75,6 +75,12 @@ object LinuxProgramLauncher {
         argv += "--bind=${shm.absolutePath}:/dev/shm"
 
         if (displaySocketDir != null) argv += "--bind=${displaySocketDir.absolutePath}:/tmp/.X11-unix"
+
+        // Android's shared storage, when this app is allowed to read it. Skipped rather than
+        // bound-and-broken otherwise, so a file dialog shows no directory instead of one that
+        // refuses to open.
+        LinuxStorage.binds(context, rootfs).forEach { argv += "--bind=$it" }
+
         extraBinds.forEach { argv += "--bind=$it" }
 
         // env rather than exec'ing the program directly: PRoot passes the host environment
