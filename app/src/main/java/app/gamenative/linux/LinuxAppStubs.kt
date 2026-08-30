@@ -102,7 +102,18 @@ object LinuxAppStubs {
      * scan -- unavoidable for an app that is not part of the system image.
      */
     suspend fun install(context: Context, apk: File): Result<Unit> {
-        StubInstallerClient.install(context, apk)?.let { return it }
+        StubInstallerClient.install(context, apk)?.let { result ->
+            // An install can outlast our wait for its result, so before believing a failure, ask
+            // what is actually on the device. Asked of the installer rather than the package
+            // manager, which hides packages we have not declared an interest in.
+            if (result.isFailure &&
+                StubInstallerClient.installedStubs(context)?.contains(apk.nameWithoutExtension) == true
+            ) {
+                Timber.i("[LinuxAppStubs]: %s installed despite the reported failure", apk.name)
+                return Result.success(Unit)
+            }
+            return result
+        }
 
         Timber.i("[LinuxAppStubs]: no ROM installer, asking the user instead")
         return requestInstall(context, apk)
@@ -150,11 +161,20 @@ object LinuxAppStubs {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /** Whether a stub for [app] is currently installed. */
-    fun isInstalled(context: Context, app: LinuxAppScanner.LinuxApp): Boolean =
-        runCatching {
-            context.packageManager.getPackageInfo(packageNameFor(app), 0)
+    /**
+     * Whether a stub for [app] is currently installed.
+     *
+     * Asked of the ROM's installer where there is one, because the package manager hides packages
+     * we have not declared an interest in and a generated stub cannot be named in advance.
+     */
+    suspend fun isInstalled(context: Context, app: LinuxAppScanner.LinuxApp): Boolean {
+        val packageName = packageNameFor(app)
+        StubInstallerClient.installedStubs(context)?.let { return packageName in it }
+
+        return runCatching {
+            context.packageManager.getPackageInfo(packageName, 0)
         }.isSuccess
+    }
 
     /** Removes the stub for [app], through the ROM's installer where there is one. */
     suspend fun uninstall(context: Context, app: LinuxAppScanner.LinuxApp): Result<Unit> {

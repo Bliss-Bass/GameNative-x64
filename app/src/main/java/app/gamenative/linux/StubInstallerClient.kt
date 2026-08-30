@@ -30,10 +30,16 @@ import timber.log.Timber
 object StubInstallerClient {
 
     private const val ACTION = "app.gamenative.stubs.StubInstaller"
-    private const val PACKAGE = "app.gamenative.stubs"
+    private const val PACKAGE = "app.gamenative.stubinstaller"
 
-    /** Long enough for a package install, short enough not to hang the caller for good. */
-    private const val TIMEOUT_MS = 60_000L
+    /**
+     * Long enough for a package install, short enough not to hang the caller for good.
+     *
+     * Generous because an install can stop to ask the user something -- a verifier prompt, say --
+     * and answering takes as long as it takes. Giving up early is worse than waiting: the binding
+     * goes with us, and the installer's process may follow, taking the answer with it.
+     */
+    private const val TIMEOUT_MS = 5 * 60_000L
 
     /** Whether this device has the installer. */
     fun isAvailable(context: Context): Boolean = intent(context) != null

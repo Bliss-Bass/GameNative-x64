@@ -6,6 +6,15 @@
         android:glEsVersion="0x00020000"
         android:required="true" />
 
+    <!--
+      The ROM's stub installer, which installs the launcher entries we generate for Linux
+      applications. Named here because package visibility filtering otherwise hides it: without
+      this, resolving or binding its service fails on a device that has it.
+    -->
+    <queries>
+        <package android:name="app.gamenative.stubinstaller" />
+    </queries>
+
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
