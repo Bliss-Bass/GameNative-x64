@@ -8,6 +8,7 @@ import app.gamenative.utils.loadGameArtwork
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.security.MessageDigest
+import timber.log.Timber
 
 /**
  * What an installed game's all-apps entry is made of.
@@ -91,6 +92,50 @@ object GameStubs {
                     ),
                 )
             }
+    }
+
+    /**
+     * Brings the entry published for one game back in step, if there is one.
+     *
+     * Per game rather than over the whole library: this runs where a game's name, artwork and
+     * installed state are already in hand, so it costs nothing to check, and a library-wide pass
+     * would have to resolve every game to answer the same question.
+     *
+     * Only ever takes back or repairs, never adds. Publishing is the user's decision, and a game
+     * whose entry they removed should not have one reappear because it is still installed.
+     */
+    suspend fun reconcile(
+        context: Context,
+        gameId: Int,
+        source: GameSource,
+        installed: Boolean,
+        label: String,
+        iconUrl: String?,
+    ) {
+        val entryId = entryIdFor(gameId, source)
+        val record = StubRegistry.games.of(context, entryId) ?: return
+
+        runCatching {
+            // Removed by the user in Settings. Their decision stands, and forgetting it here is
+            // what stops a later change to the game from quietly reinstalling it.
+            if (record.packageName !in Stubs.installed(context, listOf(record.packageName))) {
+                Timber.i("[GameStubs]: %s is gone from the device, forgetting it", record.packageName)
+                StubRegistry.games.forget(context, entryId)
+                return
+            }
+
+            if (!installed) {
+                Timber.i("[GameStubs]: %s is no longer installed, taking its entry back", entryId)
+                remove(context, entryId, record.packageName)
+                return
+            }
+
+            if (contentFingerprint(label, iconUrl) != record.fingerprint) {
+                Timber.i("[GameStubs]: %s changed, republishing its entry", entryId)
+                add(context, gameId, source, label, iconUrl)
+                    .onFailure { Timber.w(it, "[GameStubs]: could not republish %s", entryId) }
+            }
+        }.onFailure { Timber.w(it, "[GameStubs]: could not reconcile %s", entryId) }
     }
 
     suspend fun isInstalled(context: Context, gameId: Int, source: GameSource): Boolean {

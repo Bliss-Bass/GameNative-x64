@@ -1293,6 +1293,21 @@ abstract class BaseAppScreen {
             }
         }
 
+        // Nothing tells us a game was uninstalled, or renamed by its store, so an entry in the
+        // all-apps list is checked when the game is on screen and the answer is already to hand.
+        val stubLabel = getGameName(context, libraryItem)
+        val stubIconUrl = getIconUrl(context, libraryItem)
+        LaunchedEffect(libraryItem.appId, isInstalledState, stubLabel, stubIconUrl) {
+            GameStubs.reconcile(
+                context = context,
+                gameId = getGameId(libraryItem),
+                source = getGameSource(libraryItem),
+                installed = isInstalledState,
+                label = stubLabel,
+                iconUrl = stubIconUrl,
+            )
+        }
+
         val uiScope = rememberCoroutineScope()
 
         suspend fun performStateRefresh(includeUpdatePending: Boolean) {
