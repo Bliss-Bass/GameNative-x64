@@ -68,7 +68,7 @@ public class DRI3Extension implements Extension {
             ByteBuffer mapping = SysVSharedMemory.mapSHMSegment(fd, 4096, 0, false);
             if (mapping == null) throw new BadAlloc();
 
-            syncExtension.registerSharedFence(fenceId, mapping, initiallyTriggered);
+            syncExtension.registerSharedFence(client, fenceId, mapping, initiallyTriggered);
         }
         finally {
             XConnectorEpoll.closeFd(fd);

@@ -7,6 +7,8 @@ import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.events.Event;
 import com.winlator.xserver.extensions.PresentExtension;
+import com.winlator.xserver.extensions.SyncExtension;
+import com.winlator.xserver.extensions.XFixesExtension;
 import com.winlator.xserver.extensions.XInput2Extension;
 
 import java.io.IOException;
@@ -126,6 +128,16 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
         PresentExtension present = xServer.getExtension(PresentExtension.MAJOR_OPCODE);
         if (present != null)
             present.onClientDisconnected(this);
+
+        // The shared-memory present path leaves a fence and a region per swapchain image, and a
+        // guest killed mid-frame sends no Destroy for either.
+        SyncExtension sync = xServer.getExtension(SyncExtension.MAJOR_OPCODE);
+        if (sync != null)
+            sync.onClientDisconnected(this);
+
+        XFixesExtension xfixes = xServer.getExtension(XFixesExtension.MAJOR_OPCODE);
+        if (xfixes != null)
+            xfixes.onClientDisconnected(this);
     }
 
     public void generateSequenceNumber() {

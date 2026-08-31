@@ -33,6 +33,22 @@ public class XFixesExtension implements Extension {
     private static final int SERVER_MINOR = 0;
 
     private final SparseArray<short[]> regions = new SparseArray<>();
+    /** Who each region belongs to; guarded by {@link #regions}. */
+    private final SparseArray<XClient> owners = new SparseArray<>();
+
+    /**
+     * Drop the regions of a client that has gone, since a client killed mid-frame never sends
+     * DestroyRegion and its ids will be handed to somebody else.
+     */
+    public void onClientDisconnected(XClient client) {
+        synchronized (regions) {
+            for (int i = owners.size() - 1; i >= 0; i--) {
+                if (owners.valueAt(i) != client) continue;
+                regions.remove(owners.keyAt(i));
+                owners.removeAt(i);
+            }
+        }
+    }
 
     private static abstract class ClientOpcodes {
         private static final int QUERY_VERSION = 0;
@@ -96,8 +112,10 @@ public class XFixesExtension implements Extension {
                 break;
             case ClientOpcodes.CREATE_REGION: {
                 int region = inputStream.readInt();
+                short[] created = readRectangles(client, inputStream);
                 synchronized (regions) {
-                    regions.put(region, readRectangles(client, inputStream));
+                    regions.put(region, created);
+                    owners.put(region, client);
                 }
                 break;
             }
@@ -115,6 +133,7 @@ public class XFixesExtension implements Extension {
                 inputStream.skip(client.getRemainingRequestLength());
                 synchronized (regions) {
                     regions.remove(region);
+                    owners.remove(region);
                 }
                 break;
             }
