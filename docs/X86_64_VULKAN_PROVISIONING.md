@@ -270,6 +270,8 @@ What has been ruled out:
 - **Not the broker.** No call into the interposer fails, and the segments are created and
   mapped at the sizes asked for.
 - **Not an event flood.** The server sends the client no events at all in the failing window.
+- **Not size.** A 64x64 window, whose segments are 16 KB rather than 4 MB, fails identically, so
+  neither the maximum request length nor the segment size is involved.
 
 One real bug was found and fixed on the way: `ShmQueryVersion` replied with 17 bytes where
 every X reply must be 32, and this output stream pads nothing automatically, so a client read
