@@ -262,6 +262,14 @@ sizes that matter: 300 frames of vkcube at 1280x800 take 5.2 s through shared me
 6.8 s through the socket (about 57 fps against 44). At 500x500 the socket path still wins, which
 is the expected shape — the saving is the frame copy, so it grows with the frame.
 
+Half-Life 2 was checked on the setting too: with Frame presentation set to Shared memory the
+guest launches with `MESA_VK_WSI_DEBUG=sw`, creates its shared pixmaps, reaches the menu and
+keeps presenting for minutes with no X errors. Note what could *not* be measured: synthetic
+`adb shell input tap` does not reach the guest's X pointer, so the in-game menus cannot be driven
+from a script and there is no way to turn on `cl_showfps` for a like-for-like frame rate against
+the socket path. Liveness was confirmed by diffing screenshots instead (about 260 k pixels change
+per sample), which is worth remembering as the cheap check for "is it still presenting".
+
 Getting there needed three server-side pieces, not one. The shared-memory path is not "the same
 blit through shared memory": it is *present a pixmap whose storage is the guest's segment*, so it
 runs through the Present extension and drags Present's requirements in with it.
