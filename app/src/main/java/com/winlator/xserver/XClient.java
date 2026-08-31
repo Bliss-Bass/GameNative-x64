@@ -12,8 +12,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 
 public class XClient implements XResourceManager.OnResourceLifecycleListener {
-    /** Every event pushed to a client, for catching a client that spends its life draining our queue. */
-    private static final boolean TRACE_EVENTS = false;
+    /**
+     * Every event pushed to a client, for catching a client that spends its life draining our
+     * queue. Events reach a client two ways, here and through {@link EventListener}, so both
+     * report or the quiet one hides exactly the flood being looked for.
+     */
+    static final boolean TRACE_EVENTS = false;
 
     public final XServer xServer;
     public com.winlator.xconnector.Client connectorClient;

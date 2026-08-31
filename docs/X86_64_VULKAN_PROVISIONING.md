@@ -256,10 +256,28 @@ The interposer is written and works: on the shared-memory setting Mesa's probe s
 created through our broker, the server attaches it, and the whole probe handshake completes.
 What does not work is the swapchain. Mesa allocates its images through the broker
 (three segments of width x height x 4) and then the guest never sends `ShmAttach` for any of
-them, never presents a frame, and ends up with its X connection in an error state. Half-Life 2
-turns that into a silent `exit(1)`, because Xlib's IO error handler exits; vkcube instead spins
-at 100% CPU making no syscalls at all, because xcb short-circuits every call once the
-connection is marked bad.
+them and never presents a frame. Half-Life 2 turns that into a silent `exit(1)` and vkcube
+spins at 100% CPU making no syscalls.
+
+**The cause: MIT-SHM here has no shared pixmaps.** The guest is not in an error state and is
+not waiting on the socket. It is blocked inside `xcb_wait_for_special_event`, which is how
+Mesa's X11 WSI waits for a Present `IdleNotify` or `CompleteNotify`. It gets there because
+turning MIT-SHM on changes *how Mesa presents*: the ICD's imports say so plainly —
+`xcb_shm_attach` and `xcb_shm_create_pixmap` are imported, `xcb_shm_put_image` is not. So the
+shared-memory path is not "the same blit through shared memory"; it is *present a pixmap whose
+storage is the shared segment*, and the server has to supply that pixmap.
+
+This server implements MIT-SHM `QueryVersion`, `Attach`, `Detach` and `PutImage` only. There is
+no `CreatePixmap` (opcode 5), and `ShmQueryVersion` reports `shared_pixmaps = false`. So the
+capability Mesa's shm present path is built on is exactly the one that is missing, and the wait
+for a Present event that can never arrive is the visible symptom rather than the fault.
+
+This also reframes the payoff. Shared pixmaps are not a small win over the socket copy: the
+pixmap *is* the guest's memory, so a present becomes a copy the server makes on its own terms
+instead of a frame pushed through the X socket, and it uses the Present extension that already
+works for everything else. Implementing `ShmCreatePixmap` (a `Pixmap` backed by the segment's
+`ByteBuffer`, which `SHMSegmentManager` already holds) plus `shared_pixmaps = true` is the next
+piece of work, and it is smaller than the DRI3/dma-buf route.
 
 What has been ruled out:
 
@@ -272,6 +290,13 @@ What has been ruled out:
 - **Not an event flood.** The server sends the client no events at all in the failing window.
 - **Not size.** A 64x64 window, whose segments are 16 KB rather than 4 MB, fails identically, so
   neither the maximum request length nor the segment size is involved.
+- **Not the present mode.** `immediate` and `mailbox` hang exactly as `fifo` does, so it is not
+  the FIFO queue thread.
+- **Not a malformed reply or event.** Every byte the server writes to the client was dumped and
+  decoded: replies are 32 bytes (or 32 plus the length they declare), the five events sent are
+  32 bytes each, and the client receives everything it asked for.
+- **Not a dead connection.** `xcb_connection_has_error` is never true, and `xcb_poll_for_event`
+  is never even called; both were confirmed by interposing them (`tools/xcbtrace.c`).
 
 One real bug was found and fixed on the way: `ShmQueryVersion` replied with 17 bytes where
 every X reply must be 32, and this output stream pads nothing automatically, so a client read
@@ -295,3 +320,12 @@ Two things make this bearable to iterate on:
 
 With that in place: `sw,noshm` presents 60 frames and exits in about a second, `sw` hangs, and
 the whole comparison takes under fifteen seconds.
+
+Three tools earned their keep on this and are worth reaching for again:
+
+- `tools/xcbtrace.c`, an `LD_PRELOAD` shim over the handful of xcb entry points a client can
+  block in. Preloading works for the test binary because it is an executable; it would not work
+  for the Vulkan ICDs, whose own `DT_NEEDED` outranks `LD_PRELOAD` under bionic.
+- `debuggerd -b <pid>`, which names the blocked call per thread without any setup.
+- `grep -a <symbol> <ICD>`, which answers "what does this driver actually call" in seconds and
+  settled this question outright.

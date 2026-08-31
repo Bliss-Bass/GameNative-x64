@@ -102,9 +102,22 @@ public class XOutputStream {
         write(ZERO, 0, length);
     }
 
+    /** Hex dump of everything sent to a client, for decoding what a client choked on. */
+    private static final boolean TRACE_WRITES = false;
+
     private void flush() throws IOException {
         if (buffer.position() != 0) {
             buffer.flip();
+
+            if (TRACE_WRITES) {
+                StringBuilder hex = new StringBuilder();
+                for (int i = buffer.position(); i < buffer.limit(); i++) {
+                    hex.append(String.format("%02x", buffer.get(i)));
+                    if ((i - buffer.position()) % 4 == 3) hex.append(' ');
+                }
+                android.util.Log.d("XWrite", "fd=" + (clientSocket != null ? clientSocket.fd : -1)
+                        + " " + buffer.remaining() + "B " + hex);
+            }
 
             if (ancillaryFd != -1) {
                 clientSocket.sendAncillaryMsg(buffer, ancillaryFd);

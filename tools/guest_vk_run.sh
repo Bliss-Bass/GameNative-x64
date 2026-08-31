@@ -34,13 +34,17 @@ export PATH=$F/imagefs/usr/bin
 # so adding it only produces "is for EM_AARCH64" link failures. Put extra x86_64 libraries
 # a test binary needs in files/vktest/lib instead.
 export LD_LIBRARY_PATH=$F/host_vk_x86_64/usr/lib:/system/lib64:$F/host_libs_x86_64/usr/lib:$APKLIB:$F/vktest/lib
-export LD_PRELOAD=$APKLIB/libandroid-sysvshm.so
+# EXTRA_PRELOAD is for debug shims such as tools/xcbtrace.c; it goes first so it sees the calls
+# the traced program makes for itself.
+export LD_PRELOAD=${EXTRA_PRELOAD:+$EXTRA_PRELOAD:}$APKLIB/libandroid-sysvshm.so
 export ANDROID_SYSVSHM_SERVER=$F/imagefs/tmp/.sysvshm/SM0
 export ANDROID_SYSVSHM_DEBUG=1
 export VK_DRIVER_FILES=$ICD/intel_icd.x86_64.json:$ICD/lvp_icd.x86_64.json:$ICD/radeon_icd.x86_64.json
 export VK_ICD_FILENAMES=$VK_DRIVER_FILES
 export MESA_VK_WSI_DEBUG="$MODE"
-export MESA_VK_WSI_PRESENT_MODE=fifo
+# fifo drives Mesa's Present-extension queue, which waits on special events; the other modes take
+# simpler paths, so this has to be changeable to tell a present-queue stall from a blit problem.
+export MESA_VK_WSI_PRESENT_MODE=${PRESENT_MODE:-fifo}
 export LC_ALL=en_US.utf8
 
 echo "MESA_VK_WSI_DEBUG=$MESA_VK_WSI_DEBUG running: $*"
