@@ -147,4 +147,10 @@ public class SysVSharedMemory {
     public static native ByteBuffer mapSHMSegment(int fd, long size, int offset, boolean readonly);
 
     public static native void unmapSHMSegment(ByteBuffer data, long size);
+
+    /**
+     * Signal an xshmfence a client is waiting on, as a DRI3 sync fence requires. The buffer must be
+     * a mapping of the fd the client passed with DRI3 FenceFromFD.
+     */
+    public static native void triggerFence(ByteBuffer fence);
 }

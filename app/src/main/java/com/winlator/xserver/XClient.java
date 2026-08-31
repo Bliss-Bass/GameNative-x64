@@ -6,6 +6,7 @@ import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.events.Event;
+import com.winlator.xserver.extensions.PresentExtension;
 import com.winlator.xserver.extensions.XInput2Extension;
 
 import java.io.IOException;
@@ -117,6 +118,14 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
         XInput2Extension xi2 = xServer.getExtension(XInput2Extension.MAJOR_OPCODE);
         if (xi2 != null)
             xi2.onClientDisconnected(this);
+
+        // Resource ids are recycled, so anything an extension keeps under a departed client's id
+        // becomes a trap for the next client to be handed that id: Present's own SelectInput
+        // answers BadMatch when it finds an id already claimed, leaving that client with no
+        // completion events at all.
+        PresentExtension present = xServer.getExtension(PresentExtension.MAJOR_OPCODE);
+        if (present != null)
+            present.onClientDisconnected(this);
     }
 
     public void generateSequenceNumber() {

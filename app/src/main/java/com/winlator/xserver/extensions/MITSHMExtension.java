@@ -7,18 +7,24 @@ import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.Drawable;
 import com.winlator.xserver.GraphicsContext;
+import com.winlator.xserver.Pixmap;
+import com.winlator.xserver.Visual;
 import com.winlator.xserver.XClient;
 import com.winlator.xserver.XLock;
 import com.winlator.xserver.XServer;
 import com.winlator.xserver.errors.BadAccess;
 import com.winlator.xserver.errors.BadDrawable;
 import com.winlator.xserver.errors.BadGraphicsContext;
+import com.winlator.xserver.errors.BadIdChoice;
 import com.winlator.xserver.errors.BadImplementation;
+import com.winlator.xserver.errors.BadMatch;
 import com.winlator.xserver.errors.BadSHMSegment;
+import com.winlator.xserver.errors.BadValue;
 import com.winlator.xserver.errors.XRequestError;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class MITSHMExtension implements Extension {
     public static final byte MAJOR_OPCODE = -101;
@@ -30,7 +36,11 @@ public class MITSHMExtension implements Extension {
         private static final byte ATTACH = 1;
         private static final byte DETACH = 2;
         private static final byte PUT_IMAGE = 3;
+        private static final byte CREATE_PIXMAP = 5;
     }
+
+    /** ZPixmap, the only layout in which a shared pixmap can be handed over here. */
+    private static final byte SHARED_PIXMAP_FORMAT = 2;
 
     @Override
     public String getName() {
@@ -63,14 +73,17 @@ public class MITSHMExtension implements Extension {
     private static void queryVersion(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
-            outputStream.writeByte((byte)0);
+            // shared_pixmaps. Mesa's shared-memory present path is built on CreatePixmap rather
+            // than PutImage, so saying no here is what sends it off waiting for a Present event
+            // that never comes.
+            outputStream.writeByte((byte)1);
             outputStream.writeShort(client.getSequenceNumber());
             outputStream.writeInt(0);
             outputStream.writeShort((short)1);
             outputStream.writeShort((short)1);
             outputStream.writeShort((short)0);
             outputStream.writeShort((short)0);
-            outputStream.writeByte((byte)0);
+            outputStream.writeByte(SHARED_PIXMAP_FORMAT);
             // A reply is 32 bytes and nothing here pads for us, so without this the client reads the
             // next 15 bytes on the socket as the tail of this one and every reply after it is skewed.
             outputStream.writePad(15);
@@ -141,6 +154,52 @@ public class MITSHMExtension implements Extension {
         }
     }
 
+    /**
+     * A pixmap drawn straight from a client's shared segment. This is how a client that presents
+     * through the Present extension gets its frames onto the screen without pushing them down the
+     * X socket: the pixmap it presents is the memory it rendered into.
+     *
+     * There is no stride on the wire because there is no need for one: every depth this server
+     * offers pads scanlines to 32 bits, so both ends compute width * 4 for it.
+     */
+    private static void createPixmap(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        int pixmapId = inputStream.readInt();
+        int drawableId = inputStream.readInt();
+        short width = inputStream.readShort();
+        short height = inputStream.readShort();
+        byte depth = inputStream.readByte();
+        inputStream.skip(3);
+        int shmseg = inputStream.readInt();
+        int offset = inputStream.readInt();
+
+        if (!client.isValidResourceId(pixmapId)) throw new BadIdChoice(pixmapId);
+        if (client.xServer.drawableManager.getDrawable(drawableId) == null) throw new BadDrawable(drawableId);
+        if (width <= 0 || height <= 0) throw new BadValue(width <= 0 ? width : height);
+
+        ByteBuffer segment = client.xServer.getSHMSegmentManager().getData(shmseg);
+        if (segment == null) throw new BadSHMSegment(shmseg);
+
+        Visual visual = client.xServer.pixmapManager.getVisualForDepth(depth);
+        if (visual == null) throw new BadMatch();
+
+        long size = (long)width * (long)height * 4L;
+        if (offset < 0 || offset + size > segment.capacity()) throw new BadValue(offset);
+
+        ByteBuffer pixels = segment.duplicate();
+        pixels.position(offset);
+        pixels.limit(offset + (int)size);
+        pixels = pixels.slice().order(ByteOrder.LITTLE_ENDIAN);
+
+        Drawable backingStore = client.xServer.drawableManager.createSharedDrawable(pixmapId, width, height, visual, pixels);
+        if (backingStore == null) throw new BadIdChoice(pixmapId);
+        Pixmap pixmap = client.xServer.pixmapManager.createPixmap(backingStore);
+        if (pixmap == null) throw new BadIdChoice(pixmapId);
+        client.registerAsOwnerOfResource(pixmap);
+
+        android.util.Log.d("MITSHM", "createPixmap " + pixmapId + " " + width + "x" + height +
+                " depth=" + depth + " from seg=" + shmseg + " offset=" + offset);
+    }
+
     @Override
     public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int opcode = client.getRequestData();
@@ -162,6 +221,11 @@ public class MITSHMExtension implements Extension {
             case ClientOpcodes.PUT_IMAGE :
                 try (XLock lock = client.xServer.lock(XServer.Lockable.SHMSEGMENT_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
                     putImage(client, inputStream, outputStream);
+                }
+                break;
+            case ClientOpcodes.CREATE_PIXMAP :
+                try (XLock lock = client.xServer.lock(XServer.Lockable.SHMSEGMENT_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.PIXMAP_MANAGER)) {
+                    createPixmap(client, inputStream, outputStream);
                 }
                 break;
             default:

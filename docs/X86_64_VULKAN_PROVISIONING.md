@@ -199,18 +199,22 @@ Three app-side fixes were needed alongside the staging:
 
 ## How frames are presented
 
-Every presented frame currently takes the slow path: Mesa's software WSI copies the
-GPU-rendered image back to the CPU and pushes the whole thing to the X server as an
-`XPutImage` request over the unix socket. That is two costs — a readback per frame, and a
-full frame of pixels through a socket — and it is the main lever left on presentation
-latency.
+Presentation is a Settings choice (Performance -> Frame presentation), and on x86_64 it picks
+between two working paths today:
 
-`MESA_VK_WSI_DEBUG=sw,noshm` is what pins it there. The `sw` half is unavoidable for now:
-Mesa would otherwise use DRI3 with buffer sharing, and this X server has no DRI3/Present
-buffer sharing without the Vortek renderer, which is an arm64-only prebuilt. The `noshm`
-half is the interesting one, because it is working around something fixable.
+* **Software copy** (`MESA_VK_WSI_DEBUG=sw,noshm`), the default: Mesa's software WSI copies the
+  GPU-rendered image back to the CPU and pushes the whole frame to the X server as an
+  `XPutImage` over the unix socket. Two costs — a readback per frame and a full frame through a
+  socket.
+* **Shared memory** (`sw`): the readback stays, but the frame does not travel through the socket;
+  the server presents a pixmap backed by the guest's own segment. Measurably faster at game
+  resolutions — see "The MIT-SHM path works" below for numbers and for what it took.
 
-**Why `noshm` is needed, precisely.** Mesa enables MIT-SHM whenever the X server
+The `sw` half of both is still unavoidable: Mesa would otherwise use DRI3 with buffer sharing,
+and this X server has no DRI3/Present buffer sharing without the Vortek renderer, which is an
+arm64-only prebuilt. That zero-copy route is the remaining lever on presentation latency.
+
+**Why `noshm` was needed originally.** Mesa enables MIT-SHM whenever the X server
 advertises DRI3 and Present, which this one does. The X server implements MIT-SHM 1.1 —
 the variant where the client passes a *SysV shmid*, an integer, and the server looks it up
 (`MITSHMExtension.attach` -> `SHMSegmentManager.attach`). Bionic has no SysV shared
@@ -220,7 +224,12 @@ runs a broker over a unix socket (`SysVSharedMemoryComponent`, at
 guest is supposed to reach it through an `LD_PRELOAD` interposer that turns `shmget` and
 `shmat` into broker requests.
 
-On x86_64 that interposer does not exist. The preloaded `libandroid-sysvshm.so` is built
+On x86_64 that interposer did not exist, which is why MIT-SHM had to be off at first. It is
+written now (`app/src/main/cpp/winlator/sysvshm_interposer.c`, built twice: as
+`libandroid-sysvshm.so` and as `libandroid-shmem.so`, because Mesa's ICD names the latter in its
+`DT_NEEDED` and bionic lets that outrank `LD_PRELOAD`). The rest of this section is the original
+diagnosis, kept because the mechanism still explains the layout. The preloaded
+`libandroid-sysvshm.so` was built
 from `app/src/main/cpp/winlator/sysvshared_memory.c`, which defines only four JNI entry
 points and **no `shmget`/`shmat`/`shmdt`/`shmctl`** — confirmed with `nm -D`. So Mesa's
 `shmget` binds instead to Termux's `libandroid-shmem`, which hands back a shmid from its
@@ -235,12 +244,8 @@ source for the interposer is in the tree.
 
 **Two routes forward**, cheapest first:
 
-1. **Write the x86_64 interposer** and re-enable MIT-SHM. It implements `shmget`, `shmat`,
-   `shmdt` and `shmctl` against the existing broker protocol (`SHMGET`, `GET_FD`,
-   `DELETE`, one byte plus a 32-bit argument per request, replies big-endian, the fd
-   arriving as `SCM_RIGHTS` ancillary data). This keeps the CPU readback but stops whole
-   frames travelling through the X socket. It also brings `ShmFramePacer` back to life,
-   which only runs on the MIT-SHM path and is dead code today.
+1. ~~Write the x86_64 interposer and re-enable MIT-SHM.~~ **Done**, along with the three
+   server-side pieces it turned out to need; see below.
 2. **DRI3 + Present with dma-buf**, the zero-copy path and the real answer — the x86_64
    counterpart of what Vortek does on arm64. Note the fd-passing machinery this needs
    already exists on both sides: the transport handles `SCM_RIGHTS` in both directions and
@@ -250,58 +255,65 @@ source for the interposer is in the tree.
 Whichever lands, the route should become a user-visible Settings choice with a per-device
 default, since the right answer will vary by GPU and driver.
 
-### Where the MIT-SHM path stands
+### The MIT-SHM path works
 
-The interposer is written and works: on the shared-memory setting Mesa's probe segment is
-created through our broker, the server attaches it, and the whole probe handshake completes.
-What does not work is the swapchain. Mesa allocates its images through the broker
-(three segments of width x height x 4) and then the guest never sends `ShmAttach` for any of
-them and never presents a frame. Half-Life 2 turns that into a silent `exit(1)` and vkcube
-spins at 100% CPU making no syscalls.
+The shared-memory setting presents frames, repeatably, and it is faster than the socket copy at
+sizes that matter: 300 frames of vkcube at 1280x800 take 5.2 s through shared memory against
+6.8 s through the socket (about 57 fps against 44). At 500x500 the socket path still wins, which
+is the expected shape — the saving is the frame copy, so it grows with the frame.
 
-**The cause: MIT-SHM here has no shared pixmaps.** The guest is not in an error state and is
-not waiting on the socket. It is blocked inside `xcb_wait_for_special_event`, which is how
-Mesa's X11 WSI waits for a Present `IdleNotify` or `CompleteNotify`. It gets there because
-turning MIT-SHM on changes *how Mesa presents*: the ICD's imports say so plainly —
-`xcb_shm_attach` and `xcb_shm_create_pixmap` are imported, `xcb_shm_put_image` is not. So the
-shared-memory path is not "the same blit through shared memory"; it is *present a pixmap whose
-storage is the shared segment*, and the server has to supply that pixmap.
+Getting there needed three server-side pieces, not one. The shared-memory path is not "the same
+blit through shared memory": it is *present a pixmap whose storage is the guest's segment*, so it
+runs through the Present extension and drags Present's requirements in with it.
 
-This server implements MIT-SHM `QueryVersion`, `Attach`, `Detach` and `PutImage` only. There is
-no `CreatePixmap` (opcode 5), and `ShmQueryVersion` reports `shared_pixmaps = false`. So the
-capability Mesa's shm present path is built on is exactly the one that is missing, and the wait
-for a Present event that can never arrive is the visible symptom rather than the fault.
+1. **MIT-SHM `CreatePixmap` (opcode 5), and `shared_pixmaps = true` in `ShmQueryVersion`.** The
+   ICD's imports say which one it uses: `xcb_shm_attach` and `xcb_shm_create_pixmap` are
+   imported, `xcb_shm_put_image` is not. The pixmap is a `Drawable` whose `ByteBuffer` is a slice
+   of the segment `SHMSegmentManager` already holds. There is no stride on the wire and none is
+   needed: every depth here pads scanlines to 32 bits, and Mesa passes its row pitch *as the
+   pixmap width* (a 500-pixel-wide image arrives as a 512-wide pixmap), so both ends agree.
+2. **XFIXES regions.** Mesa creates a region per swapchain image, before it attaches anything,
+   and does it whether or not the server advertises XFIXES. This is the trap that made the
+   failure so hard to read: **libxcb will not send a request for an extension the server
+   disclaims — it shuts the connection down with `CLOSED_EXT_NOTSUPPORTED` instead**, writing no
+   bytes and reporting no error. So the guest went quiet mid-setup with a healthy-looking server
+   and an empty wire. Regions are recorded and unused; this server repaints whole windows.
+3. **DRI3 `FenceFromFD` (opcode 4).** Mesa allocates an `xshmfence` — one `int32` in shared
+   memory — and waits on it before reusing an image. The server must map the passed fd and, when
+   the pixmap goes idle, store 1 and `FUTEX_WAKE` (no `FUTEX_PRIVATE_FLAG`: the waiter is another
+   process). Present's idle path already called `SyncExtension.setTriggered`, so this only had to
+   give those fences memory to poke. Without it each image presents exactly once and the client
+   blocks for good.
 
-This also reframes the payoff. Shared pixmaps are not a small win over the socket copy: the
-pixmap *is* the guest's memory, so a present becomes a copy the server makes on its own terms
-instead of a frame pushed through the X socket, and it uses the Present extension that already
-works for everything else. Implementing `ShmCreatePixmap` (a `Pixmap` backed by the segment's
-`ByteBuffer`, which `SHMSegmentManager` already holds) plus `shared_pixmaps = true` is the next
-piece of work, and it is smaller than the DRI3/dma-buf route.
+A fourth bug was not about shared memory at all, but it hid behind this one and would have bitten
+any second Present client in a session: **Present's event contexts were never dropped when a
+client disconnected.** Resource ids are recycled, so the next client's `SelectInput` found the
+dead client's entry under its own id and got `BadMatch` — leaving it registered for nothing, so it
+sent one present and waited forever for a completion. The symptom was that the first run in a
+container worked and every later run hung, which reads like flakiness rather than a leak.
+`XClient.freeResources` now tells Present to forget the client, the way it already told XInput2.
 
-What has been ruled out:
+Two smaller fixes on the way: `ShmQueryVersion` replied with 17 bytes where every X reply must be
+32 (this output stream pads nothing automatically, so the client read the next 15 bytes on the
+socket as the tail of that reply), and a failed `ShmAttach` now returns `BadAccess` instead of
+silently succeeding, so a client that cannot attach falls back instead of failing later and
+elsewhere.
 
-- **Not the driver.** With the Intel ICD moved aside the guest runs on llvmpipe, a CPU driver
-  that imports nothing into a GPU, and it fails in exactly the same place.
-- **Not a rejected request.** The server sends no X error and logs none; the MIT-SHM attach it
-  does see reports success.
-- **Not the broker.** No call into the interposer fails, and the segments are created and
-  mapped at the sizes asked for.
-- **Not an event flood.** The server sends the client no events at all in the failing window.
-- **Not size.** A 64x64 window, whose segments are 16 KB rather than 4 MB, fails identically, so
-  neither the maximum request length nor the segment size is involved.
-- **Not the present mode.** `immediate` and `mailbox` hang exactly as `fifo` does, so it is not
-  the FIFO queue thread.
-- **Not a malformed reply or event.** Every byte the server writes to the client was dumped and
-  decoded: replies are 32 bytes (or 32 plus the length they declare), the five events sent are
-  32 bytes each, and the client receives everything it asked for.
-- **Not a dead connection.** `xcb_connection_has_error` is never true, and `xcb_poll_for_event`
-  is never even called; both were confirmed by interposing them (`tools/xcbtrace.c`).
+What was ruled out before the cause was found, kept because these are the cheap checks worth
+repeating on the next presentation bug:
 
-One real bug was found and fixed on the way: `ShmQueryVersion` replied with 17 bytes where
-every X reply must be 32, and this output stream pads nothing automatically, so a client read
-the following 15 bytes on the socket as the tail of that reply. Fixing it did not change the
-failure.
+- **Not the driver.** With the Intel ICD moved aside the guest runs on llvmpipe and fails
+  identically.
+- **Not the broker, size, or present mode.** No interposer call fails; a 64x64 window (16 KB
+  segments) fails the same as 4 MB ones; `immediate` and `mailbox` hang exactly as `fifo`.
+- **Not a malformed reply or event.** Every byte written to the client was dumped and decoded.
+- **Not the resource id space.** The setup reply advertises a 4 M-wide id range
+  (base `0x02c00000`, mask `0x003fffff`), so `xcb_generate_id` cannot run dry and never needs
+  XC-MISC.
+- **"Connection is not dead" was wrong**, and worth recording as a lesson: `tools/xcbtrace.c`
+  only sees calls the *test binary* makes, because a preload cannot outrank an ICD's own
+  `DT_NEEDED` under bionic. Mesa's internal `xcb_connection_has_error` never went through the
+  shim, and the connection was in fact dead the whole time.
 
 ### Reproducing it in seconds
 
@@ -318,8 +330,12 @@ Two things make this bearable to iterate on:
 - **Keep test binaries out of `imagefs`.** A container start wipes `imagefs/tmp` and resets the
   home directory, so staged tools belong somewhere else; the script expects `files/vktest`.
 
-With that in place: `sw,noshm` presents 60 frames and exits in about a second, `sw` hangs, and
-the whole comparison takes under fifteen seconds.
+With that in place a full comparison of both paths takes about fifteen seconds. Use a
+game-sized window (`--width 1280 --height 800`) when comparing: at small sizes the copy being
+saved is too cheap to measure and the socket path looks better than it is.
+
+One habit worth keeping: run each mode **twice**. The Present event-context leak above only
+showed up on the second client in a session, and a single run per mode reported it as a success.
 
 Three tools earned their keep on this and are worth reaching for again:
 

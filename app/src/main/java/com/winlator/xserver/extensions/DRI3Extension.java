@@ -40,7 +40,39 @@ public class DRI3Extension implements Extension {
         private static final byte QUERY_VERSION = 0;
         private static final byte OPEN = 1;
         private static final byte PIXMAP_FROM_BUFFER = 2;
+        private static final byte FENCE_FROM_FD = 4;
         private static final byte PIXMAP_FROM_BUFFERS = 7;
+    }
+
+    private SyncExtension syncExtension;
+
+    /**
+     * Take over a fence the client allocated and shared with us (libxshmfence: one int32 in a page
+     * of shared memory). Mesa waits on this before reusing a swapchain image, so a server that
+     * ignores the request presents each image once and then the client blocks for good.
+     */
+    private void fenceFromFd(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        int drawableId = inputStream.readInt();
+        int fenceId = inputStream.readInt();
+        boolean initiallyTriggered = inputStream.readByte() == 1;
+        inputStream.skip(3);
+
+        int fd = inputStream.getAncillaryFd();
+        try {
+            if (client.xServer.drawableManager.getDrawable(drawableId) == null) throw new BadDrawable(drawableId);
+
+            if (syncExtension == null) syncExtension = client.xServer.getExtension(SyncExtension.MAJOR_OPCODE);
+            if (syncExtension == null) throw new BadImplementation();
+
+            // A page is the smallest thing that can be mapped and the fence is a single int32.
+            ByteBuffer mapping = SysVSharedMemory.mapSHMSegment(fd, 4096, 0, false);
+            if (mapping == null) throw new BadAlloc();
+
+            syncExtension.registerSharedFence(fenceId, mapping, initiallyTriggered);
+        }
+        finally {
+            XConnectorEpoll.closeFd(fd);
+        }
     }
 
     @Override
@@ -195,6 +227,11 @@ public class DRI3Extension implements Extension {
             case ClientOpcodes.PIXMAP_FROM_BUFFER:
                 try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
                     pixmapFromBuffer(client, inputStream, outputStream);
+                }
+                break;
+            case ClientOpcodes.FENCE_FROM_FD:
+                try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER)) {
+                    fenceFromFd(client, inputStream, outputStream);
                 }
                 break;
             case ClientOpcodes.PIXMAP_FROM_BUFFERS:

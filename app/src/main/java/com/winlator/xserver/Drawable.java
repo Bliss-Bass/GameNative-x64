@@ -80,6 +80,27 @@ public class Drawable extends XResource {
         }
     }
 
+    /**
+     * A drawable whose pixels live in memory the client wrote and still owns, which is what
+     * MIT-SHM's CreatePixmap asks for. Nothing is allocated here and the buffer has to outlive the
+     * drawable, which a shared segment does until the client detaches it.
+     *
+     * The AHardwareBuffer path the other constructor can take is deliberately not taken: that
+     * texture reads its own memory, so pointing this drawable at a segment would leave the texture
+     * showing pixels nobody wrote.
+     */
+    public Drawable(int id, int width, int height, Visual visual, ByteBuffer sharedData) {
+        super(id);
+        this.texture = new Texture();
+        this.offscreenStorage = false;
+        this.renderLock = new Object();
+        this.width = (short)width;
+        this.height = (short)height;
+        this.visual = visual;
+        this.data = sharedData;
+        this.useSharedData = true;
+    }
+
     public static Drawable fromBitmap(Bitmap bitmap) {
         Drawable drawable = new Drawable(0, bitmap.getWidth(), bitmap.getHeight(), null);
         fromBitmap(bitmap, drawable.data);

@@ -342,8 +342,15 @@ public class PresentExtension implements Extension {
         long ust = System.nanoTime() / 1000;
         long msc = ust / (targetFps > 0 ? (1_000_000L / targetFps) : (1_000_000L / 60));
 
+        // A shared pixmap's pixels were written straight into the client's segment, so nothing here
+        // knows they changed; and handing its texture to the window would show memory the client
+        // keeps rendering into rather than the frame it just presented. Shared storage therefore
+        // gets marked dirty and copied rather than swapped in.
+        final boolean sharedStorage = pixmap.drawable.isUseSharedData();
+        if (sharedStorage) pixmap.drawable.forceUpdate();
+
         synchronized (content.renderLock) {
-            if (asr != null) {
+            if (asr != null && !sharedStorage) {
                 content.setTexture(pixmap.drawable.getTexture());
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
                 if (window.attributes.isMapped()) {
@@ -365,6 +372,25 @@ public class PresentExtension implements Extension {
                 else sendIdleNotify(window, pixmap, serial, idleFence);
             }
         }
+    }
+
+    /**
+     * Forget everything held for a client that has gone, so the next client to be handed its
+     * resource ids starts clean. Presents still queued for it are dropped rather than delivered:
+     * the connection they would go to no longer exists.
+     */
+    public void onClientDisconnected(XClient client) {
+        synchronized (events) {
+            for (int i = events.size() - 1; i >= 0; i--) {
+                if (events.valueAt(i).client == client) events.removeAt(i);
+            }
+        }
+        cpuQueue.removeIf(p -> p.window != null && p.window.originClient == client);
+        pendingIdles.values().removeIf(p -> p.window != null && p.window.originClient == client);
+        windowTimings.keySet().removeIf(id -> {
+            Window w = client.xServer.windowManager.getWindow(id);
+            return w == null || w.originClient == client;
+        });
     }
 
     private void selectInput(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {

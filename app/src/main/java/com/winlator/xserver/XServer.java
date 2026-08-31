@@ -14,6 +14,7 @@ import com.winlator.xserver.extensions.GenericEventExtension;
 import com.winlator.xserver.extensions.MITSHMExtension;
 import com.winlator.xserver.extensions.PresentExtension;
 import com.winlator.xserver.extensions.SyncExtension;
+import com.winlator.xserver.extensions.XFixesExtension;
 import com.winlator.xserver.extensions.XInput2Extension;
 
 import java.nio.charset.Charset;
@@ -290,6 +291,10 @@ public class XServer {
         registerExtension(new DRI3Extension(),      nextEventId, nextErrorId);
         registerExtension(new PresentExtension(),   nextEventId, nextErrorId);
         registerExtension(new SyncExtension(),      nextEventId, nextErrorId);
+        // Mesa's shared-memory present path creates an XFIXES region per swapchain image, and
+        // libxcb kills the connection outright rather than send a request for an extension the
+        // server disclaims, so this has to be here for MIT-SHM to be usable at all.
+        registerExtension(new XFixesExtension(),    nextEventId, nextErrorId);
         if (supportsXInput2(runningFromGlibc)) {
             if (mouseDragCompatibilityEnabled) {
                 registerExtension(new GenericEventExtension(), nextEventId, nextErrorId);

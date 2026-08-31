@@ -33,6 +33,14 @@ public class DrawableManager extends XResourceManager implements XResourceManage
         return drawable;
     }
 
+    /** @see Drawable#Drawable(int, int, int, Visual, java.nio.ByteBuffer) */
+    public Drawable createSharedDrawable(int id, short width, short height, Visual visual, java.nio.ByteBuffer data) {
+        if (id == 0 || drawables.indexOfKey(id) >= 0) return null;
+        Drawable drawable = new Drawable(id, width, height, visual, data);
+        drawables.put(id, drawable);
+        return drawable;
+    }
+
     public void removeDrawable(int id) {
         Drawable drawable = drawables.get(id);
 

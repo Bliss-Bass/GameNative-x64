@@ -18,6 +18,9 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <android/sharedmem.h>
+#include <limits.h>
+#include <linux/futex.h>
+#include <stdint.h>
 
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "System.out", __VA_ARGS__);
 
@@ -88,6 +91,22 @@ Java_com_winlator_sysvshm_SysVSharedMemory_unmapSHMSegment(JNIEnv *env, jobject 
                                                            jlong size) {
     char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
     munmap(dataAddr, size);
+}
+
+/*
+ * Trigger an xshmfence, the fence libxshmfence hands us over a DRI3 FenceFromFD.
+ *
+ * The layout is one int32 the two processes share, and the protocol is libxshmfence's: a waiter
+ * sleaves the value at zero and blocks on the futex; a trigger stores one and wakes everyone. The
+ * wake must not use FUTEX_PRIVATE_FLAG, because the waiter is in another process.
+ */
+JNIEXPORT void JNICALL
+Java_com_winlator_sysvshm_SysVSharedMemory_triggerFence(JNIEnv *env, jclass obj, jobject fence) {
+    int32_t *value = (int32_t *)(*env)->GetDirectBufferAddress(env, fence);
+    if (value == NULL) return;
+
+    __atomic_store_n(value, 1, __ATOMIC_SEQ_CST);
+    syscall(SYS_futex, value, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
 }
 
 JNIEXPORT jint JNICALL

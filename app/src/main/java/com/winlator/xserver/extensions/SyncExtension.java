@@ -2,6 +2,7 @@ package com.winlator.xserver.extensions;
 
 import android.util.SparseBooleanArray;
 
+import com.winlator.sysvshm.SysVSharedMemory;
 import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xserver.XClient;
@@ -16,6 +17,8 @@ import java.io.IOException;
 public class SyncExtension implements Extension {
     public static final byte MAJOR_OPCODE = -104;
     private final SparseBooleanArray fences = new SparseBooleanArray();
+    /** Mappings for the fences a client shares with us; guarded by {@link #fences}. */
+    private final android.util.SparseArray<java.nio.ByteBuffer> sharedFences = new android.util.SparseArray<>();
     private byte firstEventId = 0;
     private byte firstErrorId = 0;
 
@@ -55,9 +58,30 @@ public class SyncExtension implements Extension {
     @Override
     public byte getFirstErrorId() { return firstErrorId; }
 
+    /**
+     * Adopt a fence whose state lives in memory shared with the client, as DRI3 FenceFromFD
+     * provides. A client that presents through DRI3 blocks on this memory rather than on any reply,
+     * so a fence recorded only here would leave it waiting forever.
+     */
+    public void registerSharedFence(int id, java.nio.ByteBuffer mapping, boolean initiallyTriggered) {
+        synchronized (fences) {
+            // Fence ids are recycled along with the rest of a departed client's resource ids, so an
+            // id arriving again means the old mapping is stale, not that two fences share an id.
+            java.nio.ByteBuffer stale = sharedFences.get(id);
+            if (stale != null) SysVSharedMemory.unmapSHMSegment(stale, stale.capacity());
+
+            sharedFences.put(id, mapping);
+            fences.put(id, initiallyTriggered);
+        }
+        if (initiallyTriggered) SysVSharedMemory.triggerFence(mapping);
+    }
+
     public void setTriggered(int id) {
         synchronized (fences) {
-            if (fences.indexOfKey(id) >= 0) fences.put(id, true);
+            if (fences.indexOfKey(id) < 0) return;
+            fences.put(id, true);
+            java.nio.ByteBuffer mapping = sharedFences.get(id);
+            if (mapping != null) SysVSharedMemory.triggerFence(mapping);
         }
     }
 
@@ -76,11 +100,11 @@ public class SyncExtension implements Extension {
     }
 
     private void triggerFence(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        int id = inputStream.readInt();
         synchronized (fences) {
-            int id = inputStream.readInt();
             if (fences.indexOfKey(id) < 0) throw new BadFence(id);
-            fences.put(id, true);
         }
+        setTriggered(id);
     }
 
     private void resetFence(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -100,6 +124,11 @@ public class SyncExtension implements Extension {
             int id = inputStream.readInt();
             if (fences.indexOfKey(id) < 0) throw new BadFence(id);
             fences.delete(id);
+            java.nio.ByteBuffer mapping = sharedFences.get(id);
+            if (mapping != null) {
+                sharedFences.remove(id);
+                SysVSharedMemory.unmapSHMSegment(mapping, mapping.capacity());
+            }
         }
     }
 
