@@ -353,3 +353,43 @@ Three tools earned their keep on this and are worth reaching for again:
 - `debuggerd -b <pid>`, which names the blocked call per thread without any setup.
 - `grep -a <symbol> <ICD>`, which answers "what does this driver actually call" in seconds and
   settled this question outright.
+
+### Measuring a frame rate honestly
+
+A Vulkan or DXVK overlay in the guest cannot answer "how fast is this actually running". It
+reports the rate Mesa hands pixmaps to our X server, and that number is throttled twice more
+afterwards, by the copy onto the Android surface and then by the display's 60 Hz. A healthy
+figure there can sit on top of an unhealthy one further along, and a poor one does not say
+which stage caused it.
+
+Two counters over the same interval do answer it, and neither needs input into the guest:
+
+- **What the guest submits.** `com.winlator.core.FrameStats` counts `PresentPixmap` requests,
+  hooked in `PresentExtension.presentPixmap` before any of our own work on the frame. It is
+  compiled out unless `FrameStats.ENABLED` is edited, since that is the hot path.
+- **What reaches the display.** `dumpsys SurfaceFlinger --latency` on the app's BLAST
+  SurfaceView layer, which needs no instrumentation at all. Note the renderer in use on x86_64
+  presents from native code on its own thread, so there is no useful Java-side hook for this
+  half; SurfaceFlinger is the measurement, not a substitute for one.
+
+`tools/measure_present_rate.sh <device> [seconds]` reads both and prints the presentation path
+alongside them. Sample both over a comparable window: `--latency` keeps only the last 127
+frames, so a 20-second `FrameStats` mean against a 4-second composited window will show a gap
+that is an artefact of the windows, not of dropped frames.
+
+Measured at the Half-Life 2 main menu, shared-memory path, three consecutive samples:
+
+| | guest submitted | composited |
+|---|---|---|
+| 1 | 15.7/s | 14.3 fps |
+| 2 | 15.8/s | 14.5 fps |
+| 3 | 16.0/s | 15.3 fps |
+
+The two track within about a frame, which is the useful result: **nothing is being lost between
+the guest and the display**. Neither vsync nor our copy is the ceiling here — the guest is, at
+roughly 16 fps. That also explains why the presentation path barely shows up in HL2 while it is
+clearly visible in `vkcube` (57.7 fps shared memory vs 44.1 fps over the socket, 1280x800):
+`vkcube` submits fast enough for the path to be the limit, and HL2 does not.
+
+So the presentation work is worth continuing for headroom, not for HL2's menu frame rate, and a
+DRI3 comparison should be made with `vkcube` rather than a game.

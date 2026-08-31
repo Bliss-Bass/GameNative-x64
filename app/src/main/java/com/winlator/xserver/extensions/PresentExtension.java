@@ -321,6 +321,8 @@ public class PresentExtension implements Extension {
         int idleFence = inputStream.readInt();
         inputStream.skip(client.getRemainingRequestLength());
 
+        com.winlator.core.FrameStats.countPresent();
+
         final Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
 

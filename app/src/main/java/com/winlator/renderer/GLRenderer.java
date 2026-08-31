@@ -146,6 +146,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         if (onFrameRenderedListener != null) {
             onFrameRenderedListener.run();
         }
+        com.winlator.core.FrameStats.countRenderedFrame();
     }
 
     void drawScene() {
