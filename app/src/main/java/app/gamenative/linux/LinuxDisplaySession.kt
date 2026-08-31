@@ -37,6 +37,9 @@ class LinuxDisplaySession private constructor(
     private var settings: Process? = null
     private var panel: Process? = null
 
+    /** Keeps application windows filling the display; see [LinuxDesktopConfig.FIT_WINDOWS]. */
+    private var fitter: Process? = null
+
     /**
      * The programs launched into this session, which used to be started and forgotten.
      *
@@ -188,6 +191,12 @@ class LinuxDisplaySession private constructor(
         wm = start("/usr/bin/openbox --config-file $rc", tag = "openbox")
         settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
 
+        // Only for an application, whose window is the Android window and should fill it. On a
+        // desktop, a window that asked to be small is one the user can move and resize.
+        if (!desktop) {
+            fitter = start("/bin/sh ${LinuxDesktopConfig.FIT_WINDOWS}", tag = "fit-windows")
+        }
+
         if (desktop) {
             // Not left to the X server, whose idea of an unset root window is a monochrome
             // weave. Runs and exits, so it is not one of the processes we hold on to.
@@ -326,7 +335,13 @@ class LinuxDisplaySession private constructor(
         // [GuestProcesses], which is where the work of actually ending them lives.
         val held = synchronized(apps) { apps.toList().also { apps.clear() } }
         val labelled = held.map { it to "application" } +
-            listOf(panel to "tint2", settings to "xsettingsd", wm to "openbox", server to "Xtigervnc")
+            listOf(
+                fitter to "fit-windows",
+                panel to "tint2",
+                settings to "xsettingsd",
+                wm to "openbox",
+                server to "Xtigervnc",
+            )
                 .mapNotNull { (process, label) -> process?.let { it to label } }
 
         for ((process, label) in labelled) {
@@ -341,6 +356,7 @@ class LinuxDisplaySession private constructor(
             }
         }
 
+        fitter = null
         panel = null
         settings = null
         wm = null

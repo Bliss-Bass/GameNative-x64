@@ -49,6 +49,8 @@ object LinuxRootfs {
      *   menu alone means a long press for everything on a screen with no right button.
      * - x11-xserver-utils is here for xsetroot, which paints the root window: the X server's
      *   own default is a black-and-white weave from the 1980s.
+     * - wmctrl and x11-utils (for xprop) are what make an application fill its Android window
+     *   even when openbox's own rule cannot. See [LinuxDesktopConfig.FIT_WINDOWS].
      * - The font packages are not optional here: Recommends are off, so nothing else pulls
      *   them in, and both a bitmap font for xterm and a scalable one for everything that
      *   draws through Xft have to be present or clients fail to start on a missing font.
@@ -60,6 +62,8 @@ object LinuxRootfs {
         "xterm",
         "tint2",
         "x11-xserver-utils",
+        "x11-utils",
+        "wmctrl",
         "xfonts-base",
         "fonts-dejavu-core",
     )
@@ -87,6 +91,8 @@ object LinuxRootfs {
         "usr/bin/xterm",
         "usr/bin/tint2",
         "usr/bin/xsetroot",
+        "usr/bin/wmctrl",
+        "usr/bin/xprop",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 

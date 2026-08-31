@@ -33,6 +33,7 @@ object LinuxDesktopConfig {
     const val APP_RC = "/root/.config/openbox/rc-app.xml"
     const val DESKTOP_RC = "/root/.config/openbox/rc-desktop.xml"
     const val PANEL_RC = "/root/.config/tint2/tint2rc"
+    const val FIT_WINDOWS = "/root/.config/openbox/fit-windows.sh"
 
     private const val DESKTOP_MENU = "menu-desktop.xml"
 
@@ -79,6 +80,61 @@ object LinuxDesktopConfig {
 
         // Left behind by earlier versions, which had a single configuration.
         File(dir, "rc.xml").delete()
+
+        writeFitWindows(dir)
+    }
+
+    /**
+     * A watcher that maximizes application windows, because the rule above is not enough on its
+     * own.
+     *
+     * Openbox evaluates an `<application>` rule once, when a window is first mapped, and skips
+     * maximizing one whose size hints say it cannot be resized at that instant. A GTK4 program
+     * maps its window while its minimum size is still the size it asked for and only relaxes the
+     * hints during its first layout, so the rule reaches it a moment too early: gnome-calculator
+     * came up 394x522 in the middle of a 1555x1036 display, undecorated but not maximized, while
+     * galculator (GTK3, real hints at map time) filled the display from the same rule. Asking
+     * openbox to maximize the same window a second later works, which is all this does.
+     *
+     * Event-driven, not a poll: `xprop -spy` writes a line whenever the client list changes, so
+     * this sleeps until a window appears or goes away. The second pass a second later is for the
+     * case above, where the first request arrives before the program has relaxed its hints.
+     *
+     * A script file rather than a command string because the launcher joins its argument vector
+     * with spaces, which a shell one-liner with quotes and pipes would not survive.
+     */
+    private fun writeFitWindows(dir: File) {
+        File(dir, "fit-windows.sh").writeText(
+            """
+            |#!/bin/sh
+            |# Written by GameNative. Changes are lost when the session next starts.
+            |
+            |maximize() {
+            |  # Quiet, because the window manager may not have claimed the root yet and the
+            |  # watch below is what recovers from that; a complaint per attempt is only noise.
+            |  wmctrl -l 2>/dev/null | while read -r id rest; do
+            |    wmctrl -i -r "${'$'}id" -b add,maximized_vert,maximized_horz 2>/dev/null
+            |  done
+            |}
+            |
+            |# The outer loop is for the window manager, not for polling: xprop exits rather than
+            |# waits if the property is not there yet, which it is not for the moment between the
+            |# X server accepting connections and openbox claiming the root window, and its watch
+            |# also ends if openbox is restarted from the menu.
+            |while :; do
+            |  if xprop -root _NET_CLIENT_LIST >/dev/null 2>&1; then
+            |    maximize
+            |    xprop -root -spy _NET_CLIENT_LIST 2>/dev/null | while read -r ignored; do
+            |      maximize
+            |      sleep 1
+            |      maximize
+            |    done
+            |  fi
+            |  sleep 1
+            |done
+            |
+            """.trimMargin(),
+        )
     }
 
     /**
