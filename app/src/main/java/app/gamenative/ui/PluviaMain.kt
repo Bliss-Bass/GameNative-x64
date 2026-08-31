@@ -1655,7 +1655,21 @@ fun PluviaMain(
                     LinuxAppsScreen(
                         onBack = { navController.navigateUp() },
                         onOpenTerminal = { navController.navigate(PluviaScreen.Terminal.route) },
-                        onLaunch = { argv -> navController.navigate(PluviaScreen.LinuxDesktop.route(argv)) },
+                        // Its own window rather than a screen in this one, so Android sizes and
+                        // remembers each application separately and two can be open at once. The
+                        // in-app route below remains for the bare desktop, and as the fallback if
+                        // the window cannot be opened at all.
+                        onLaunch = { app ->
+                            val opened = runCatching {
+                                context.startActivity(
+                                    LinuxSessionActivity.intent(context, app.launchArgv, app.entryId, app.name),
+                                )
+                            }.onFailure { Timber.w(it, "[PluviaMain]: no session window for %s", app.name) }
+
+                            if (opened.isFailure) {
+                                navController.navigate(PluviaScreen.LinuxDesktop.route(app.launchArgv))
+                            }
+                        },
                     )
                 }
 

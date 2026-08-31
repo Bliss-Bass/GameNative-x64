@@ -1,7 +1,8 @@
 package app.gamenative.linux
 
 import android.content.Context
-import com.winlator.core.ProcessHelper
+import android.view.View
+import app.gamenative.linux.rfb.RfbView
 import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -24,20 +25,28 @@ import timber.log.Timber
 class LinuxDisplaySession private constructor(
     private val context: Context,
     /** X display number, as in ":2". */
-    val display: Int,
+    override val display: Int,
     /** Loopback port the presenter connects to. */
     val port: Int,
     /** Whether this session is one application or a desktop. */
     private val mode: LinuxDesktopConfig.Mode,
-) {
+) : LinuxSession {
 
     private var server: Process? = null
     private var wm: Process? = null
     private var settings: Process? = null
     private var panel: Process? = null
 
+    /**
+     * The programs launched into this session, which used to be started and forgotten.
+     *
+     * Without this list the application the user actually opened was the one thing teardown did
+     * not end, and a session that is expected to host several of them has to know what it holds.
+     */
+    private val apps = mutableListOf<Process>()
+
     @Volatile
-    var isRunning = false
+    override var isRunning = false
         private set
 
     companion object {
@@ -47,7 +56,20 @@ class LinuxDisplaySession private constructor(
         /** Above the 5900 range so a user's own VNC server is not disturbed. */
         private const val FIRST_PORT = 5950
 
+        /** How many sessions can be up at once, one display each. */
+        private const val DISPLAY_COUNT = 16
+
         private const val READY_TIMEOUT_MS = 20_000L
+
+        /**
+         * Ports handed out but not yet listening.
+         *
+         * [freePort] asks the network whether a port is taken, and an X server takes a second or
+         * two to get there. Two sessions starting at once would both be told 5950 was free, and
+         * the second server would exit unable to bind -- which matters now that starting several
+         * is the point rather than an edge case.
+         */
+        private val claimed = mutableSetOf<Int>()
 
         /**
          * Brings a session up and returns once the X server accepts connections.
@@ -75,26 +97,58 @@ class LinuxDisplaySession private constructor(
                     throw IOException("The graphical session is not installed")
                 }
 
-                val port = freePort()
+                val port = claimPort()
                 val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode)
-                session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi))
+                runCatching { session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi)) }
+                    .onFailure {
+                        // Nothing is listening on it and nothing will be, so holding the claim
+                        // would retire a display for the life of the process.
+                        release(port)
+                        throw it
+                    }
                 session
             }
         }
 
         /**
-         * A port nothing is listening on. Racy in principle, but the alternative -- binding
-         * it here to hold it -- would leave the X server unable to take it.
+         * A port nothing is listening on and no other session has been promised.
+         *
+         * Binding it here to hold it properly would leave the X server unable to take it, so the
+         * claim is a note to ourselves that lasts until the server is up or has failed.
          */
-        private fun freePort(): Int {
-            for (port in FIRST_PORT until FIRST_PORT + 16) {
+        @Synchronized
+        private fun claimPort(): Int {
+            for (port in FIRST_PORT until FIRST_PORT + DISPLAY_COUNT) {
+                if (port in claimed) continue
                 val free = runCatching {
                     Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 150) }
                 }.isFailure
-                if (free) return port
+                if (free) {
+                    claimed += port
+                    return port
+                }
             }
-            throw IOException("No free port for the graphical session")
+            throw IOException("All $DISPLAY_COUNT graphical sessions are in use")
         }
+
+        @Synchronized
+        private fun release(port: Int) {
+            claimed -= port
+        }
+
+        /**
+         * Whether something on [port] answers as an RFB server, which is what a live session's
+         * X server does.
+         */
+        internal fun isServing(port: Int): Boolean = runCatching {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress("127.0.0.1", port), 200)
+                socket.soTimeout = 500
+                val header = ByteArray(4)
+                java.io.DataInputStream(socket.getInputStream()).readFully(header)
+                header.decodeToString() == "RFB "
+            }
+        }.getOrDefault(false)
     }
 
     private suspend fun launch(width: Int, height: Int, dpi: Int) {
@@ -149,8 +203,18 @@ class LinuxDisplaySession private constructor(
      * Removes the lock and socket a previous session left behind. Xtigervnc refuses to
      * start on a display whose lock file exists, and PRoot's guest does not always get to
      * clean up when the app goes away.
+     *
+     * "Stale" is checked rather than assumed. This used to delete whatever it found, which was
+     * safe only while one session existed at a time; with several up at once, a session shutting
+     * down would take a live neighbour's socket out from under it if it ever saw the same display
+     * number, and X clients hold that path open for their whole lives.
      */
     private fun clearStaleDisplay() {
+        if (isServing(port)) {
+            Timber.i("[LinuxDisplaySession]: display :%d is live, leaving its lock alone", display)
+            return
+        }
+
         val rootfs = LinuxRootfs.rootfsDir(context)
         val leftovers = listOf(
             File(rootfs, "tmp/.X$display-lock"),
@@ -214,15 +278,26 @@ class LinuxDisplaySession private constructor(
     }
 
     /** Runs [argv] against this session's display, for launching applications into it. */
-    fun run(argv: String) {
-        start(argv, tag = "linux-app")
+    override fun run(argv: String) {
+        val process = start(argv, tag = "linux-app") ?: run {
+            Timber.w("[LinuxDisplaySession]: could not launch %s on display :%d", argv, display)
+            return
+        }
+        synchronized(apps) { apps += process }
+    }
+
+    override fun createView(context: Context, onClosed: (Throwable?) -> Unit): View =
+        RfbView(context, port) { failure -> onClosed(failure) }
+
+    override fun releaseView(view: View) {
+        (view as? RfbView)?.disconnect()
     }
 
     /**
      * Rewrites the XSETTINGS file and signals the daemon, so a density change reaches
      * running GTK and Qt apps. They read DPI once at startup otherwise.
      */
-    fun setDpi(densityDpi: Int) {
+    override fun setDpi(densityDpi: Int) {
         val dpi = LinuxDisplayScale.xdpi(densityDpi)
         val settings = File(LinuxRootfs.rootfsDir(context), "root/.xsettingsd")
         val text = settings.takeIf { it.isFile }?.readText() ?: return
@@ -242,24 +317,37 @@ class LinuxDisplaySession private constructor(
         Timber.i("[LinuxDisplaySession]: dpi set to %d", dpi)
     }
 
-    fun stop() {
+    override fun stop() {
         isRunning = false
-        // The X server last: killing it first makes the clients die noisily on a lost
-        // connection, and openbox in particular logs a fatal error.
-        for (process in listOf(panel, settings, wm, server)) {
-            val child = process ?: continue
-            // TERM first so PRoot's --kill-on-exit can take the guest down with it;
-            // destroyForcibly is SIGKILL, which PRoot cannot pass on.
-            val pid = LinuxProgramLauncher.pidOf(child)
-            if (pid > 0) runCatching { ProcessHelper.terminateProcess(pid) }
-            if (!child.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) child.destroyForcibly()
+
+        // Applications first and the X server last: killing the server first makes everything
+        // still connected to it die noisily on a lost connection, and openbox treats that as
+        // fatal. Each of these is a PRoot host whose guest processes go with it -- see
+        // [GuestProcesses], which is where the work of actually ending them lives.
+        val held = synchronized(apps) { apps.toList().also { apps.clear() } }
+        val labelled = held.map { it to "application" } +
+            listOf(panel to "tint2", settings to "xsettingsd", wm to "openbox", server to "Xtigervnc")
+                .mapNotNull { (process, label) -> process?.let { it to label } }
+
+        for ((process, label) in labelled) {
+            val pid = LinuxProgramLauncher.pidOf(process)
+            if (pid > 0) {
+                GuestProcesses.end(process, pid, "$label on display :$display")
+            } else {
+                // No pid means the reflection this depends on has broken, so the tree cannot be
+                // walked; the handle is all there is.
+                Timber.w("[LinuxDisplaySession]: no pid for %s, killing the handle only", label)
+                process.destroyForcibly()
+            }
         }
+
         panel = null
         settings = null
         wm = null
         server = null
 
         clearStaleDisplay()
+        release(port)
         Timber.i("[LinuxDisplaySession]: display :%d stopped", display)
     }
 }

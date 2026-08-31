@@ -150,6 +150,10 @@ internal suspend fun createLinuxAppShortcut(
     val intent = Intent(MainActivity.ACTION_LINUX_DESKTOP).apply {
         setClass(appContext, MainActivity::class.java)
         putExtra(MainActivity.EXTRA_LINUX_ARGV, app.launchArgv)
+        // So a shortcut reaches the same session and the same window as any other launch of this
+        // application, rather than a second copy keyed on the command alone.
+        putExtra(MainActivity.EXTRA_LINUX_ENTRY_ID, app.entryId)
+        putExtra(MainActivity.EXTRA_LINUX_LABEL, app.name)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 

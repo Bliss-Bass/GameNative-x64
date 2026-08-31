@@ -19,6 +19,15 @@ object LinuxAppStubs {
     /** The command the trampoline hands back to us, read by the stub's LaunchActivity. */
     private const val META_ARGV = "app.gamenative.stub.ARGV"
 
+    /**
+     * The desktop entry the command came from, handed back alongside it.
+     *
+     * What a running session is keyed on, and what Android files the application's window under,
+     * so a launch from the all-apps list reaches the same session and the same window as a launch
+     * from within the app.
+     */
+    private const val META_ENTRY_ID = "app.gamenative.stub.ENTRY_ID"
+
     fun packageNameFor(app: LinuxAppScanner.LinuxApp): String = Stubs.packageNameFor(app.entryId)
 
     /** Whether a stub can be built at all, which needs a userland as well as the trampoline. */
@@ -38,6 +47,9 @@ object LinuxAppStubs {
         val summary = listOf(
             app.name,
             app.launchArgv,
+            // Carried in the stub's meta-data, so a stub built before it was is out of date and
+            // republishes itself through the reconcile pass rather than needing a migration.
+            app.entryId,
             app.iconPath.orEmpty(),
             icon?.length()?.toString().orEmpty(),
             icon?.lastModified()?.toString().orEmpty(),
@@ -64,7 +76,7 @@ object LinuxAppStubs {
                 packageName = packageName,
                 label = app.name,
                 versionCode = versionCode,
-                metadata = mapOf(META_ARGV to app.launchArgv),
+                metadata = mapOf(META_ARGV to app.launchArgv, META_ENTRY_ID to app.entryId),
                 iconPng = iconPng(context, app),
             ).getOrThrow()
         }

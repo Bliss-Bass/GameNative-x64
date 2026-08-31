@@ -28,32 +28,41 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
-import app.gamenative.linux.LinuxDesktopConfig
-import app.gamenative.linux.LinuxDisplaySession
 import app.gamenative.linux.LinuxRootfs
-import app.gamenative.linux.rfb.RfbView
+import app.gamenative.linux.LinuxSession
+import app.gamenative.linux.LinuxSessions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
- * A Linux graphical session, presented over RFB from an X server in the rootfs.
+ * A window onto a Linux session.
  *
- * @param argv optional program to launch into the session once it is up.
+ * A viewer, not an owner: the session belongs to [LinuxSessions], which is what lets one outlive
+ * this composable and lets a second launch of the same application find the session it already
+ * has rather than start a rival copy. What happens when this window closes is the user's choice,
+ * expressed as [app.gamenative.enums.LinuxSessionMode] and applied by the registry.
+ *
+ * @param argv the program this session is for, or null for a bare desktop.
+ * @param entryId the desktop entry the program came from, which is what keys the session.
+ * @param label how the session names itself in the shade and in the session list.
  */
 @Composable
 fun LinuxDesktopScreen(
     argv: String? = null,
+    entryId: String? = null,
+    label: String? = null,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
     val metrics = context.resources.displayMetrics
+    val key = remember(entryId, argv) { LinuxSessions.keyFor(entryId, argv) }
 
-    var session by remember { mutableStateOf<LinuxDisplaySession?>(null) }
+    var session by remember { mutableStateOf<LinuxSession?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(key) {
         // Covers a userland installed before a package was added to the session, which is
         // an apt run rather than a reinstall, and can take long enough to need a message.
         LinuxRootfs.ensureDisplaySession(context) { status = it.message }
@@ -64,28 +73,27 @@ fun LinuxDesktopScreen(
             }
         status = null
 
-        // With a program to run, that program is the session and gets the display to itself.
-        // Without one, the user is here for the desktop: panel, menu and decorated windows.
-        val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
-
-        LinuxDisplaySession.start(context, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi, mode)
-            .onSuccess { started ->
-                withContext(Dispatchers.IO) {
-                    started.setDpi(metrics.densityDpi)
-                    argv?.let { started.run(it) }
-                }
-                session = started
+        LinuxSessions.open(
+            context = context,
+            key = key,
+            label = label ?: context.getString(R.string.linux_session_notification_title),
+            argv = argv,
+            width = metrics.widthPixels,
+            height = metrics.heightPixels,
+            densityDpi = metrics.densityDpi,
+        )
+            .onSuccess { opened ->
+                withContext(Dispatchers.IO) { opened.setDpi(metrics.densityDpi) }
+                LinuxSessions.attach(key)
+                session = opened
             }
-            .onFailure {
-                Timber.e(it, "[LinuxDesktopScreen]: could not start the session")
-                error = it.message
-            }
+            .onFailure { error = it.message }
     }
 
-    // Keyed on Unit, not on the session: keying on it would tear the session down as soon
-    // as it was assigned, since that assignment is itself a key change.
-    DisposableEffect(Unit) {
-        onDispose { session?.let { active -> Thread { active.stop() }.start() } }
+    // Keyed on the session key rather than on the session, since assigning the session is itself
+    // a key change and would tear down what had just been attached.
+    DisposableEffect(key) {
+        onDispose { LinuxSessions.detach(context, key) }
     }
 
     Box(
@@ -104,11 +112,19 @@ fun LinuxDesktopScreen(
             else -> AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
-                    RfbView(viewContext, active.port) { failure ->
-                        if (failure != null) error = failure.message else onExit()
+                    active.createView(viewContext) { failure ->
+                        if (failure != null) {
+                            error = failure.message
+                            return@createView
+                        }
+                        // The application in the session exited, which no lifetime mode is a
+                        // reason to keep an empty X server for: "keep it running" is about
+                        // closing the window, not about the program ending.
+                        LinuxSessions.stop(context, key)
+                        onExit()
                     }.apply { requestFocus() }
                 },
-                onRelease = { it.disconnect() },
+                onRelease = { active.releaseView(it) },
             )
         }
     }

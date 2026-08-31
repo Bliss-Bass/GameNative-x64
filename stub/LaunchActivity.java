@@ -20,8 +20,16 @@ public class LaunchActivity extends Activity {
 
     /** A Linux application: the command to run in the userland. */
     private static final String META_ARGV = "app.gamenative.stub.ARGV";
+    /**
+     * Which desktop entry that command came from. The host keys a running session on it, so
+     * launching this entry again finds the session it already has instead of starting a second
+     * copy on another display, and Android files the window's task under it.
+     */
+    private static final String META_ENTRY_ID = "app.gamenative.stub.ENTRY_ID";
     private static final String ACTION_LINUX = "app.gamenative.action.LINUX_DESKTOP";
     private static final String EXTRA_ARGV = "linux_argv";
+    private static final String EXTRA_ENTRY_ID = "linux_entry_id";
+    private static final String EXTRA_LABEL = "linux_label";
 
     /** A game: its numeric id within the store it came from, and that store's name. */
     private static final String META_APP_ID = "app.gamenative.stub.APP_ID";
@@ -91,6 +99,12 @@ public class LaunchActivity extends Activity {
         if (argv != null) {
             Intent intent = new Intent(ACTION_LINUX);
             intent.putExtra(EXTRA_ARGV, argv);
+            // Absent in stubs built before entry ids were carried, which the host allows for.
+            intent.putExtra(EXTRA_ENTRY_ID, meta.getString(META_ENTRY_ID));
+            // This stub's own label, which is the application's name: what the host shows for the
+            // window and in its running-sessions notification.
+            intent.putExtra(EXTRA_LABEL,
+                    getApplicationInfo().loadLabel(getPackageManager()).toString());
             return intent;
         }
 

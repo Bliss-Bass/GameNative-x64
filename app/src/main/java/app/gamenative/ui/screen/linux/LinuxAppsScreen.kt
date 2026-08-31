@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,14 +53,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.content.Context
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.gamenative.PrefManager
 import app.gamenative.R
+import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxDisplayScale
 import app.gamenative.linux.LinuxRootfs
+import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxStorage
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.theme.PluviaTheme
@@ -80,11 +85,15 @@ import timber.log.Timber
 fun LinuxAppsScreen(
     onBack: () -> Unit,
     onOpenTerminal: () -> Unit,
-    onLaunch: (argv: String) -> Unit,
+    onLaunch: (LinuxAppScanner.LinuxApp) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
+
+    // Which applications are up. Collected rather than read once: a session can end on its own
+    // when the last window in it exits, and the row's controls must not outlive it.
+    val sessions by LinuxSessions.sessions.collectAsStateWithLifecycle()
 
     // All-files access is granted in Settings, so the answer only changes while attention is
     // elsewhere. Keyed on window focus rather than the lifecycle: in desktop windowing both
@@ -118,7 +127,12 @@ fun LinuxAppsScreen(
             } else {
                 null
             }
-        Header(onBack = onBack, onRefresh = onRefresh)
+        Header(
+            onBack = onBack,
+            onRefresh = onRefresh,
+            running = sessions.size,
+            onStopAll = { LinuxSessions.stopAll(context) },
+        )
 
         if (LinuxRootfs.isInstalled(context) && !storageGranted) {
             StorageBanner(onGrant = { LinuxStorage.requestAccess(context) })
@@ -126,6 +140,7 @@ fun LinuxAppsScreen(
 
         if (LinuxRootfs.isInstalled(context)) {
             ScaleRow()
+            SessionModeRow()
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -152,9 +167,15 @@ fun LinuxAppsScreen(
 
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(found, key = { it.id }) { app ->
+                        val session = sessions.firstOrNull {
+                            it.key == LinuxSessions.keyFor(app.entryId, app.launchArgv)
+                        }
                         AppRow(
                             app = app,
-                            onClick = { onLaunch(app.launchArgv) },
+                            session = session,
+                            onClick = { onLaunch(app) },
+                            onStop = { LinuxSessions.stop(context, it.key) },
+                            onRestart = { LinuxSessions.restart(context, it.key) },
                             onPin = { scope.launch { createLinuxAppShortcut(context, app) } },
                             onAddToDrawer = if (LinuxAppStubs.isSupported(context)) {
                                 { scope.launch { addToDrawer(context, app) } }
@@ -285,10 +306,64 @@ private fun StorageBanner(onGrant: () -> Unit) {
     }
 }
 
+/**
+ * How long a session lives after its window closes.
+ *
+ * Beside the size control for the same reason: it is only meaningful once there is a userland,
+ * and this is the screen someone is on when they wonder why an app they closed is still listed as
+ * running -- or why reopening it is slow.
+ */
+@Composable
+private fun SessionModeRow() {
+    var mode by rememberSaveable { mutableStateOf(PrefManager.linuxSessionMode) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.linux_session_mode_title),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = stringResource(mode.summaryRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = PluviaTheme.colors.textMuted,
+            )
+        }
+
+        Box {
+            Button(onClick = { expanded = true }) {
+                Text(stringResource(mode.titleRes))
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                LinuxSessionMode.entries.forEach { choice ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(choice.titleRes)) },
+                        onClick = {
+                            mode = choice
+                            PrefManager.linuxSessionMode = choice
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AppRow(
     app: LinuxAppScanner.LinuxApp,
+    session: LinuxSessions.Snapshot?,
     onClick: () -> Unit,
+    onStop: (LinuxSessions.Snapshot) -> Unit,
+    onRestart: (LinuxSessions.Snapshot) -> Unit,
     onPin: () -> Unit,
     onAddToDrawer: (() -> Unit)?,
 ) {
@@ -313,17 +388,44 @@ private fun AppRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // The comment is the entry's own one-line description, which is more useful
-            // than the command; the terminal note is not obvious from either.
-            val subtitle = app.comment
-                ?: stringResource(R.string.linux_apps_terminal_app).takeIf { app.terminal }
+            // A running session is what someone is looking for when they came here to stop
+            // one, so it displaces the description while it lasts.
+            val subtitle = when {
+                session != null -> stringResource(R.string.linux_session_running, session.display)
+                app.comment != null -> app.comment
+                app.terminal -> stringResource(R.string.linux_apps_terminal_app)
+                else -> null
+            }
             if (subtitle != null) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = PluviaTheme.colors.textMuted,
+                    color = if (session != null) {
+                        PluviaTheme.colors.accentCyan
+                    } else {
+                        PluviaTheme.colors.textMuted
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        // Only while there is a session to act on: a stop button for something that is not
+        // running would be furniture, and a restart would be a launch by another name.
+        if (session != null) {
+            IconButton(onClick = { onRestart(session) }, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.RestartAlt,
+                    contentDescription = stringResource(R.string.linux_session_restart),
+                    tint = Color.White.copy(alpha = 0.7f),
+                )
+            }
+            IconButton(onClick = { onStop(session) }, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.StopCircle,
+                    contentDescription = stringResource(R.string.linux_session_stop),
+                    tint = PluviaTheme.colors.accentCyan,
                 )
             }
         }
@@ -376,7 +478,12 @@ private fun AppIcon(iconPath: String?) {
 }
 
 @Composable
-private fun Header(onBack: () -> Unit, onRefresh: (() -> Unit)?) {
+private fun Header(
+    onBack: () -> Unit,
+    onRefresh: (() -> Unit)?,
+    running: Int,
+    onStopAll: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -398,6 +505,24 @@ private fun Header(onBack: () -> Unit, onRefresh: (() -> Unit)?) {
                 .weight(1f)
                 .padding(start = 8.dp),
         )
+
+        // Held sessions are otherwise invisible from here: the list shows what is installed, and
+        // a lifetime the user cannot see or end is not one they can be asked to choose.
+        if (running > 0) {
+            Text(
+                text = stringResource(R.string.linux_session_count, running),
+                style = MaterialTheme.typography.bodySmall,
+                color = PluviaTheme.colors.accentCyan,
+            )
+            IconButton(onClick = onStopAll, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.StopCircle,
+                    contentDescription = stringResource(R.string.linux_session_stop_all),
+                    tint = PluviaTheme.colors.accentCyan,
+                )
+            }
+        }
+
         if (onRefresh != null) {
             IconButton(onClick = onRefresh, modifier = Modifier.size(44.dp)) {
                 Icon(

@@ -23,6 +23,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+      For a held Linux session. Not dataSync, which Android time-limits: correct for a download,
+      wrong for a session the user asked to keep running.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -104,6 +109,28 @@
 
         </activity>
 
+        <!--
+            One Linux application, in its own task and window.
+
+            documentLaunchMode="intoExisting" with a per-application Uri as the intent data is
+            what gives each one its own window: Android files distinct data as distinct
+            documents, so two Linux apps can be open side by side and each keeps the bounds it
+            was last given, while relaunching one brings its existing window forward.
+
+            configChanges covers size and density because a freeform resize must not recreate
+            this: the view negotiates the new size with the X server itself, and a recreation
+            would drop the connection and rebuild it for every frame of a window drag.
+        -->
+        <activity
+            android:name=".ui.LinuxSessionActivity"
+            android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:label="@string/linux_session_notification_title"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode"
+            android:theme="@style/Theme.Pluvia" />
+
         <!-- GOG OAuth (in-app WebView; intercepts redirect for automatic code capture) -->
         <activity
             android:name=".ui.screen.auth.GOGOAuthActivity"
@@ -176,6 +203,21 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+            Holds the process open while a Linux session runs. Two types because specialUse only
+            exists from API 34: the legacy flavours target 28 and start as dataSync, and the type
+            asked for at runtime has to be one declared here.
+        -->
+        <service
+            android:name=".service.LinuxSessionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|dataSync">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs a Linux userland session — an X server and the applications in it — for as long as the user keeps it open" />
+        </service>
 
         <!--
             Handles the Exit action on foreground-service notifications.

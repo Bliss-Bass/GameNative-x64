@@ -48,6 +48,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.utils.GameSessionMemory
 import app.gamenative.service.gog.GOGService
 import app.gamenative.service.epic.EpicService
+import app.gamenative.ui.LinuxSessionActivity
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.util.LocalSnackbarHostController
@@ -94,6 +95,18 @@ class MainActivity : ComponentActivity() {
         /** Opens the Linux desktop, with an optional [EXTRA_LINUX_ARGV] command to run in it. */
         const val ACTION_LINUX_DESKTOP = "app.gamenative.action.LINUX_DESKTOP"
         const val EXTRA_LINUX_ARGV = "linux_argv"
+
+        /**
+         * Which desktop entry the command came from, when the caller knows.
+         *
+         * What a session is keyed on, so launching an application that is already running finds
+         * it instead of starting a second copy, and what Android files the window's task under.
+         * Optional: a stub built before this was carried supplies only a command.
+         */
+        const val EXTRA_LINUX_ENTRY_ID = "linux_entry_id"
+
+        /** The application's name, for the window and the running-sessions notification. */
+        const val EXTRA_LINUX_LABEL = "linux_label"
 
         /** Opens the Linux terminal, which is also where the userland is installed from. */
         const val ACTION_LINUX_TERMINAL = "app.gamenative.action.LINUX_TERMINAL"
@@ -387,7 +400,22 @@ class MainActivity : ComponentActivity() {
             val terminal = intent.action == ACTION_LINUX_TERMINAL
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
             val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
+            val entryId = intent.getStringExtra(EXTRA_LINUX_ENTRY_ID)
+            val label = intent.getStringExtra(EXTRA_LINUX_LABEL)
             Timber.i("[IntentLaunch]: Linux %s requested (argv=%s)", if (terminal) "terminal" else "desktop", argv)
+
+            // An application gets a window of its own, so Android sizes and remembers it per
+            // application rather than reusing whatever bounds this activity happens to have. The
+            // in-app route below stays as the fallback: an older stub or an unusual device that
+            // cannot start the session activity should still open the app, in here, rather than
+            // fail. A bare desktop request is a screen of this app and stays put.
+            if (!terminal && !argv.isNullOrBlank()) {
+                val opened = runCatching {
+                    startActivity(LinuxSessionActivity.intent(this, argv, entryId, label))
+                }.onFailure { Timber.w(it, "[IntentLaunch]: no session window, falling back in-app") }
+
+                if (opened.isSuccess) return
+            }
 
             // Always recorded, and the event only says one is waiting. The alternative --
             // carrying the request on the event and recording it only for a cold start -- looks

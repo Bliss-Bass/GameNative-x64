@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import app.gamenative.PluviaApp
 import app.gamenative.events.AndroidEvent
+import app.gamenative.linux.LinuxSessions
 import timber.log.Timber
 
 /**
@@ -27,6 +28,13 @@ class NotificationActionReceiver : BroadcastReceiver() {
             NotificationHelper.ACTION_EXIT -> {
                 Timber.d("NotificationActionReceiver: Exit tapped, broadcasting EndProcess")
                 PluviaApp.events.emit(AndroidEvent.EndProcess)
+            }
+
+            NotificationHelper.ACTION_STOP_LINUX_SESSIONS -> {
+                // Ends the sessions only. The service that posted this notification stops itself
+                // once the last one has gone, so there is nothing to tell it here.
+                Timber.d("NotificationActionReceiver: stopping all Linux sessions")
+                LinuxSessions.stopAll(context)
             }
         }
     }

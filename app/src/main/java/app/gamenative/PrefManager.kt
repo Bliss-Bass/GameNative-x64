@@ -16,6 +16,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.autotuning.DeviceGate
 import app.gamenative.enums.AppTheme
+import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.enums.PresentationPath
 import app.gamenative.linux.LinuxDisplayScale
 import app.gamenative.ui.enums.AppFilter
@@ -1307,6 +1308,17 @@ object PrefManager {
         get() = getPref(LINUX_UI_SCALE_PERCENT, LinuxDisplayScale.DEFAULT_SCALE_PERCENT)
         set(value) {
             setPref(LINUX_UI_SCALE_PERCENT, value)
+        }
+
+    /**
+     * How long a Linux session lives after its window is closed. See [LinuxSessionMode]; stored
+     * by key so a value from another build degrades to the default rather than throwing.
+     */
+    private val LINUX_SESSION_MODE = stringPreferencesKey("linux_session_mode")
+    var linuxSessionMode: LinuxSessionMode
+        get() = LinuxSessionMode.fromKey(getPref(LINUX_SESSION_MODE, LinuxSessionMode.DEFAULT.key))
+        set(value) {
+            setPref(LINUX_SESSION_MODE, value.key)
         }
 
     private val EXTERNAL_STORAGE_PATH = stringPreferencesKey("external_storage_path")

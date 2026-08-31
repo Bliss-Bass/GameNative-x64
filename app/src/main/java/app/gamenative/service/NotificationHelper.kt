@@ -27,9 +27,13 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         const val NOTIFICATION_ID_GOG = 2
         const val NOTIFICATION_ID_EPIC = 3
         const val NOTIFICATION_ID_AMAZON = 4
+        const val NOTIFICATION_ID_LINUX = 5
         private const val NOTIFICATION_ID_SUMMARY = 100
 
         const val ACTION_EXIT = "com.oxgames.pluvia.EXIT"
+
+        /** Ends every running Linux session, without touching the rest of the app. */
+        const val ACTION_STOP_LINUX_SESSIONS = "app.gamenative.STOP_LINUX_SESSIONS"
 
         private const val NO_PROGRESS = -2
     }
@@ -51,6 +55,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         NOTIFICATION_ID_GOG -> "GOG"
         NOTIFICATION_ID_EPIC -> "Epic Games"
         NOTIFICATION_ID_AMAZON -> "Amazon Games"
+        NOTIFICATION_ID_LINUX -> context.getString(R.string.linux_session_notification_title)
         else -> context.getString(R.string.app_name)
     }
 
@@ -117,6 +122,26 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         createServiceNotification(NOTIFICATION_ID_STEAM, content)
 
     /**
+     * The running-sessions notification, whose action ends the sessions rather than the app.
+     *
+     * "Exit" would be wrong here: someone who wants their Linux apps closed has not asked to be
+     * signed out of Steam or to have a download abandoned.
+     */
+    fun createLinuxSessionNotification(content: String): Notification =
+        buildNotification(
+            title = serviceNameFor(NOTIFICATION_ID_LINUX),
+            content = content,
+            isSummary = false,
+            action = Action(context.getString(R.string.linux_session_stop_all), ACTION_STOP_LINUX_SESSIONS),
+        )
+
+    @Synchronized
+    fun notifyLinuxSessions(content: String) {
+        notificationManager.notify(NOTIFICATION_ID_LINUX, createLinuxSessionNotification(content))
+        markActive(NOTIFICATION_ID_LINUX)
+    }
+
+    /**
      * Drives a live "Downloading <name> · X%" progress notification off [downloadInfo]'s existing
      * progress callbacks (event-driven, throttled to whole-percent changes). Reverts to idle when
      * the download finishes. Call once per download, per service [id].
@@ -156,7 +181,16 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         isSummary = true,
     )
 
-    private fun buildNotification(title: String, content: String, isSummary: Boolean, progress: Int = NO_PROGRESS): Notification {
+    /** A notification button: what it says, and the broadcast it sends. */
+    private data class Action(val label: String, val broadcast: String)
+
+    private fun buildNotification(
+        title: String,
+        content: String,
+        isSummary: Boolean,
+        progress: Int = NO_PROGRESS,
+        action: Action = Action("Exit", ACTION_EXIT),
+    ): Notification {
         val intent = Intent(
             Intent.ACTION_VIEW,
             "pluvia://home".toUri(),
@@ -180,11 +214,13 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         // the targeted service wasn't already running (e.g. Exit tapped on a GOG
         // notification with no active Steam session).
         val stopIntent = Intent(context, NotificationActionReceiver::class.java).apply {
-            action = ACTION_EXIT
+            setAction(action.broadcast)
         }
         val stopPendingIntent = PendingIntent.getBroadcast(
             context,
-            0,
+            // Distinct per action: PendingIntents are matched ignoring extras, so one request
+            // code for both would hand out whichever was built first.
+            action.broadcast.hashCode(),
             stopIntent,
             PendingIntent.FLAG_IMMUTABLE,
         )
@@ -204,7 +240,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setGroup(GROUP_KEY)
-            .addAction(0, "Exit", stopPendingIntent)
+            .addAction(0, action.label, stopPendingIntent)
 
         when {
             progress == NO_PROGRESS -> {}
