@@ -83,9 +83,15 @@ val stubTrampolineDex by tasks.registering {
     }
 }
 
-// The asset merge for the flavor that packages the trampoline, which is the only consumer.
-tasks.matching { it.name.startsWith("mergeModernX64") && it.name.endsWith("Assets") }
-    .configureEach { dependsOn(stubTrampolineDex) }
+// Everything that reads the flavor's asset directories, which is the asset merge plus lint's
+// model tasks. Lint matters because it fails the build outright rather than warning: it reports
+// reading a directory another task produces without a declared dependency, and it runs on
+// release but not on debug, so a debug-only wiring passes locally and breaks the ROM prebuilt.
+tasks.matching {
+    // Lint's task names vary in case ("lintVitalAnalyze...", "generate...LintVitalReportModel").
+    it.name.contains("ModernX64") &&
+        (it.name.endsWith("Assets") || it.name.contains("lint", ignoreCase = true))
+}.configureEach { dependsOn(stubTrampolineDex) }
 
 android {
     namespace = "app.gamenative"
