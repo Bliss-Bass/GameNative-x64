@@ -171,9 +171,20 @@ private fun NavHostController.navigateToPendingLinuxRequest() {
     Timber.i("[PluviaMain]: Opening Linux %s", if (request.terminal) "terminal" else "session")
     if (request.terminal) {
         navigate(PluviaScreen.Terminal.route)
-    } else {
-        navigate(PluviaScreen.LinuxDesktop.route(request.argv))
+        return
     }
+
+    // A session launched from an app-drawer entry has only the graph's start destination beneath
+    // it, so back leaves the app the user was just in and lands on the library -- or, before a
+    // Steam login, on the sign-in screen, which has nothing to do with what they opened. The list
+    // the entry was made from is the screen "back" means here, so put it underneath first.
+    //
+    // Only for a launch that names a program. A bare desktop request is the desktop itself rather
+    // than something reached from the list, and the library is its parent.
+    if (request.argv != null && currentDestination?.route != PluviaScreen.LinuxApps.route) {
+        navigate(PluviaScreen.LinuxApps.route)
+    }
+    navigate(PluviaScreen.LinuxDesktop.route(request.argv))
 }
 
 /**
