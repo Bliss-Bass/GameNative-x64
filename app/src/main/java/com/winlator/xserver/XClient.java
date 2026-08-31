@@ -12,6 +12,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 
 public class XClient implements XResourceManager.OnResourceLifecycleListener {
+    /** Every event pushed to a client, for catching a client that spends its life draining our queue. */
+    private static final boolean TRACE_EVENTS = false;
+
     public final XServer xServer;
     public com.winlator.xconnector.Client connectorClient;
     private boolean authenticated = false;
@@ -53,6 +56,9 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     }
 
     public void sendEvent(Event event) {
+        if (TRACE_EVENTS) {
+            android.util.Log.d("XEvent", "-> " + event.getClass().getSimpleName());
+        }
         try (XStreamLock ignored = outputStream.lock()) {
             event.send(sequenceNumber, outputStream);
         }

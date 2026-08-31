@@ -249,3 +249,47 @@ source for the interposer is in the tree.
 
 Whichever lands, the route should become a user-visible Settings choice with a per-device
 default, since the right answer will vary by GPU and driver.
+
+### Where the MIT-SHM path stands
+
+The interposer is written and works: on the shared-memory setting Mesa's probe segment is
+created through our broker, the server attaches it, and the whole probe handshake completes.
+What does not work is the swapchain. Mesa allocates its images through the broker
+(three segments of width x height x 4) and then the guest never sends `ShmAttach` for any of
+them, never presents a frame, and ends up with its X connection in an error state. Half-Life 2
+turns that into a silent `exit(1)`, because Xlib's IO error handler exits; vkcube instead spins
+at 100% CPU making no syscalls at all, because xcb short-circuits every call once the
+connection is marked bad.
+
+What has been ruled out:
+
+- **Not the driver.** With the Intel ICD moved aside the guest runs on llvmpipe, a CPU driver
+  that imports nothing into a GPU, and it fails in exactly the same place.
+- **Not a rejected request.** The server sends no X error and logs none; the MIT-SHM attach it
+  does see reports success.
+- **Not the broker.** No call into the interposer fails, and the segments are created and
+  mapped at the sizes asked for.
+- **Not an event flood.** The server sends the client no events at all in the failing window.
+
+One real bug was found and fixed on the way: `ShmQueryVersion` replied with 17 bytes where
+every X reply must be 32, and this output stream pads nothing automatically, so a client read
+the following 15 bytes on the socket as the tail of that reply. Fixing it did not change the
+failure.
+
+### Reproducing it in seconds
+
+`tools/guest_vk_run.sh` runs any native x86_64 Vulkan binary inside a live container
+environment with the WSI mode as an argument, so both paths can be compared without a game.
+`vkcube` from Termux's `vulkan-tools` (x86_64) is a good subject: it is 288 KB, links only
+libc, and finds the container's loader through `LD_LIBRARY_PATH`.
+
+Two things make this bearable to iterate on:
+
+- **A container of one's own.** Import a folder containing nothing but `winemine.exe` as a
+  custom game (called `vk-testing` here). It boots a session, and therefore the X server and
+  the broker, in about half a minute, and its window stays open indefinitely.
+- **Keep test binaries out of `imagefs`.** A container start wipes `imagefs/tmp` and resets the
+  home directory, so staged tools belong somewhere else; the script expects `files/vktest`.
+
+With that in place: `sw,noshm` presents 60 frames and exits in about a second, `sw` hangs, and
+the whole comparison takes under fifteen seconds.
