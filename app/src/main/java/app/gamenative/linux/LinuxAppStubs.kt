@@ -1,12 +1,10 @@
 package app.gamenative.linux
 
 import android.content.Context
-import android.graphics.Bitmap
+import app.gamenative.stubs.StubIcons
 import app.gamenative.stubs.StubRegistry
 import app.gamenative.stubs.Stubs
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.IOException
 import java.security.MessageDigest
 
 /**
@@ -99,11 +97,18 @@ object LinuxAppStubs {
             if (gone) StubRegistry.linux.forget(context, entryId)
         }
 
-    /** [app]'s icon as a PNG, which a stub cannot do without. */
+    /**
+     * [app]'s icon as a PNG, falling back to a lettered tile.
+     *
+     * A desktop entry naming an icon we cannot produce a bitmap from is ordinary rather than
+     * exceptional: it may name one that is not installed, or -- like xterm -- an XPM, which
+     * Android cannot decode. Refusing to create the entry over that is the wrong trade, since the
+     * user asked for a way to launch the application, not for its artwork. The list already shows
+     * a stand-in glyph in the same situation.
+     */
     private fun iconPng(context: Context, app: LinuxAppScanner.LinuxApp): ByteArray {
-        val bitmap = LinuxAppIcon.load(context, app.iconPath) ?: throw IOException("no icon for ${app.name}")
-        return ByteArrayOutputStream()
-            .also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            .toByteArray()
+        val bitmap = LinuxAppIcon.load(context, app.iconPath)
+            ?: StubIcons.lettered(context, app.name)
+        return StubIcons.png(bitmap)
     }
 }

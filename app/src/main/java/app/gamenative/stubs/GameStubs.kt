@@ -1,18 +1,11 @@
 package app.gamenative.stubs
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
 import app.gamenative.data.GameSource
 import app.gamenative.utils.SteamGridDB
 import java.io.File
 import app.gamenative.utils.createAdaptiveIconBitmap
 import app.gamenative.utils.loadGameArtwork
-import java.io.ByteArrayOutputStream
-import java.io.IOException
 import java.security.MessageDigest
 import timber.log.Timber
 
@@ -182,40 +175,16 @@ object GameStubs {
         val image = artwork.firstNotNullOfOrNull { loadGameArtwork(context, it) }
             ?: SteamGridDB.fetchIcon(label, iconCache(context))?.let { loadGameArtwork(context, "file://$it") }
 
-        val tile = if (image != null) createAdaptiveIconBitmap(context, image) else lettered(context, label)
+        val tile = if (image != null) {
+            createAdaptiveIconBitmap(context, image)
+        } else {
+            StubIcons.lettered(context, label)
+        }
 
-        return ByteArrayOutputStream()
-            .also { tile.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            .toByteArray()
+        return StubIcons.png(tile)
     }
 
     /** Where looked-up icons are kept, so a game is only ever looked up once. */
     private fun iconCache(context: Context): File = File(context.filesDir, "stubs/artwork").apply { mkdirs() }
 
-    /** A tile carrying [label]'s first letter, for a game with no artwork anywhere. */
-    private fun lettered(context: Context, label: String): Bitmap {
-        val size = (108f * context.resources.displayMetrics.density).toInt().coerceAtLeast(108)
-        val letter = label.trim().firstOrNull()?.uppercase() ?: "?"
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = size * 0.5f
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-
-        // Offset from the centre by the glyph's own extents, since drawText places the baseline.
-        val metrics = paint.fontMetrics
-        val baseline = size / 2f - (metrics.ascent + metrics.descent) / 2f
-
-        return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
-            Canvas(bitmap).apply {
-                drawColor(BACKGROUND)
-                drawText(letter, size / 2f, baseline, paint)
-            }
-        }
-    }
-
-    /** Behind a lettered tile. Matches the launcher's own placeholder tone rather than shouting. */
-    private const val BACKGROUND = 0xFF37474F.toInt()
 }
