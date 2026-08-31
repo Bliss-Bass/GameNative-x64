@@ -17,6 +17,7 @@ import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.autotuning.DeviceGate
 import app.gamenative.enums.AppTheme
 import app.gamenative.enums.PresentationPath
+import app.gamenative.linux.LinuxDisplayScale
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.HomeDestination
 import app.gamenative.ui.enums.Orientation
@@ -1294,6 +1295,18 @@ object PrefManager {
         get() = PresentationPath.fromKey(getPref(PRESENTATION_PATH, PresentationPath.DEFAULT.key))
         set(value) {
             setPref(PRESENTATION_PATH, value.key)
+        }
+
+    /**
+     * How large the Linux session draws, as a percentage of Android's own UI scale. 100 means a
+     * Linux app is the size an Android app would be on this panel; see [LinuxDisplayScale], which
+     * owns the conversion between Android's 160dpi baseline and X's 96dpi one.
+     */
+    private val LINUX_UI_SCALE_PERCENT = intPreferencesKey("linux_ui_scale_percent")
+    var linuxUiScalePercent: Int
+        get() = getPref(LINUX_UI_SCALE_PERCENT, LinuxDisplayScale.DEFAULT_SCALE_PERCENT)
+        set(value) {
+            setPref(LINUX_UI_SCALE_PERCENT, value)
         }
 
     private val EXTERNAL_STORAGE_PATH = stringPreferencesKey("external_storage_path")

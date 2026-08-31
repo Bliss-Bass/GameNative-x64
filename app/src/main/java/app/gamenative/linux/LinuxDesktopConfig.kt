@@ -1,6 +1,7 @@
 package app.gamenative.linux
 
 import android.content.Context
+import app.gamenative.PrefManager
 import java.io.File
 import timber.log.Timber
 
@@ -87,11 +88,11 @@ object LinuxDesktopConfig {
      * terminal, so what is installed changes under us, and neither a menu nor a launcher is worth
      * having if it does not list what is actually there.
      */
-    fun writeDesktop(context: Context, apps: List<LinuxAppScanner.LinuxApp>, densityDpi: Int) {
+    fun writeDesktop(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
         val rootfs = LinuxRootfs.rootfsDir(context)
         runCatching {
             writeMenu(rootfs, apps)
-            writePanel(rootfs, apps, densityDpi)
+            writePanel(context, rootfs, apps)
         }.onFailure { Timber.w(it, "[LinuxDesktopConfig]: could not write the desktop configuration") }
     }
 
@@ -133,10 +134,17 @@ object LinuxDesktopConfig {
      * long press away at best, and a menu that appears where the finger landed is not something
      * to build a desktop on; a row of targets along the bottom edge is.
      */
-    private fun writePanel(rootfs: File, apps: List<LinuxAppScanner.LinuxApp>, densityDpi: Int) {
+    private fun writePanel(context: Context, rootfs: File, apps: List<LinuxAppScanner.LinuxApp>) {
         // Sized in physical terms: a panel a finger can hit is about 9mm, which is this many
         // pixels on whatever panel the tablet has.
-        val height = (densityDpi * 0.35f).toInt().coerceIn(40, 160)
+        //
+        // Deliberately Android's real density and not the DPI the X server is given. That one is
+        // rebased onto X's 96dpi convention so toolkits lay out at the right size, which makes it
+        // the wrong number for asking "how many pixels is 9mm". The user's scale still applies:
+        // someone who wants a larger UI wants a larger panel with it.
+        val densityDpi = context.resources.displayMetrics.densityDpi
+        val scale = PrefManager.linuxUiScalePercent / 100f
+        val height = (densityDpi * 0.35f * scale).toInt().coerceIn(40, 160)
         val iconSize = height - (height / 4)
 
         // Capped, because the launcher is the shortcut to the handful of things someone reaches

@@ -394,12 +394,12 @@ object LinuxRootfs {
      * Default XSETTINGS, so text is the right physical size on a dense screen.
      *
      * X clients assume 96 DPI and would draw at about half size on this hardware. Android's
-     * densityDpi is a bucketed approximation of the panel's real density, which is close
-     * enough for type; the session rewrites this file and signals xsettingsd if the density
-     * ever changes under it.
+     * densityDpi is not that number, though -- it is measured against a different baseline --
+     * so [LinuxDisplayScale] converts it rather than passing it through. The session rewrites
+     * this file and signals xsettingsd if the density or the user's scale changes under it.
      */
     private fun writeXsettings(rootfs: File, densityDpi: Int) {
-        val dpi = densityDpi.coerceIn(96, 400)
+        val dpi = LinuxDisplayScale.xdpi(densityDpi)
         File(rootfs, "root/.xsettingsd").writeText(
             """
             Xft/DPI ${dpi * 1024}

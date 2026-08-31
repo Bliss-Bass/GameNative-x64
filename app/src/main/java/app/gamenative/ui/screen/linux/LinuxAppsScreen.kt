@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,11 +51,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.content.Context
+import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
+import app.gamenative.linux.LinuxDisplayScale
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxStorage
 import app.gamenative.ui.util.SnackbarManager
@@ -119,6 +124,10 @@ fun LinuxAppsScreen(
             StorageBanner(onGrant = { LinuxStorage.requestAccess(context) })
         }
 
+        if (LinuxRootfs.isInstalled(context)) {
+            ScaleRow()
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             val found = apps
             when {
@@ -172,6 +181,68 @@ private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp)
             Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
             SnackbarManager.show(context.getString(R.string.stub_add_failed, app.name))
         }
+}
+
+/**
+ * How large Linux apps draw, as a percentage of Android's own UI scale.
+ *
+ * Here rather than in Settings because it is only meaningful once there is a userland to apply it
+ * to, and this is the screen someone is on when they notice the size is wrong.
+ *
+ * Takes effect when a session next starts: the X server is told its DPI on the command line, and
+ * a running session's clients have already sized their windows from it.
+ */
+@Composable
+private fun ScaleRow() {
+    var percent by rememberSaveable { mutableIntStateOf(PrefManager.linuxUiScalePercent) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.linux_scale_title),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = stringResource(R.string.linux_scale_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = PluviaTheme.colors.textMuted,
+            )
+        }
+
+        Box {
+            Button(onClick = { expanded = true }) {
+                Text(stringResource(R.string.linux_scale_value, percent))
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                LinuxDisplayScale.SCALE_CHOICES.forEach { choice ->
+                    DropdownMenuItem(
+                        text = {
+                            // The default is worth naming: "100%" alone does not say what it is
+                            // 100% of, and matching Android is the whole point of the number.
+                            val label = if (choice == LinuxDisplayScale.DEFAULT_SCALE_PERCENT) {
+                                stringResource(R.string.linux_scale_match, choice)
+                            } else {
+                                stringResource(R.string.linux_scale_value, choice)
+                            }
+                            Text(label)
+                        },
+                        onClick = {
+                            percent = choice
+                            PrefManager.linuxUiScalePercent = choice
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

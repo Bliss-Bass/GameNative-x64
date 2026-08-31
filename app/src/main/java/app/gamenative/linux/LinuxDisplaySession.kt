@@ -55,9 +55,10 @@ class LinuxDisplaySession private constructor(
          * [width] and [height] are the starting size only; the presenter resizes the
          * desktop to match its surface as soon as it knows how big that is.
          *
-         * [densityDpi] is what the server will report to clients. Every Xft client sizes
-         * type from it, so leaving it at the X default of 96 draws text at roughly half
-         * size on a panel like this one.
+         * [densityDpi] is Android's density for this display. It is converted before the
+         * server sees it: X clients size against a 96dpi baseline where Android uses 160,
+         * so passing it through unchanged draws everything about 1.7x too large. See
+         * [LinuxDisplayScale], which also applies the user's scale preference.
          */
         suspend fun start(
             context: Context,
@@ -76,7 +77,7 @@ class LinuxDisplaySession private constructor(
 
                 val port = freePort()
                 val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode)
-                session.launch(width, height, densityDpi.coerceIn(96, 400))
+                session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi))
                 session
             }
         }
@@ -125,7 +126,7 @@ class LinuxDisplaySession private constructor(
 
         // Built from what is installed right now, since apt runs in our own terminal.
         if (desktop) {
-            LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context), dpi)
+            LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context))
         }
 
 
@@ -222,7 +223,7 @@ class LinuxDisplaySession private constructor(
      * running GTK and Qt apps. They read DPI once at startup otherwise.
      */
     fun setDpi(densityDpi: Int) {
-        val dpi = densityDpi.coerceIn(96, 400)
+        val dpi = LinuxDisplayScale.xdpi(densityDpi)
         val settings = File(LinuxRootfs.rootfsDir(context), "root/.xsettingsd")
         val text = settings.takeIf { it.isFile }?.readText() ?: return
         val updated = text.lines().joinToString("\n") { line ->
