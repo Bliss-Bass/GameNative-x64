@@ -3,6 +3,7 @@ package app.gamenative.utils.launchdependencies
 import android.content.Context
 import app.gamenative.data.GameSource
 import app.gamenative.service.SteamService
+import app.gamenative.utils.HostContainerPolicy
 import app.gamenative.utils.LOADING_PROGRESS_UNKNOWN
 import com.winlator.container.Container
 import com.winlator.core.TarCompressorUtils
@@ -18,14 +19,17 @@ import java.io.File
  * Only runs when container variant is BIONIC and wine version is proton-9.0-arm64ec or proton-9.0-x86_64.
  */
 object BionicDefaultProtonDependency : LaunchDependency {
+    private fun protonVersionForHost(container: Container): String =
+        HostContainerPolicy.mapWineVersionForHost(container.wineVersion)
+
     override fun appliesTo(container: Container, gameSource: GameSource, gameId: Int): Boolean {
         if (container.containerVariant != Container.BIONIC) return false
-        val v = container.wineVersion
+        val v = protonVersionForHost(container)
         return v.contains("proton-9.0-arm64ec") || v.contains("proton-9.0-x86_64")
     }
 
     override fun isSatisfied(context: Context, container: Container, gameSource: GameSource, gameId: Int): Boolean {
-        val protonVersion = container.wineVersion
+        val protonVersion = protonVersionForHost(container)
         val outFile = File(ImageFs.getSharedProtonDir(context), protonVersion)
         val binDir = File(outFile, "bin")
         return binDir.exists() && binDir.isDirectory
@@ -33,8 +37,8 @@ object BionicDefaultProtonDependency : LaunchDependency {
 
     override fun getLoadingMessage(context: Context, container: Container, gameSource: GameSource, gameId: Int): String {
         return when {
-            container.wineVersion.contains("proton-9.0-arm64ec") -> "Downloading arm64ec Proton"
-            container.wineVersion.contains("proton-9.0-x86_64") -> "Downloading x86_64 Proton"
+            protonVersionForHost(container).contains("proton-9.0-arm64ec") -> "Downloading arm64ec Proton"
+            protonVersionForHost(container).contains("proton-9.0-x86_64") -> "Downloading x86_64 Proton"
             else -> "Extracting Proton"
         }
     }
@@ -46,7 +50,16 @@ object BionicDefaultProtonDependency : LaunchDependency {
         gameSource: GameSource,
         gameId: Int,
     ) = coroutineScope {
-        val protonVersion = container.wineVersion
+        val protonVersion = protonVersionForHost(container)
+        if (protonVersion != container.wineVersion) {
+            Timber.i(
+                "BionicDefaultProtonDependency: remapped wineVersion %s -> %s",
+                container.wineVersion,
+                protonVersion,
+            )
+            container.wineVersion = protonVersion
+            container.saveData()
+        }
         val imageFs = withContext(Dispatchers.IO) { ImageFs.find(context) }
         val archiveName = when {
             protonVersion.contains("proton-9.0-arm64ec") -> "proton-9.0-arm64ec.txz"

@@ -25,7 +25,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowBuild
 import java.io.File
+import app.gamenative.utils.HostContainerPolicy
 
 @RunWith(RobolectricTestRunner::class)
 class BionicDefaultProtonDependencyTest {
@@ -34,6 +36,7 @@ class BionicDefaultProtonDependencyTest {
 
     @Before
     fun setUp() {
+        ShadowBuild.setSupportedAbis(arrayOf("arm64-v8a", "armeabi-v7a", "armeabi"))
         context = ApplicationProvider.getApplicationContext()
         container = mockk(relaxed = true)
     }
@@ -164,5 +167,55 @@ class BionicDefaultProtonDependencyTest {
             )
         }
         assertEquals(listOf(0.42f), progressValues)
+    }
+
+    @Test
+    fun install_onX86Host_downloadsX86_64ArchiveEvenIfContainerIsArm64ec() = runBlocking {
+        ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
+        every { container.wineVersion } returns "proton-9.0-arm64ec"
+        every { container.wineVersion = any() } returns Unit
+        mockkObject(SteamService.Companion)
+
+        val binDir = File(ImageFs.getSharedProtonDir(context), "proton-9.0-x86_64/bin")
+        binDir.mkdirs()
+
+        every { SteamService.isFileInstallable(context, "proton-9.0-x86_64.txz") } returns false
+
+        val deferred = mockk<Deferred<Unit>>()
+        every {
+            SteamService.downloadFile(
+                onDownloadProgress = any(),
+                parentScope = any(),
+                context = context,
+                fileName = "proton-9.0-x86_64.txz",
+            )
+        } returns deferred
+        coEvery { deferred.await() } returns Unit
+
+        BionicDefaultProtonDependency.install(
+            context = context,
+            container = container,
+            callbacks = LaunchDependencyCallbacks({}, {}),
+            gameSource = GameSource.STEAM,
+            gameId = 10,
+        )
+
+        verify(exactly = 1) {
+            SteamService.downloadFile(
+                onDownloadProgress = any(),
+                parentScope = any(),
+                context = context,
+                fileName = "proton-9.0-x86_64.txz",
+            )
+        }
+        verify(exactly = 0) {
+            SteamService.downloadFile(
+                onDownloadProgress = any(),
+                parentScope = any(),
+                context = context,
+                fileName = "proton-9.0-arm64ec.txz",
+            )
+        }
+        assertEquals("proton-9.0-x86_64", HostContainerPolicy.mapWineVersionForHost("proton-9.0-arm64ec"))
     }
 }

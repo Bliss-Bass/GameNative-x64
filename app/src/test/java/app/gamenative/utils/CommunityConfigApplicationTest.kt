@@ -17,6 +17,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowBuild
 
 @RunWith(RobolectricTestRunner::class)
 class CommunityConfigApplicationTest {
@@ -79,6 +80,7 @@ class CommunityConfigApplicationTest {
 
     @Before
     fun setUp() {
+        ShadowBuild.setSupportedAbis(arrayOf("arm64-v8a", "armeabi-v7a", "armeabi"))
         context = ApplicationProvider.getApplicationContext()
         PrefManager.init(context)
 

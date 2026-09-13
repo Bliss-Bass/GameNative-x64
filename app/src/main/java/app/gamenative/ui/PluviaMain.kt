@@ -100,6 +100,7 @@ import app.gamenative.ui.util.LocalSnackbarHostController
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.HostContainerPolicy
 import app.gamenative.utils.PlatformAuthUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ManifestInstaller
@@ -1768,6 +1769,11 @@ fun preLaunchApp(
             ContainerUtils.getOrCreateContainerWithOverride(context, appId)
         } else {
             ContainerUtils.getOrCreateContainer(context, appId)
+        }
+
+        // Community configs are ARM-first. Remap before Proton / manifest downloads.
+        if (HostContainerPolicy.adaptContainerForHost(context, container)) {
+            container.saveData()
         }
 
         // Clear session metadata on every launch to ensure fresh values

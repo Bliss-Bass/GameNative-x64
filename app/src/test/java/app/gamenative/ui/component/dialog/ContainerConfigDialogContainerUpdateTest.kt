@@ -24,6 +24,7 @@ import org.junit.runner.RunWith
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowBuild
 import java.io.File
 import java.lang.reflect.Field
 import java.util.EnumSet
@@ -37,6 +38,7 @@ class ContainerConfigDialogContainerUpdateTest {
 
     @Before
     fun setUp() {
+        ShadowBuild.setSupportedAbis(arrayOf("arm64-v8a", "armeabi-v7a", "armeabi"))
         context = ApplicationProvider.getApplicationContext()
         tempDir = File.createTempFile("container_test_", null)
         tempDir.delete()

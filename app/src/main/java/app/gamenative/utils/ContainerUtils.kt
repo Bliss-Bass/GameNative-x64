@@ -388,8 +388,10 @@ object ContainerUtils {
             updatedData = when (key) {
                 "executablePath" -> value?.let { updatedData.copy(executablePath = it as? String ?: updatedData.executablePath) }
                     ?: updatedData
-                "graphicsDriver" -> value?.let { updatedData.copy(graphicsDriver = it as? String ?: updatedData.graphicsDriver) }
-                    ?: updatedData
+                "graphicsDriver" -> value?.let {
+                    val raw = it as? String ?: updatedData.graphicsDriver
+                    updatedData.copy(graphicsDriver = HostContainerPolicy.mapGraphicsDriverForHost(raw))
+                } ?: updatedData
                 "graphicsDriverVersion" -> value?.let {
                     updatedData.copy(
                         graphicsDriverVersion =
@@ -419,7 +421,10 @@ object ContainerUtils {
                 "box64Preset" -> value?.let { updatedData.copy(box64Preset = it as? String ?: updatedData.box64Preset) } ?: updatedData
                 "containerVariant" -> value?.let { updatedData.copy(containerVariant = it as? String ?: updatedData.containerVariant) }
                     ?: updatedData
-                "wineVersion" -> value?.let { updatedData.copy(wineVersion = it as? String ?: updatedData.wineVersion) } ?: updatedData
+                "wineVersion" -> value?.let {
+                    val raw = it as? String ?: updatedData.wineVersion
+                    updatedData.copy(wineVersion = HostContainerPolicy.mapWineVersionForHost(raw))
+                } ?: updatedData
                 "emulator" -> value?.let { updatedData.copy(emulator = it as? String ?: updatedData.emulator) } ?: updatedData
                 "fexcoreVersion" -> value?.let { updatedData.copy(fexcoreVersion = it as? String ?: updatedData.fexcoreVersion) }
                     ?: updatedData
@@ -597,6 +602,11 @@ object ContainerUtils {
         container.setDinputMapperType(containerData.dinputMapperType)
         container.setUseDRI3(containerData.useDRI3)
         Timber.d("Container set: preferredInputApi=%s, dinputMapperType=0x%02x", api, containerData.dinputMapperType)
+
+        if (HostContainerPolicy.adaptContainerForHost(context, container) && !saveToDisk) {
+            // Adaptation already mutated in-memory fields; persist so launch deps see the host Proton.
+            container.saveData()
+        }
 
         if (saveToDisk) {
             // Mark that config has been changed, so we can show feedback dialog after next game run
@@ -1017,7 +1027,11 @@ object ContainerUtils {
         val containerManager = ContainerManager(context)
 
         val container = if (containerManager.hasContainer(appId)) {
-            containerManager.getContainerById(appId)
+            containerManager.getContainerById(appId).also { existing ->
+                if (HostContainerPolicy.adaptContainerForHost(context, existing)) {
+                    existing.saveData()
+                }
+            }
         } else {
             createNewContainer(context, appId, appId, containerManager)
         }
@@ -1111,6 +1125,9 @@ object ContainerUtils {
 
         return if (containerManager.hasContainer(appId)) {
             val container = containerManager.getContainerById(appId)
+            if (HostContainerPolicy.adaptContainerForHost(context, container)) {
+                container.saveData()
+            }
 
             // Apply temporary override if present (without saving to disk)
             if (IntentLaunchManager.hasTemporaryOverride(appId)) {

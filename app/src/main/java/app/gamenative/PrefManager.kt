@@ -23,6 +23,7 @@ import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.HomeDestination
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.enums.PaneType
+import app.gamenative.utils.HostContainerPolicy
 import com.materialkolor.PaletteStyle
 import com.winlator.box86_64.Box86_64Preset
 import com.winlator.container.Container
@@ -264,9 +265,11 @@ object PrefManager {
 
     private val WINE_VERSION = stringPreferencesKey("wine_version")
     var wineVersion: String
-        get() = getPref(WINE_VERSION, Container.DEFAULT_WINE_VERSION)
+        get() = HostContainerPolicy.mapWineVersionForHost(
+            getPref(WINE_VERSION, Container.DEFAULT_WINE_VERSION),
+        )
         set(value) {
-            setPref(WINE_VERSION, value)
+            setPref(WINE_VERSION, HostContainerPolicy.mapWineVersionForHost(value))
         }
 
     private val EMULATOR = stringPreferencesKey("emulator")

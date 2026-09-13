@@ -279,11 +279,14 @@ object BestConfigService {
         val effectiveMatchType = if (preserveConfigValues) "exact_gpu_match" else matchType
         val filteredConfig = filterConfigByMatchType(configJson, effectiveMatchType, storeMatch)
         val filteredJson = JSONObject(filteredConfig.toString())
-        return if (preserveConfigValues) {
+        val prepared = if (preserveConfigValues) {
             filteredJson
         } else {
             applyGpuFamilyOverrides(context, filteredJson, matchedGpu)
         }
+        // ARM-first community configs must not enqueue arm64ec Proton on x86_64.
+        HostContainerPolicy.adaptBestConfigJson(prepared)
+        return prepared
     }
 
     /**
@@ -418,8 +421,10 @@ object BestConfigService {
             }
         }
 
+        val skipArmOnlyComponents = HostContainerPolicy.isX86Host()
+
         // Validate Box64 version (check separately based on container variant)
-        if (box64Version.isNotEmpty() && containerVariant.isNotEmpty()) {
+        if (!skipArmOnlyComponents && box64Version.isNotEmpty() && containerVariant.isNotEmpty()) {
             val box64VersionsToCheck = when {
                 containerVariant.equals(Container.BIONIC, ignoreCase = true) -> availableBox64Bionic
                 containerVariant.equals(Container.GLIBC, ignoreCase = true) -> availableBox64Glibc
@@ -435,7 +440,7 @@ object BestConfigService {
         }
 
         // Validate WoWBox64 version (if wineVersion contains arm64ec)
-        if (wineVersion.contains("arm64ec", ignoreCase = true)) {
+        if (!skipArmOnlyComponents && wineVersion.contains("arm64ec", ignoreCase = true)) {
             if (box64Version.isNotEmpty() && !ManifestComponentHelper.versionExists(box64Version, availableWowBox64) && emulator != "FEXCore") {
                 Timber.tag("BestConfigService").w("WoWBox64 version $box64Version not found")
                 missing.add("WoWBox64 $box64Version")
@@ -443,7 +448,7 @@ object BestConfigService {
         }
 
         // Validate FEXCore version
-        if (fexcoreVersion.isNotEmpty() && !ManifestComponentHelper.versionExists(fexcoreVersion, availableFexcore)) {
+        if (!skipArmOnlyComponents && fexcoreVersion.isNotEmpty() && !ManifestComponentHelper.versionExists(fexcoreVersion, availableFexcore)) {
             Timber.tag("BestConfigService").w("FEXCore version $fexcoreVersion not found")
             missing.add("FEXCore $fexcoreVersion")
         }
@@ -467,7 +472,10 @@ object BestConfigService {
         // Validate graphics driver version (from graphicsDriverConfig). When the value references a
         // manifest entry by its `name`, rewrite it to the canonical `id` (== meta.json name ==
         // installed folder) so the runtime resolver finds it.
-        if (containerVariant.equals(Container.BIONIC, ignoreCase = true) && graphicsDriverConfig.isNotEmpty()) {
+        if (!skipArmOnlyComponents &&
+            containerVariant.equals(Container.BIONIC, ignoreCase = true) &&
+            graphicsDriverConfig.isNotEmpty()
+        ) {
             val sep = if (graphicsDriverConfig.contains(";")) ";" else ","
             val parts = graphicsDriverConfig.split(sep).toMutableList()
             val versionIdx = parts.indexOfFirst { it.substringBefore("=", "") == "version" }
@@ -486,7 +494,7 @@ object BestConfigService {
         }
 
         // Validate Box64 preset
-        if (box64Preset.isNotEmpty()) {
+        if (!skipArmOnlyComponents && box64Preset.isNotEmpty()) {
             val preset = Box86_64PresetManager.getPreset("box64", context, box64Preset)
             if (preset == null) {
                 Timber.tag("BestConfigService").w("Box64 preset $box64Preset not found")
@@ -496,7 +504,7 @@ object BestConfigService {
 
         // Validate FEXCore preset
         val fexcorePreset = filteredJson.optString("fexcorePreset", "")
-        if (fexcorePreset.isNotEmpty()) {
+        if (!skipArmOnlyComponents && fexcorePreset.isNotEmpty()) {
             val preset = FEXCorePresetManager.getPreset(context, fexcorePreset)
             if (preset == null) {
                 Timber.tag("BestConfigService").w("FEXCore preset $fexcorePreset not found")
@@ -530,10 +538,11 @@ object BestConfigService {
         val dxwrapper = filteredJson.optString("dxwrapper", "")
         val dxwrapperConfig = filteredJson.optString("dxwrapperConfig", "")
         val box64Version = filteredJson.optString("box64Version", "")
-        val wineVersion = filteredJson.optString("wineVersion", "")
+        val wineVersion = HostContainerPolicy.mapWineVersionForHost(filteredJson.optString("wineVersion", ""))
         val emulator = filteredJson.optString("emulator", "")
         val fexcoreVersion = filteredJson.optString("fexcoreVersion", "")
         val graphicsDriverConfig = filteredJson.optString("graphicsDriverConfig", "")
+        val skipArmOnlyComponents = HostContainerPolicy.isX86Host()
 
         val manifestDxvk = ManifestComponentHelper.filterManifestByVariant(
             manifest.items[ManifestContentTypes.DXVK].orEmpty(),
@@ -658,7 +667,7 @@ object BestConfigService {
             }
         }
 
-        if (box64Version.isNotEmpty() && containerVariant.isNotEmpty()) {
+        if (!skipArmOnlyComponents && box64Version.isNotEmpty() && containerVariant.isNotEmpty()) {
             val locallyAvailableBox64 = when {
                 containerVariant.equals(Container.BIONIC, ignoreCase = true) -> locallyAvailableBox64Bionic
                 containerVariant.equals(Container.GLIBC, ignoreCase = true) -> locallyAvailableBox64Glibc
@@ -672,7 +681,7 @@ object BestConfigService {
             }
         }
 
-        if (wineVersion.contains("arm64ec", ignoreCase = true) && emulator != "FEXCore") {
+        if (!skipArmOnlyComponents && wineVersion.contains("arm64ec", ignoreCase = true) && emulator != "FEXCore") {
             if (box64Version.isNotEmpty() && !ManifestComponentHelper.versionExists(box64Version, locallyAvailableWowBox64)) {
                 val entry = ManifestComponentHelper.findManifestEntryForVersion(box64Version, manifestWowBox64)
                 if (entry != null) {
@@ -681,7 +690,7 @@ object BestConfigService {
             }
         }
 
-        if (fexcoreVersion.isNotEmpty()) {
+        if (!skipArmOnlyComponents && fexcoreVersion.isNotEmpty()) {
             if (!ManifestComponentHelper.versionExists(fexcoreVersion, locallyAvailableFexcore)) {
                 val entry = ManifestComponentHelper.findManifestEntryForVersion(fexcoreVersion, manifestFexcore)
                 if (entry != null) {
@@ -708,7 +717,10 @@ object BestConfigService {
             }
         }
 
-        if (containerVariant.equals(Container.BIONIC, ignoreCase = true) && graphicsDriverConfig.isNotEmpty()) {
+        if (!skipArmOnlyComponents &&
+            containerVariant.equals(Container.BIONIC, ignoreCase = true) &&
+            graphicsDriverConfig.isNotEmpty()
+        ) {
             val sep = if (graphicsDriverConfig.contains(";")) ";" else ","
             val driverVersion = graphicsDriverConfig.split(sep)
                 .firstOrNull { it.substringBefore("=", "") == "version" }

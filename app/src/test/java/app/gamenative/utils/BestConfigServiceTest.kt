@@ -17,6 +17,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.*
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowBuild
 
 @RunWith(RobolectricTestRunner::class)
 class BestConfigServiceTest {
@@ -67,6 +68,7 @@ class BestConfigServiceTest {
 
     @Before
     fun setUp() {
+        ShadowBuild.setSupportedAbis(arrayOf("arm64-v8a", "armeabi-v7a", "armeabi"))
         context = ApplicationProvider.getApplicationContext()
         resources = context.resources
 
@@ -155,6 +157,19 @@ class BestConfigServiceTest {
         assertEquals("FEXCore", result["emulator"])
         assertEquals("COMPATIBILITY", result["box64Preset"])
         assertEquals("2507", result["fexcoreVersion"])
+    }
+
+    @Test
+    fun parseConfig_onX86Host_rewritesArm64ecProtonAndWrapper() {
+        ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
+        val bestConfig = parseBestConfig(dota2Adreno835FamilyMatchResponse)
+        val result = runBlocking {
+            BestConfigService.parseConfigToContainerData(context, bestConfig, "gpu_family_match", true)
+        }
+
+        assertNotNull(result)
+        assertEquals("proton-9.0-x86_64", result!!["wineVersion"])
+        assertEquals("System", result["graphicsDriver"])
     }
 
     @Test
