@@ -2295,17 +2295,11 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         }
         if (event.getAction() == MotionEvent.ACTION_MOVE ||
             event.getAction() == MotionEvent.ACTION_HOVER_MOVE) {
-            float dx = 0f;
-            float dy = 0f;
-
-            int historySize = event.getHistorySize();
-            for (int i = 0; i < historySize; i++) {
-                dx += event.getHistoricalAxisValue(MotionEvent.AXIS_RELATIVE_X, i);
-                dy += event.getHistoricalAxisValue(MotionEvent.AXIS_RELATIVE_Y, i);
-            }
-
-            dx += event.getAxisValue(MotionEvent.AXIS_RELATIVE_X);
-            dy += event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+            // API 36 captured mice report deltas on getX/getY (SOURCE_MOUSE_RELATIVE).
+            // AXIS_RELATIVE_* is often zero under ABSOLUTE capture, which is what the
+            // no-arg requestPointerCapture() now requests.
+            float dx = app.gamenative.utils.PointerCaptureCompat.capturedDeltaX(event);
+            float dy = app.gamenative.utils.PointerCaptureCompat.capturedDeltaY(event);
             this.xServer.injectPointerMoveDelta(Mathf.roundPoint(dx), Mathf.roundPoint(dy));
             return true;
         }

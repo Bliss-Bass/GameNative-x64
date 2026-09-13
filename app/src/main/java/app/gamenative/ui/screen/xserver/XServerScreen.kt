@@ -131,6 +131,7 @@ import app.gamenative.utils.HostBionicLibs
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.HostGraphicsEnv
 import app.gamenative.utils.HostDisplayEnv
+import app.gamenative.utils.PointerCaptureCompat
 import app.gamenative.utils.BlissPortDebug
 import app.gamenative.utils.GameSessionMemory
 import app.gamenative.utils.LsfgQuickMenuHelper
@@ -962,7 +963,7 @@ fun XServerScreen(
                 val view = PluviaApp.touchpadView
                 if (view != null) {
                     view.requestFocus()
-                    view.requestPointerCapture()
+                    PointerCaptureCompat.requestRelativeCapture(view)
                 }
             }, 100)
             true
