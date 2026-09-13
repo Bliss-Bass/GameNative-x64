@@ -61,10 +61,18 @@ class HostContainerPolicyTest {
     }
 
     @Test
-    fun mapWineVersionForHost_rewritesProton9Arm64ec() {
+    fun mapWineVersionForHost_rewritesProton9Arm64ecToHostDefault() {
         assertEquals(
-            "proton-9.0-x86_64",
+            HostContainerPolicy.PROTON_X86_64,
             HostContainerPolicy.mapWineVersionForHost("proton-9.0-arm64ec", HostCpu.X86_64),
+        )
+    }
+
+    @Test
+    fun mapWineVersionForHost_rewritesProton9X86ToHostDefault() {
+        assertEquals(
+            HostContainerPolicy.PROTON_X86_64,
+            HostContainerPolicy.mapWineVersionForHost("proton-9.0-x86_64", HostCpu.X86_64),
         )
     }
 
@@ -79,7 +87,7 @@ class HostContainerPolicyTest {
         }
 
         assertTrue(HostContainerPolicy.adaptContainerForHost(context, container))
-        assertEquals("proton-9.0-x86_64", container.wineVersion)
+        assertEquals(HostContainerPolicy.PROTON_X86_64, container.wineVersion)
         assertEquals("System", container.graphicsDriver)
     }
 
@@ -106,7 +114,7 @@ class HostContainerPolicyTest {
         }
 
         assertTrue(HostContainerPolicy.adaptContainerForHost(context, container))
-        assertEquals("proton-9.0-x86_64", container.wineVersion)
+        assertEquals(HostContainerPolicy.PROTON_X86_64, container.wineVersion)
         assertEquals("System", container.graphicsDriver)
         assertTrue(container.graphicsDriverConfig.contains("version=System"))
     }
@@ -122,7 +130,7 @@ class HostContainerPolicyTest {
 
         HostContainerPolicy.adaptBestConfigJson(json)
 
-        assertEquals("proton-9.0-x86_64", json.getString("wineVersion"))
+        assertEquals(HostContainerPolicy.PROTON_X86_64, json.getString("wineVersion"))
         assertEquals("System", json.getString("graphicsDriver"))
         assertTrue(json.getString("graphicsDriverConfig").contains("version=System"))
     }

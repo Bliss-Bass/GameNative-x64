@@ -168,7 +168,7 @@ class BestConfigServiceTest {
         }
 
         assertNotNull(result)
-        assertEquals("proton-9.0-x86_64", result!!["wineVersion"])
+        assertEquals(HostContainerPolicy.PROTON_X86_64, result!!["wineVersion"])
         assertEquals("System", result["graphicsDriver"])
     }
 

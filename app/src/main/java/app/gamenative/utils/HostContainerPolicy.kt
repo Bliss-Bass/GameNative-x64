@@ -20,7 +20,9 @@ object HostContainerPolicy {
     const val GRAPHICS_SYSTEM = "System"
 
     private val ARM64EC_TO_X86_64 = mapOf(
-        "proton-9.0-arm64ec" to "proton-9.0-x86_64",
+        // Proton 9 x86_64 aborts in ntdll alloc_pages_vprot on current Android 16
+        // kernels (wineboot never starts). Lift community proton-9 to the host default.
+        "proton-9.0-arm64ec" to PROTON_X86_64,
         "proton-10.0-arm64ec-2" to PROTON_X86_64,
         "proton-10.0-4-arm64ec-1" to PROTON_X86_64,
         "proton-11.0-1-arm64ec-1" to "proton-11.0-1-x86_64-1",
@@ -38,7 +40,12 @@ object HostContainerPolicy {
         mapWineVersionForHost(wineVersion, HostCpu.current())
 
     fun mapWineVersionForHost(wineVersion: String, host: HostCpu): String {
-        if (!host.isX86_64 || !wineVersion.contains("arm64ec", ignoreCase = true)) {
+        if (!host.isX86_64) return wineVersion
+        // Bundled proton-9 (either arch) is not viable on this host; use Proton 10.
+        if (wineVersion.contains("proton-9", ignoreCase = true)) {
+            return PROTON_X86_64
+        }
+        if (!wineVersion.contains("arm64ec", ignoreCase = true)) {
             return wineVersion
         }
         return ARM64EC_TO_X86_64[wineVersion]
