@@ -57,7 +57,7 @@ jobs:
         RELEASE_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
         RELEASE_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
         RELEASE_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-      run: ./gradlew :app:assembleModernX64Debug :app:assembleModernX64Release -PnoMinify=true
+      run: ./gradlew --no-configuration-cache :app:assembleModernX64Debug :app:assembleModernX64Release -PnoMinify=true
 
     - name: Verify release APK signature
       run: |

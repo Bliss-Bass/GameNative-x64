@@ -45,38 +45,45 @@ val stubTrampolineDex by tasks.registering {
     // The asset root, so the dex is packaged as stub/trampoline.dex. Not named classes.dex:
     // packaging drops an asset by that name, taking it for a dex of the app's own.
     val outputDir = layout.buildDirectory.dir("generated/stubTrampoline")
+    // Capture plain Files/Strings at configuration time so this task is configuration-cache safe.
+    // Reading `android.*` or `providers` inside doLast serializes script objects and fails CI.
+    val sdkDir = android.sdkDirectory
+    val compileSdkVer = android.compileSdk ?: error("compileSdk required for stubTrampolineDex")
+    val buildToolsVer = android.buildToolsVersion
 
     inputs.file(source)
     outputs.dir(outputDir)
 
     doLast {
-        val sdk = android.sdkDirectory
-        val platform = File(sdk, "platforms/android-${android.compileSdk}/android.jar")
-        val d8 = File(sdk, "build-tools/${android.buildToolsVersion}/d8")
+        fun run(vararg args: String) {
+            val proc = ProcessBuilder(*args).inheritIO().start()
+            val code = proc.waitFor()
+            check(code == 0) { "command failed ($code): ${args.joinToString(" ")}" }
+        }
+
+        val platform = File(sdkDir, "platforms/android-$compileSdkVer/android.jar")
+        val d8 = File(sdkDir, "build-tools/$buildToolsVer/d8")
         check(platform.isFile) { "platform jar not found: $platform" }
         check(d8.canExecute()) { "d8 not found: $d8" }
 
         val classes = temporaryDir.resolve("classes").apply { deleteRecursively(); mkdirs() }
         // Compiled against the platform alone: a stub depends on nothing else, which is what
         // keeps it a few kilobytes.
-        providers.exec {
-            commandLine(
-                "javac", "-source", "8", "-target", "8", "-nowarn",
-                "-bootclasspath", platform.absolutePath,
-                "-d", classes.absolutePath, source.absolutePath,
-            )
-        }.result.get().assertNormalExitValue()
+        run(
+            "javac", "-source", "8", "-target", "8", "-nowarn",
+            "-bootclasspath", platform.absolutePath,
+            "-d", classes.absolutePath, source.absolutePath,
+        )
 
         val dexDir = temporaryDir.resolve("dex").apply { deleteRecursively(); mkdirs() }
-        providers.exec {
-            commandLine(
-                d8.absolutePath, "--min-api", "26",
-                "--output", dexDir.absolutePath,
-                "--lib", platform.absolutePath,
-                *classes.walkTopDown().filter { it.extension == "class" }
-                    .map { it.absolutePath }.toList().toTypedArray(),
-            )
-        }.result.get().assertNormalExitValue()
+        val classFiles = classes.walkTopDown().filter { it.extension == "class" }
+            .map { it.absolutePath }.toList()
+        run(
+            d8.absolutePath, "--min-api", "26",
+            "--output", dexDir.absolutePath,
+            "--lib", platform.absolutePath,
+            *classFiles.toTypedArray(),
+        )
 
         val out = outputDir.get().asFile.resolve("stub").apply { mkdirs() }
         dexDir.resolve("classes.dex").copyTo(out.resolve("trampoline.dex"), overwrite = true)
@@ -133,7 +140,7 @@ android {
         buildConfigField("boolean", "XR_BUILD", "false")
         buildConfigField("boolean", "MODERN_XR", "false")
 
-        versionCode = 57
+        versionCode = 58
         versionName = "1.2.1"
 
         buildConfigField("boolean", "GOLD", "false")

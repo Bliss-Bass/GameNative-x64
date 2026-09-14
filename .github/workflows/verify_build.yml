@@ -47,7 +47,7 @@ jobs:
       uses: ./.github/actions/x64-payload
 
     - name: Build with Gradle
-      run: ./gradlew :app:assembleModernX64Debug
+      run: ./gradlew --no-configuration-cache :app:assembleModernX64Debug
 
     - name: Run Unit Tests
-      run: ./gradlew :app:testModernX64DebugUnitTest
+      run: ./gradlew --no-configuration-cache :app:testModernX64DebugUnitTest
