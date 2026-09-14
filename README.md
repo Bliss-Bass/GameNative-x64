@@ -15,7 +15,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/Bliss-Bass/GameNative-x64?style=flat-square&logo=github&label=x64+release)](https://github.com/Bliss-Bass/GameNative-x64/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL%203.0-blue?style=flat-square)](https://github.com/utkarshdalal/GameNative/blob/master/LICENSE)
 
-[**Releases**](https://github.com/Bliss-Bass/GameNative-x64/releases) · [**Upstream**](https://github.com/utkarshdalal/GameNative) · [**Discord**](https://discord.gg/2hKv4VfZfE)
+[**Releases**](https://github.com/Bliss-Bass/GameNative-x64/releases) · [**Upstream**](https://github.com/utkarshdalal/GameNative) · [**Discord**](https://discord.gg/2hKv4VfZfE) · [**Support on Ko-fi**](https://ko-fi.com/gamenative)
 
 </div>
 

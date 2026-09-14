@@ -152,6 +152,8 @@ object ContainerUtils {
             useLegacyDRM = PrefManager.useLegacyDRM,
             unpackFiles = PrefManager.unpackFiles,
             suspendPolicy = PrefManager.suspendPolicy,
+            fasterExternalLoading = PrefManager.fasterExternalLoading,
+            disableLibredirect = PrefManager.disableLibredirect,
             wineVersion = PrefManager.wineVersion,
             emulator = PrefManager.emulator,
             fexcoreVersion = PrefManager.fexcoreVersion,
@@ -241,6 +243,8 @@ object ContainerUtils {
         PrefManager.useLegacyDRM = containerData.useLegacyDRM
         PrefManager.unpackFiles = containerData.unpackFiles
         PrefManager.suspendPolicy = containerData.suspendPolicy
+        PrefManager.fasterExternalLoading = containerData.fasterExternalLoading
+        PrefManager.disableLibredirect = containerData.disableLibredirect
         PrefManager.portraitMode = containerData.portraitMode
         PrefManager.sharpnessEffect = containerData.sharpnessEffect
         PrefManager.sharpnessLevel = containerData.sharpnessLevel
@@ -309,6 +313,7 @@ object ContainerUtils {
             rendererPresentMode = container.rendererPresentMode,
             displayRenderer = container.displayRenderer,
             xrRefreshRate = container.xrRefreshRate,
+            xrRenderScale = container.xrRenderScale,
             sfCompatMode = container.sfCompatMode,
             dxwrapper = container.dxWrapper,
             dxwrapperConfig = container.dxWrapperConfig,
@@ -339,11 +344,14 @@ object ContainerUtils {
             fexcorePreset = container.getFEXCorePreset(),
             language = container.language,
             sdlControllerAPI = container.isSdlControllerAPI,
+            fasterExternalLoading = container.isFasterExternalLoading,
+            disableLibredirect = container.isDisableLibredirect,
             useSteamInput = useSteamInput,
             forceDlc = container.isForceDlc,
             localSavesOnly = container.isLocalSavesOnly,
             steamOfflineMode = container.isSteamOfflineMode(),
             epicOfflineMode = container.isEpicOfflineMode(),
+            disableEpicOverlay = container.isDisableEpicOverlay,
             useLegacyDRM = container.isUseLegacyDRM(),
             unpackFiles = container.isUnpackFiles(),
             suspendPolicy = container.suspendPolicy,
@@ -370,6 +378,8 @@ object ContainerUtils {
             sharpnessDenoise = container.getExtra("sharpnessDenoise", "100").toIntOrNull() ?: 100,
             // LSFG Vulkan frame generation
             lsfgEnabled = container.getExtra(LsfgVkManager.EXTRA_ARMED, "false").toBoolean(),
+            windowsVrEnabled = container.getExtra("windowsVrEnabled", "false").toBoolean(),
+            openCompositeEnabled = container.getExtra("windowsVrOpenCompositeEnabled", "false").toBoolean(),
         )
     }
 
@@ -499,6 +509,7 @@ object ContainerUtils {
         container.rendererPresentMode = containerData.rendererPresentMode
         container.displayRenderer = containerData.displayRenderer
         container.xrRefreshRate = containerData.xrRefreshRate
+        container.xrRenderScale = containerData.xrRenderScale
         container.sfCompatMode = containerData.sfCompatMode
         container.dxWrapper = containerData.dxwrapper
         container.dxWrapperConfig = containerData.dxwrapperConfig
@@ -529,6 +540,8 @@ object ContainerUtils {
         container.box86Preset = containerData.box86Preset
         container.box64Preset = containerData.box64Preset
         container.isSdlControllerAPI = containerData.sdlControllerAPI
+        container.isFasterExternalLoading = containerData.fasterExternalLoading
+        container.isDisableLibredirect = containerData.disableLibredirect
         container.putExtra("useSteamInput", containerData.useSteamInput)
         container.desktopTheme = containerData.desktopTheme
         container.graphicsDriverVersion = containerData.graphicsDriverVersion
@@ -548,6 +561,7 @@ object ContainerUtils {
         container.setLocalSavesOnly(containerData.localSavesOnly)
         container.setSteamOfflineMode(containerData.steamOfflineMode)
         container.setEpicOfflineMode(containerData.epicOfflineMode)
+        container.setDisableEpicOverlay(containerData.disableEpicOverlay)
         container.setUseLegacyDRM(containerData.useLegacyDRM)
         container.setUnpackFiles(containerData.unpackFiles)
         container.setSuspendPolicy(containerData.suspendPolicy)
@@ -560,6 +574,8 @@ object ContainerUtils {
         container.putExtra("sharpnessDenoise", containerData.sharpnessDenoise.toString())
         // LSFG Vulkan frame generation
         container.putExtra(LsfgVkManager.EXTRA_ARMED, containerData.lsfgEnabled.toString())
+        container.putExtra("windowsVrEnabled", containerData.windowsVrEnabled.toString())
+        container.putExtra("windowsVrOpenCompositeEnabled", containerData.openCompositeEnabled.toString())
         try {
             container.language = containerData.language
         } catch (e: Exception) {
@@ -942,6 +958,8 @@ object ContainerUtils {
                 useLegacyDRM = PrefManager.useLegacyDRM,
                 unpackFiles = PrefManager.unpackFiles,
                 suspendPolicy = PrefManager.suspendPolicy,
+                fasterExternalLoading = PrefManager.fasterExternalLoading,
+                disableLibredirect = PrefManager.disableLibredirect,
                 portraitMode = PrefManager.portraitMode,
                 externalDisplayMode = PrefManager.externalDisplayInputMode,
                 externalDisplaySwap = PrefManager.externalDisplaySwap,
@@ -972,6 +990,7 @@ object ContainerUtils {
         // If custom config is provided, just apply it and return
         if (customConfig?.dxwrapper != null) {
             applyToContainer(context, container, containerData)
+            SessionReport.markConfigApplied(container, if (bestConfigMap.isNullOrEmpty()) "default" else "known")
             return container
         }
 
@@ -1020,6 +1039,7 @@ object ContainerUtils {
 
         // Apply container data with the determined DX wrapper
         applyToContainer(context, container, containerData)
+        SessionReport.markConfigApplied(container, if (bestConfigMap.isNullOrEmpty()) "default" else "known")
         return container
     }
 
@@ -1292,6 +1312,9 @@ object ContainerUtils {
         }
         return null
     }
+
+    fun isAbsoluteWindowsPath(path: String): Boolean =
+        Regex("^[A-Za-z]:[\\\\/]").containsMatchIn(path)
 
     /**
      * Scans the container's A: drive for all .exe and .bat files

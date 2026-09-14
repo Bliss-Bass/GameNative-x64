@@ -60,8 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import app.gamenative.ui.component.settings.SettingsListDropdown
+import app.gamenative.ui.component.settings.SettingsMultiListDropdown
 import app.gamenative.ui.component.settings.SettingsTextField
 import app.gamenative.ui.component.ACHIEVEMENT_NOTIFICATION_POSITION
+import app.gamenative.ui.enums.LibraryTab
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 import app.gamenative.utils.IconSwitcher
@@ -154,6 +156,8 @@ fun SettingsGroupInterface(
 
     // Controller/gamepad hints visibility
     var showGamepadHints by rememberSaveable { mutableStateOf(PrefManager.showGamepadHints) }
+    var showRecommendations by rememberSaveable { mutableStateOf(PrefManager.showRecommendations) }
+    var libraryTabs by remember { mutableStateOf(PrefManager.libraryTabs) }
 
     // Achievements
     var showAchievementNotifications by rememberSaveable { mutableStateOf(PrefManager.achievementShowNotification) }
@@ -388,24 +392,104 @@ fun SettingsGroupInterface(
             },
         )
 
-        var showRecommendations by rememberSaveable { mutableStateOf(PrefManager.showRecommendations) }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_interface_show_recommendations_title)) },
             subtitle = { Text(text = stringResource(R.string.settings_interface_show_recommendations_subtitle)) },
             state = showRecommendations,
-            onCheckedChange = {
-                showRecommendations = it
-                PrefManager.showRecommendations = it
+            onCheckedChange = { enabled ->
+                showRecommendations = enabled
+                PrefManager.showRecommendations = enabled
+                PluviaApp.events.emit(
+                    AndroidEvent.LibraryTabsChanged(
+                        libraryTabs.filter { tab -> tab != LibraryTab.RECOMMENDED || enabled },
+                    ),
+                )
                 PluviaApp.events.emit(AndroidEvent.RecommendationToggleChanged)
                 Telemetry.capture(
                     event = "\$set",
-                    properties = mapOf("\$set" to mapOf("recommendation_enabled" to it)),
+                    properties = mapOf("\$set" to mapOf("recommendation_enabled" to enabled)),
                 )
-                if (!it) {
+                if (!enabled) {
                     Telemetry.capture("recommendation_disabled")
                 }
             },
+        )
+
+        var showHiddenGamesByDefault by rememberSaveable { mutableStateOf(PrefManager.showHiddenGamesByDefault) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_interface_show_hidden_games_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_interface_show_hidden_games_subtitle)) },
+            state = showHiddenGamesByDefault,
+            onCheckedChange = {
+                showHiddenGamesByDefault = it
+                PrefManager.showHiddenGamesByDefault = it
+                PluviaApp.events.emit(AndroidEvent.HiddenGamesSettingChanged(showHiddenGamesByDefault = it))
+            },
+        )
+
+        var hideAiFeatures by rememberSaveable { mutableStateOf(PrefManager.hideAiFeatures) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_hide_ai_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_hide_ai_subtitle)) },
+            state = hideAiFeatures,
+            onCheckedChange = {
+                hideAiFeatures = it
+                PrefManager.hideAiFeatures = it
+            },
+        )
+
+        var bootScreenAds by rememberSaveable { mutableStateOf(PrefManager.bootScreenAdsEnabled) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_info_boot_ads_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_info_boot_ads_subtitle)) },
+            state = bootScreenAds,
+            onCheckedChange = {
+                bootScreenAds = it
+                PrefManager.bootScreenAdsEnabled = it
+            },
+        )
+
+        var bootScreenRecs by rememberSaveable { mutableStateOf(PrefManager.bootScreenRecommendationsEnabled) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_info_boot_recs_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_info_boot_recs_subtitle)) },
+            state = bootScreenRecs,
+            onCheckedChange = {
+                bootScreenRecs = it
+                PrefManager.bootScreenRecommendationsEnabled = it
+            },
+        )
+
+        val configurableLibraryTabs = LibraryTab.configurableEntries
+        val selectedLibraryTabIndices = configurableLibraryTabs.mapIndexedNotNull { index, tab ->
+            index.takeIf { tab in libraryTabs }
+        }
+        SettingsMultiListDropdown(
+            colors = settingsTileColorsAlt(),
+            values = selectedLibraryTabIndices,
+            items = configurableLibraryTabs.map { stringResource(it.labelResId) },
+            fallbackDisplay = stringResource(R.string.settings_interface_library_tabs_none),
+            onItemSelected = { index ->
+                val selectedTab = configurableLibraryTabs[index]
+                val selectedTabs = libraryTabs.toMutableSet()
+                if (!selectedTabs.add(selectedTab)) selectedTabs.remove(selectedTab)
+                libraryTabs = LibraryTab.entries.filter {
+                    it !in LibraryTab.configurableEntries || it in selectedTabs
+                }
+                PrefManager.libraryTabs = libraryTabs
+                PluviaApp.events.emit(
+                    AndroidEvent.LibraryTabsChanged(
+                        libraryTabs.filter { it != LibraryTab.RECOMMENDED || showRecommendations },
+                    ),
+                )
+            },
+            title = { Text(text = stringResource(R.string.settings_interface_library_tabs_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_interface_library_tabs_subtitle)) },
         )
 
         if (!BuildConfig.MODERN_ANDROID) {
@@ -841,4 +925,3 @@ private fun Preview_SettingsScreen() {
         )
     }
 }
-
