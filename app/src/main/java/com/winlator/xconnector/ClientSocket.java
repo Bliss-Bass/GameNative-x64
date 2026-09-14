@@ -52,6 +52,36 @@ public class ClientSocket {
         else throw new IOException("Failed to write data.");
     }
 
+    /**
+     * Attempts a non-blocking write via MSG_DONTWAIT without changing fd flags.
+     * @return bytes written; {@code 0} if the socket would block
+     */
+    public int writeDontWait(ByteBuffer data) throws IOException {
+        int remaining = data.remaining();
+        if (remaining == 0) return 0;
+        int bytesWritten = writeDontWait(fd, data, data.position(), remaining);
+        if (bytesWritten > 0) {
+            data.position(data.position() + bytesWritten);
+            return bytesWritten;
+        }
+        if (bytesWritten == 0) {
+            return 0;
+        }
+        throw new IOException("Failed to write data (dontwait).");
+    }
+
+    /** Blocking write of {@code data.remaining()} bytes starting at {@code data.position()}. */
+    public void writeRemaining(ByteBuffer data) throws IOException {
+        while (data.hasRemaining()) {
+            int bytesWritten = writeAt(fd, data, data.position(), data.remaining());
+            if (bytesWritten > 0) {
+                data.position(data.position() + bytesWritten);
+            } else {
+                throw new IOException("Failed to write remaining data.");
+            }
+        }
+    }
+
     public int recvAncillaryMsg(ByteBuffer data) throws IOException {
         int position = data.position();
         int bytesRead = recvAncillaryMsg(fd, data, position, data.remaining());
@@ -76,6 +106,10 @@ public class ClientSocket {
     private native int read(int fd, ByteBuffer data, int offset, int length);
 
     private native int write(int fd, ByteBuffer data, int length);
+
+    private native int writeAt(int fd, ByteBuffer data, int offset, int length);
+
+    private native int writeDontWait(int fd, ByteBuffer data, int offset, int length);
 
     private native int recvAncillaryMsg(int clientFd, ByteBuffer data, int offset, int length);
 

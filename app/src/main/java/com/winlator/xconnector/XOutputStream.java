@@ -119,13 +119,48 @@ public class XOutputStream {
                         + " " + buffer.remaining() + "B " + hex);
             }
 
-            if (ancillaryFd != -1) {
-                clientSocket.sendAncillaryMsg(buffer, ancillaryFd);
-                ancillaryFd = -1;
+            try {
+                if (ancillaryFd != -1) {
+                    // SCM_RIGHTS must stay intact; never drop.
+                    clientSocket.sendAncillaryMsg(buffer, ancillaryFd);
+                    ancillaryFd = -1;
+                } else if (isDroppableInputEvent(buffer)) {
+                    // Keep the fd blocking for protocol. Only input events use
+                    // MSG_DONTWAIT so a stalled guest cannot ANR the UI thread.
+                    writeInputEventOrDrop(buffer);
+                } else {
+                    clientSocket.write(buffer);
+                }
+            } finally {
+                buffer.clear();
             }
-            else clientSocket.write(buffer);
+        }
+    }
 
-            buffer.clear();
+    /**
+     * True only for a single 32-byte core input event. Replies (type 1), errors (0),
+     * and multi-message flushes must use blocking write — dropping them hangs wine.
+     */
+    static boolean isDroppableInputEvent(ByteBuffer data) {
+        if (data == null || data.remaining() != 32) return false;
+        int type = data.get(data.position()) & 0xff;
+        // KeyPress=2 KeyRelease=3 ButtonPress=4 ButtonRelease=5 MotionNotify=6
+        return type >= 2 && type <= 6;
+    }
+
+    private void writeInputEventOrDrop(ByteBuffer data) throws IOException {
+        if (clientSocket == null || !data.hasRemaining()) return;
+
+        int written = clientSocket.writeDontWait(data);
+        if (written == 0) {
+            android.util.Log.w("XWrite", "dropping " + data.remaining()
+                    + "B input event (guest socket full, fd=" + clientSocket.fd + ")");
+            data.position(data.limit());
+            return;
+        }
+        // Partial send: finish remaining bytes with blocking write (respects position).
+        if (data.hasRemaining()) {
+            clientSocket.writeRemaining(data);
         }
     }
 

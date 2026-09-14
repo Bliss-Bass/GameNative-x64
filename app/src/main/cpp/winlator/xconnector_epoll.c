@@ -229,6 +229,43 @@ Java_com_winlator_xconnector_ClientSocket_write(JNIEnv *env, jobject obj, jint f
 }
 
 JNIEXPORT jint JNICALL
+Java_com_winlator_xconnector_ClientSocket_writeAt(JNIEnv *env, jobject obj, jint fd, jobject data,
+                                                  jint offset, jint length) {
+    char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
+    ssize_t n;
+    do {
+        n = write(fd, dataAddr + offset, (size_t) length);
+    } while (n < 0 && errno == EINTR);
+    if (n < 0) {
+        return -1;
+    }
+    return (jint) n;
+}
+
+/**
+ * Non-blocking send without putting the fd in O_NONBLOCK mode.
+ * Used only for droppable X input events so Esc/overlay cannot ANR the UI
+ * thread, while protocol replies keep using blocking write().
+ * @return bytes sent, 0 if would block, -1 on error
+ */
+JNIEXPORT jint JNICALL
+Java_com_winlator_xconnector_ClientSocket_writeDontWait(JNIEnv *env, jobject obj, jint fd,
+                                                        jobject data, jint offset, jint length) {
+    char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
+    ssize_t n;
+    do {
+        n = send(fd, dataAddr + offset, (size_t) length, MSG_DONTWAIT | MSG_NOSIGNAL);
+    } while (n < 0 && errno == EINTR);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        return 0;
+    }
+    if (n < 0) {
+        return -1;
+    }
+    return (jint) n;
+}
+
+JNIEXPORT jint JNICALL
 Java_com_winlator_xconnector_XConnectorEpoll_createEventFd(JNIEnv *env, jobject obj) {
     int fd = eventfd(0, EFD_NONBLOCK);
     printf("xconnector_epoll.c eventfd %d", fd);
