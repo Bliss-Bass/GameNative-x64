@@ -418,6 +418,18 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         if (isEventTriggeredByStylus(event)) {
             return handleStylusHoverEvent(event);
         }
+        if (!hasPointerCapture()
+                && event.isFromSource(InputDevice.SOURCE_MOUSE)
+                && event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE) {
+            float[] transformedPoint = XForm.transformPoint(xform, event.getX(), event.getY());
+            if (xServer.isRelativeMouseMovement()) {
+                xServer.getWinHandler().mouseEvent(
+                        MouseEventFlags.MOVE, (int) transformedPoint[0], (int) transformedPoint[1], 0);
+            } else {
+                xServer.injectPointerMove((int) transformedPoint[0], (int) transformedPoint[1]);
+            }
+            return true;
+        }
         return super.onHoverEvent(event);
     }
 
@@ -1956,20 +1968,15 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         float[] ptDelta  = XForm.transformPoint(xform, dx, dy);
         float transformedDx = ptDelta[0] - ptOrigin[0];
         float transformedDy = ptDelta[1] - ptOrigin[1];
-        int mx;
-        int my;
-        if (xServer.isMouseDragCompatibilityEnabled()) {
-            relativeDragRemainderX += transformedDx;
-            relativeDragRemainderY += transformedDy;
-            mx = (int) relativeDragRemainderX;
-            my = (int) relativeDragRemainderY;
-            relativeDragRemainderX -= mx;
-            relativeDragRemainderY -= my;
-            if (mx == 0 && my == 0) return;
-        } else {
-            mx = (int) transformedDx;
-            my = (int) transformedDy;
-        }
+        // Always accumulate sub-pixels. Captured mice often report fractional
+        // deltas; truncating each sample to int leaves the cursor stuck.
+        relativeDragRemainderX += transformedDx;
+        relativeDragRemainderY += transformedDy;
+        int mx = (int) relativeDragRemainderX;
+        int my = (int) relativeDragRemainderY;
+        relativeDragRemainderX -= mx;
+        relativeDragRemainderY -= my;
+        if (mx == 0 && my == 0) return;
         if (xServer.isRelativeMouseMovement()) {
             xServer.getWinHandler().mouseEvent(MouseEventFlags.MOVE, mx, my, 0);
         } else {
@@ -2402,11 +2409,16 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
             // no-arg requestPointerCapture() now requests.
             float dx = app.gamenative.utils.PointerCaptureCompat.capturedDeltaX(event);
             float dy = app.gamenative.utils.PointerCaptureCompat.capturedDeltaY(event);
-            this.xServer.injectPointerMoveDelta(Mathf.roundPoint(dx), Mathf.roundPoint(dy));
+            moveCursorByRelativeDelta(dx, dy);
             return true;
         }
         event.setSource(event.getSource() | InputDevice.SOURCE_MOUSE);
         return onExternalMouseEvent(event);
+    }
+
+    @Override
+    public boolean onCapturedPointerEvent(MotionEvent event) {
+        return onCapturedPointer(this, event);
     }
 
     public void setSimTouchScreen(boolean simTouchScreen) {

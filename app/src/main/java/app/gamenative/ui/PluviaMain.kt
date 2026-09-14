@@ -330,16 +330,14 @@ private fun trackMembershipPrompt(event: String, trigger: String) {
 }
 
 private fun trackAiDebugOffer(event: String, appId: String, trigger: String) {
-    if (PrefManager.usageAnalyticsEnabled) {
-        PostHog.capture(
-            event = event,
-            properties = mapOf(
-                "game_name" to ContainerUtils.resolveGameName(appId),
-                "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
-                "trigger" to trigger,
-            ),
-        )
-    }
+    Telemetry.capture(
+        event = event,
+        properties = mapOf(
+            "game_name" to ContainerUtils.resolveGameName(appId),
+            "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
+            "trigger" to trigger,
+        ),
+    )
 }
 
 private fun trackGameLaunched(appId: String) {

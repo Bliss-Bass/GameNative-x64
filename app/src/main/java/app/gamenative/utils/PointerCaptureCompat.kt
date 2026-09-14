@@ -2,6 +2,7 @@ package app.gamenative.utils
 
 import android.view.MotionEvent
 import android.view.View
+import app.gamenative.PluviaApp
 
 /**
  * Android 16 added pointer-capture modes. The no-arg [View.requestPointerCapture]
@@ -22,6 +23,12 @@ object PointerCaptureCompat {
             // Pre-16, or the capture-modes flag is off: the no-arg call is relative.
         }
         view.requestPointerCapture()
+    }
+
+    @JvmStatic
+    fun releaseCapture() {
+        PluviaApp.pointerCaptureRoot?.releasePointerCapture()
+        PluviaApp.touchpadView?.releasePointerCapture()
     }
 
     /** One sample of captured pointer motion, including historical batches. */

@@ -25,6 +25,8 @@ import app.gamenative.utils.DeviceInfo
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.PlayIntegrity
+import app.gamenative.utils.PointerCaptureCompat
+import app.gamenative.utils.PointerCaptureDispatchLayout
 import app.gamenative.utils.Telemetry
 import app.gamenative.utils.downloader.ContainerFilesDownloader
 import java.io.File
@@ -228,6 +230,7 @@ class PluviaApp : SplitCompatApplication() {
         var inputControlsView: InputControlsView? = null
         var inputControlsManager: InputControlsManager? = null
         var touchpadView: TouchpadView? = null
+        var pointerCaptureRoot: PointerCaptureDispatchLayout? = null
         var radialMenuCoordinator: RadialMenuCoordinator? = null
         var achievementWatcher: app.gamenative.service.AchievementWatcher? = null
 
@@ -264,7 +267,7 @@ class PluviaApp : SplitCompatApplication() {
                 .onFailure { Timber.e(it, "shutdownEnvironment: achievementWatcher.stop") }
             runCatching { SteamService.clearCachedAchievements() }
                 .onFailure { Timber.e(it, "shutdownEnvironment: clearCachedAchievements") }
-            runCatching { touchpadView?.releasePointerCapture() }
+            runCatching { PointerCaptureCompat.releaseCapture() }
                 .onFailure { Timber.e(it, "shutdownEnvironment: releasePointerCapture") }
             runCatching { radialMenuCoordinator?.detach() }
                 .onFailure { Timber.e(it, "shutdownEnvironment: radialMenuCoordinator.detach") }

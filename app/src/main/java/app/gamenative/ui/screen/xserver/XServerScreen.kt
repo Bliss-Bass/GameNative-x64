@@ -1031,10 +1031,15 @@ fun XServerScreen(
     val tryCapturePointer: () -> Boolean = {
         if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
             !container.isTouchscreenMode) {
-            PluviaApp.touchpadView?.postDelayed({
-                val view = PluviaApp.touchpadView
+            val captureTarget = PluviaApp.pointerCaptureRoot ?: PluviaApp.touchpadView
+            captureTarget?.postDelayed({
+                val root = PluviaApp.pointerCaptureRoot
+                root?.ensureCaptureFocus()
+                val view = root ?: PluviaApp.touchpadView
                 if (view != null) {
-                    view.requestFocus()
+                    if (root == null) {
+                        view.requestFocus()
+                    }
                     PointerCaptureCompat.requestRelativeCapture(view)
                 }
             }, 100)
@@ -1088,13 +1093,7 @@ fun XServerScreen(
                     }
 
                     PluviaApp.touchpadView?.postDelayed({
-                        val view = PluviaApp.touchpadView
-                        if (view != null) {
-                            // Delay technically not required for the function to work but this can
-                            // race against tryCapturePointer() and end up capturing after release
-                            // was already called
-                            view.releasePointerCapture()
-                        }
+                        PointerCaptureCompat.releaseCapture()
                     }, 100)
                 }
                 hasUpdatedScreenGamepad = false
@@ -1477,14 +1476,10 @@ fun XServerScreen(
         val controllerManager = ControllerManager.getInstance()
         controllerManager.scanForDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
-        PluviaApp.touchpadView?.postDelayed({
-            val view = PluviaApp.touchpadView
-            if (view != null) {
-                // Delay technically not required for the function to work but this can
-                // race against tryCapturePointer() and end up capturing after release
-                // was already called
-                view.releasePointerCapture()
-            }
+        PluviaApp.pointerCaptureRoot?.postDelayed({
+            PointerCaptureCompat.releaseCapture()
+        }, 100) ?: PluviaApp.touchpadView?.postDelayed({
+            PointerCaptureCompat.releaseCapture()
         }, 100)
 
         showQuickMenu = true
@@ -1551,8 +1546,10 @@ fun XServerScreen(
                         }
                     }
                 }
-                PluviaApp.touchpadView?.postDelayed({
-                    PluviaApp.touchpadView?.releasePointerCapture()
+                PluviaApp.pointerCaptureRoot?.postDelayed({
+                    PointerCaptureCompat.releaseCapture()
+                }, 100) ?: PluviaApp.touchpadView?.postDelayed({
+                    PointerCaptureCompat.releaseCapture()
                 }, 100)
                 showQuickMenu = true
             }

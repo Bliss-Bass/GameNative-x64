@@ -47,6 +47,12 @@ public class XServer {
     private WinHandler winHandler;
     private final EnumMap<Lockable, ReentrantLock> locks = new EnumMap<>(Lockable.class);
     private volatile boolean relativeMouseMovement = false;
+    /**
+     * Unity Cursor.lockState=Locked uses a 1×1 ClipCursor. Honoring that pins the
+     * visible cursor at screen center (Prodeus dialogs). Source games like HL2 warp
+     * the pointer without a tiny clip; those warps must still be applied.
+     */
+    static final int LOCKED_CURSOR_CLIP_PX = 16;
     private final boolean mouseDragCompatibilityEnabled;
     private boolean simulateTouchScreen = false;
     private final boolean runningFromGlibc;
@@ -84,6 +90,16 @@ public class XServer {
 
     public void setRelativeMouseMovement(boolean relativeMouseMovement) {
         this.relativeMouseMovement = relativeMouseMovement;
+    }
+
+    public boolean shouldIgnoreGuestPointerWarp() {
+        return relativeMouseMovement || isLockedCursorClip(grabManager.getConfinementBounds());
+    }
+
+    public static boolean isLockedCursorClip(Rect confinement) {
+        return confinement != null
+                && confinement.width() <= LOCKED_CURSOR_CLIP_PX
+                && confinement.height() <= LOCKED_CURSOR_CLIP_PX;
     }
 
     public boolean isMouseDragCompatibilityEnabled() {
@@ -202,9 +218,10 @@ public class XServer {
             int maxX = screenInfo.width - 1, maxY = screenInfo.height - 1;
             short clampedX = 0, clampedY = 0;
 
-            // ClipCursor
+            // ClipCursor. A 1×1 (or similarly tiny) clip is Unity mouse-lock, not a
+            // real window confine — honoring it pins the cursor at screen center.
             Rect confinement = grabManager.getConfinementBounds();
-            if (confinement != null) {
+            if (confinement != null && !isLockedCursorClip(confinement)) {
                 minX = Math.max(minX, confinement.left);
                 minY = Math.max(minY, confinement.top);
                 maxX = Math.min(maxX, confinement.right - 1);

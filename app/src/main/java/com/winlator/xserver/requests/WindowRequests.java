@@ -317,7 +317,7 @@ public abstract class WindowRequests {
     }
 
     public static void warpPointer(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
-        if (client.xServer.isRelativeMouseMovement()) {
+        if (client.xServer.shouldIgnoreGuestPointerWarp()) {
             client.skipRequest();
             return;
         }

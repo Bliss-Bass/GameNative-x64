@@ -17,6 +17,9 @@ import android.os.OutcomeReceiver
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.OrientationEventListener
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,6 +63,7 @@ import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.PowerManager
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.IconDecoder
+import app.gamenative.utils.PointerCaptureDispatchLayout
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.LocaleHelper
 import app.gamenative.utils.Telemetry
@@ -357,6 +361,43 @@ class MainActivity : ComponentActivity() {
                 PluviaMain()
             }
         }
+        installPointerCaptureDispatch()
+    }
+
+    /**
+     * Wrap Compose so captured mouse events reach [com.winlator.widget.TouchpadView]
+     * even when Compose does not keep AndroidView as ViewGroup.mFocused.
+     */
+    private fun installPointerCaptureDispatch() {
+        val content = findViewById<ViewGroup>(android.R.id.content) ?: return
+        if (content.childCount == 1 && content.getChildAt(0) is PointerCaptureDispatchLayout) {
+            return
+        }
+        val wrapper = PointerCaptureDispatchLayout(this)
+        PluviaApp.pointerCaptureRoot = wrapper
+        val children = ArrayList<View>(content.childCount)
+        while (content.childCount > 0) {
+            val child = content.getChildAt(0)
+            content.removeViewAt(0)
+            children.add(child)
+        }
+        for (child in children) {
+            wrapper.addView(
+                child,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+        content.addView(
+            wrapper,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        wrapper.ensureCaptureFocus()
     }
 
     override fun onNewIntent(intent: Intent) {

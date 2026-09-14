@@ -372,6 +372,10 @@ public class ExternalController {
 
         boolean isGamepad = device.supportsSource(InputDevice.SOURCE_GAMEPAD);
         boolean isJoystick = device.supportsSource(InputDevice.SOURCE_JOYSTICK);
+        boolean isPointer =
+                device.supportsSource(InputDevice.SOURCE_MOUSE) ||
+                        device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                        device.supportsSource(InputDevice.SOURCE_TOUCHPAD);
 
         // Only consider axes reported under a controller source class. Composite HID
         // devices (e.g. keyboards with built-in touchpads) expose AXIS_X/AXIS_Y through
@@ -382,23 +386,42 @@ public class ExternalController {
                 hasControllerAxis(device, android.view.MotionEvent.AXIS_X) ||
                         hasControllerAxis(device, android.view.MotionEvent.AXIS_Y);
 
+        boolean hasGamepadKeys = hasGamepadFaceButtons(device);
+
+        return classifyGameController(isGamepad, isJoystick, isPointer, hasAxes, hasGamepadKeys);
+    }
+
+    /**
+     * Pure classification for unit tests. Pointer-capable HID composites (wireless mouse
+     * dongles that also claim JOYSTICK for a volume wheel) must not become Player 1.
+     */
+    static boolean classifyGameController(
+            boolean isGamepad,
+            boolean isJoystick,
+            boolean isPointer,
+            boolean hasControllerStickAxes,
+            boolean hasGamepadFaceButtons
+    ) {
+        if (isPointer) {
+            // Require a real gamepad face-button set. Stick axes alone are not enough —
+            // YICHIP mouse dongles advertise JOYSTICK + GENERIC_1 for media keys.
+            return isGamepad && hasGamepadFaceButtons;
+        }
+        return (isGamepad && hasGamepadFaceButtons) ||
+                (isJoystick && hasControllerStickAxes);
+    }
+
+    private static boolean hasGamepadFaceButtons(InputDevice device) {
         boolean[] hasGamepadKeysArray = device.hasKeys(
                 KeyEvent.KEYCODE_BUTTON_A,
                 KeyEvent.KEYCODE_BUTTON_B,
                 KeyEvent.KEYCODE_BUTTON_X,
                 KeyEvent.KEYCODE_BUTTON_Y
         );
-
-        boolean hasGamepadKeys = false;
         for (boolean hasKey : hasGamepadKeysArray) {
-            if (hasKey) {
-                hasGamepadKeys = true;
-                break;
-            }
+            if (hasKey) return true;
         }
-
-        return (isGamepad && hasGamepadKeys) ||
-                (isJoystick && hasAxes);
+        return false;
     }
 
     /** Shared with {@link ControllerManager#isGameController(InputDevice)}. */

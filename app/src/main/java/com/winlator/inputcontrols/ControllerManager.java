@@ -102,16 +102,35 @@ public class ControllerManager {
         detectedDevices.clear();
         int[] deviceIds = inputManager.getInputDeviceIds();
         Set<String> present = new HashSet<>();
+        Set<String> connectedNonControllers = new HashSet<>();
         for (int deviceId : deviceIds) {
             InputDevice device = inputManager.getInputDevice(deviceId);
             // Some handhelds expose built-in controls as virtual devices, so
             // accept any device that reports a real gamepad/joystick shape.
-            if (device != null && isGameController(device)) {
+            if (device == null) continue;
+            String ident = getDeviceIdentifier(device);
+            if (isGameController(device)) {
                 detectedDevices.add(device);
-                String ident = getDeviceIdentifier(device);
                 knownDeviceIdentifiers.put(deviceId, ident);
                 if (ident != null) present.add(ident);
+            } else if (ident != null) {
+                connectedNonControllers.add(ident);
             }
+        }
+        // Clear slots that still point at a connected mouse/keyboard dongle we used to
+        // misclassify as a pad (e.g. YICHIP Wireless Device System Control).
+        boolean cleared = false;
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            String assigned = slotAssignments.get(i);
+            if (assigned != null && connectedNonControllers.contains(assigned)) {
+                slotAssignments.remove(i);
+                cleared = true;
+                Log.i(TAG, "Cleared Player " + (i + 1) + " assignment for non-controller " + assigned);
+            }
+        }
+        if (cleared) {
+            saveAssignments();
+            notifySlotsChanged();
         }
         long now = SystemClock.elapsedRealtime();
         for (String ident : present) {
@@ -183,37 +202,7 @@ public class ControllerManager {
      * @return True if the device is a game controller.
      */
     public static boolean isGameController(InputDevice device) {
-        if (device == null) return false;
-
-        boolean isGamepad = device.supportsSource(InputDevice.SOURCE_GAMEPAD);
-        boolean isJoystick = device.supportsSource(InputDevice.SOURCE_JOYSTICK);
-
-        // Only consider axes reported under a controller source class. Composite HID
-        // devices (e.g. keyboards with built-in touchpads) expose AXIS_X/AXIS_Y through
-        // SOURCE_MOUSE and may wrongly claim SOURCE_JOYSTICK in their source mask, which
-        // caused them to be treated as gamepads. SOURCE_GAMEPAD is queried as well, for
-        // drivers that attach the sticks to the gamepad source instead.
-        boolean hasAxes =
-                ExternalController.hasControllerAxis(device, android.view.MotionEvent.AXIS_X) ||
-                        ExternalController.hasControllerAxis(device, android.view.MotionEvent.AXIS_Y);
-
-        boolean[] hasGamepadKeysArray = device.hasKeys(
-                KeyEvent.KEYCODE_BUTTON_A,
-                KeyEvent.KEYCODE_BUTTON_B,
-                KeyEvent.KEYCODE_BUTTON_X,
-                KeyEvent.KEYCODE_BUTTON_Y
-        );
-
-        boolean hasGamepadKeys = false;
-        for (boolean hasKey : hasGamepadKeysArray) {
-            if (hasKey) {
-                hasGamepadKeys = true;
-                break;
-            }
-        }
-
-        return (isGamepad && hasGamepadKeys) ||
-                (isJoystick && hasAxes);
+        return ExternalController.isGameController(device);
     }
 
     /**
