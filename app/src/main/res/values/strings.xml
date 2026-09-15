@@ -1095,7 +1095,7 @@
     <string name="present_shm">Shared memory</string>
     <string name="present_shm_summary">Still copied to the CPU, but handed over in shared memory instead of the socket.</string>
     <string name="present_dri3">Direct (DRI3)</string>
-    <string name="present_dri3_summary">No copy at all: the game\'s image is shared with the display directly. Fastest, needs driver support.</string>
+    <string name="present_dri3_summary">Skips the software readback: the game exports a linear dma-buf. Faster than shared memory; full GPU zero-copy still pending.</string>
 
     <!-- Settings: Emulation Group -->
     <string name="settings_emulation_title">Emulation</string>

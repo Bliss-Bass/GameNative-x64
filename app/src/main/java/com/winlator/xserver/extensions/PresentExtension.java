@@ -279,6 +279,10 @@ public class PresentExtension implements Extension {
     }
 
     private static void queryVersion(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        // Mesa's X11 WSI only enables DRI3 modifiers when BOTH DRI3 and Present are >= 1.2
+        // (see wsi_common_x11.c: has_dri3_modifiers = has_dri3_v1_2 && has_present_v1_2).
+        // We implement the Present 1.0 requests Mesa actually uses; advertising 1.2 unlocks
+        // GetSupportedModifiers so linear dma-bufs are negotiated instead of tiled PixmapFromBuffer.
         inputStream.skip(8);
 
         try (XStreamLock lock = outputStream.lock()) {
@@ -287,7 +291,7 @@ public class PresentExtension implements Extension {
             outputStream.writeShort(client.getSequenceNumber());
             outputStream.writeInt(0);
             outputStream.writeInt(1);
-            outputStream.writeInt(0);
+            outputStream.writeInt(2);
             outputStream.writePad(16);
         }
     }

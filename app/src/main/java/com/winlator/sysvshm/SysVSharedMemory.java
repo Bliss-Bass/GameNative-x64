@@ -153,4 +153,10 @@ public class SysVSharedMemory {
      * a mapping of the fd the client passed with DRI3 FenceFromFD.
      */
     public static native void triggerFence(ByteBuffer fence);
+
+    /**
+     * Bracket a CPU access to a dma-buf mapping. {@code start=true} before the access,
+     * {@code start=false} after; {@code write=true} for CPU writes, false for reads.
+     */
+    public static native boolean syncDmaBuf(int fd, boolean start, boolean write);
 }

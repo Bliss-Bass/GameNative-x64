@@ -299,4 +299,29 @@ public class Drawable extends XResource {
     public void setUseSharedData(boolean useSharedData) {
         this.useSharedData = useSharedData;
     }
+
+    /**
+     * Optional dma-buf fd that backs {@link #data} for the DRI3 linear path. Kept open so Present
+     * can {@code DMA_BUF_IOCTL_SYNC} before a CPU read; -1 when not applicable (MIT-SHM, etc.).
+     */
+    private int dmaBufFd = -1;
+
+    public int getDmaBufFd() {
+        return dmaBufFd;
+    }
+
+    public void setDmaBufFd(int dmaBufFd) {
+        this.dmaBufFd = dmaBufFd;
+    }
+
+    /** Row pitch in bytes when {@link #data} is a shared/dma-buf mapping; 0 means tightly packed. */
+    private int sharedStrideBytes = 0;
+
+    public int getSharedStrideBytes() {
+        return sharedStrideBytes;
+    }
+
+    public void setSharedStrideBytes(int sharedStrideBytes) {
+        this.sharedStrideBytes = sharedStrideBytes;
+    }
 }

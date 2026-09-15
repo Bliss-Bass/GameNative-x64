@@ -29,8 +29,8 @@ enum class PresentationPath(
     SHM("shm", "sw", R.string.present_shm, R.string.present_shm_summary),
 
     /**
-     * DRI3 with dma-buf: the guest exports the rendered image and the server imports it, so no copy
-     * happens at all. Needs a driver that can export dma-buf and a server that advertises DRI3 1.2.
+     * DRI3 1.2 with linear dma-buf: skips Mesa's software-WSI readback. The server still mmap-copies
+     * into the compositor today; tiled zero-copy GPU import is a later step.
      */
     DRI3("dri3", "", R.string.present_dri3, R.string.present_dri3_summary),
     ;

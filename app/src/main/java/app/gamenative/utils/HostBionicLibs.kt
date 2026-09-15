@@ -2,6 +2,7 @@ package app.gamenative.utils
 
 import android.content.Context
 import app.gamenative.PrefManager
+import app.gamenative.enums.PresentationPath
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.envvars.EnvVars
 import timber.log.Timber
@@ -189,14 +190,38 @@ object HostBionicLibs {
         //             call lands in Termux's libandroid-shmem and yields a shmid the server never
         //             issued, so ShmAttach fails and PutImage raises BadSHMSegment.
         //   shm       the same copy, but read out of a shared segment rather than the socket.
-        //   dri3      no copy: the guest exports the image and the server imports the dma-buf.
+        //   dri3      leave Mesa on the hardware WSI path; server accepts linear dma-bufs (DRI3 1.2).
         //
         // See docs/X86_64_VULKAN_PROVISIONING.md.
-        val path = PrefManager.presentationPath
+        // debug.gamenative.presentation={software|shm|dri3} overrides the Settings choice for A/B tests.
+        val path = presentationPathForLaunch()
         if (path.wsiDebug.isNotEmpty()) {
             envVars.put("MESA_VK_WSI_DEBUG", path.wsiDebug)
+        } else {
+            // Container extras / older launches may leave sw set; DRI3 needs it gone.
+            envVars.remove("MESA_VK_WSI_DEBUG")
         }
 
         Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (presentation=%s)", value, path.key)
+    }
+
+    private fun presentationPathForLaunch(): PresentationPath {
+        val override = systemProperty("debug.gamenative.presentation")
+        if (override.isNotEmpty()) {
+            val parsed = PresentationPath.fromKey(override)
+            if (parsed.key == override) return parsed
+            Timber.w("HostBionicLibs: ignoring unknown debug.gamenative.presentation=%s", override)
+        }
+        return PrefManager.presentationPath
+    }
+
+    private fun systemProperty(key: String): String {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            clazz.getMethod("get", String::class.java, String::class.java)
+                .invoke(null, key, "") as? String ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
     }
 }

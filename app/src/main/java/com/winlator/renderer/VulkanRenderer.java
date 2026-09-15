@@ -10,6 +10,7 @@ import app.gamenative.R;
 import com.winlator.widget.FrameRating;
 import com.winlator.widget.XServerRendererView;
 import com.winlator.widget.XServerView;
+import com.winlator.sysvshm.SysVSharedMemory;
 import com.winlator.xserver.Bitmask;
 import com.winlator.xserver.Cursor;
 import com.winlator.xserver.Drawable;
@@ -66,6 +67,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private Drawable rootCursorDrawable;
     private Cursor lastCursor = null;
     private boolean xRenderingPausedForScanout = false;
+    private boolean dmaSampleLogged = false;
     private volatile VulkanXrFrameBridge xrFrameBridge = null;
     private volatile long xrTargetAhbPtr = 0;
     private volatile boolean flatPresentationEnabled = true;
@@ -535,9 +537,33 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             }
             java.nio.ByteBuffer buf = pixmap.getBuffer();
             if (buf == null) return;
-            short stride = (short)(buf.capacity() / (pixmap.height * 4));
-            nativeUpdateWindowContent(nativeHandle, targetId, buf,
-                pixmap.width, pixmap.height, stride, rx, ry);
+            int dmaFd = pixmap.getDmaBufFd();
+            if (dmaFd >= 0) SysVSharedMemory.syncDmaBuf(dmaFd, true, false);
+            try {
+                short stridePx;
+                int strideBytes = pixmap.getSharedStrideBytes();
+                if (strideBytes > 0) stridePx = (short)(strideBytes / 4);
+                else stridePx = (short)(buf.capacity() / (pixmap.height * 4));
+                // One-shot visibility check: all-zero after SYNC means the LINEAR dma-buf isn't
+                // CPU-coherent on this driver, and we need GPU import instead of mmap.
+                if (!dmaSampleLogged && dmaFd >= 0 && buf.capacity() >= 256) {
+                    dmaSampleLogged = true;
+                    int sum = 0;
+                    for (int i = 0; i < 256; i++) sum += buf.get(i) & 0xff;
+                    int mid = (pixmap.height / 2) * stridePx * 4 + (pixmap.width / 2) * 4;
+                    int midSum = 0;
+                    if (mid + 16 < buf.capacity()) {
+                        for (int i = 0; i < 16; i++) midSum += buf.get(mid + i) & 0xff;
+                    }
+                    android.util.Log.i("DRI3", "cpu sample after SYNC headSum=" + sum +
+                            " midSum=" + midSum + " " + pixmap.width + "x" + pixmap.height +
+                            " stridePx=" + stridePx);
+                }
+                nativeUpdateWindowContent(nativeHandle, targetId, buf,
+                    pixmap.width, pixmap.height, stridePx, rx, ry);
+            } finally {
+                if (dmaFd >= 0) SysVSharedMemory.syncDmaBuf(dmaFd, false, false);
+            }
         }
     }
 

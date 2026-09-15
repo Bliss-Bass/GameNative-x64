@@ -200,7 +200,7 @@ Three app-side fixes were needed alongside the staging:
 ## How frames are presented
 
 Presentation is a Settings choice (Performance -> Frame presentation), and on x86_64 it picks
-between two working paths today:
+between three routes:
 
 * **Software copy** (`MESA_VK_WSI_DEBUG=sw,noshm`), the default: Mesa's software WSI copies the
   GPU-rendered image back to the CPU and pushes the whole frame to the X server as an
@@ -209,10 +209,15 @@ between two working paths today:
 * **Shared memory** (`sw`): the readback stays, but the frame does not travel through the socket;
   the server presents a pixmap backed by the guest's own segment. Measurably faster at game
   resolutions — see "The MIT-SHM path works" below for numbers and for what it took.
+* **Direct (DRI3)** (empty `MESA_VK_WSI_DEBUG`): leave Mesa on the hardware WSI path. The server
+  now advertises DRI3 1.2 and `GetSupportedModifiers` with **linear only**, so ANV exports a
+  CPU-mmapable dma-buf; Present copies those pixels into the compositor texture. That removes the
+  software-WSI readback (the expensive half of `sw`). Tiled Intel modifiers and true GPU
+  zero-copy import are still TODO — until then this is the middle path between shm and full
+  dma-buf scanout.
 
-The `sw` half of both is still unavoidable: Mesa would otherwise use DRI3 with buffer sharing,
-and this X server has no DRI3/Present buffer sharing without the Vortek renderer, which is an
-arm64-only prebuilt. That zero-copy route is the remaining lever on presentation latency.
+`debug.gamenative.presentation={software|shm|dri3}` overrides the Settings choice for A/B tests
+without navigating the UI.
 
 **Why `noshm` was needed originally.** Mesa enables MIT-SHM whenever the X server
 advertises DRI3 and Present, which this one does. The X server implements MIT-SHM 1.1 —

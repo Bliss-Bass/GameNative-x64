@@ -20,6 +20,8 @@
 #include <android/sharedmem.h>
 #include <limits.h>
 #include <linux/futex.h>
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
 #include <stdint.h>
 
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "System.out", __VA_ARGS__);
@@ -107,6 +109,28 @@ Java_com_winlator_sysvshm_SysVSharedMemory_triggerFence(JNIEnv *env, jclass obj,
 
     __atomic_store_n(value, 1, __ATOMIC_SEQ_CST);
     syscall(SYS_futex, value, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
+}
+
+/*
+ * Make a dma-buf CPU-coherent around a read (or write). Mesa's LINEAR export is mmapable, but
+ * without DMA_BUF_IOCTL_SYNC the CPU can observe stale or partially-written GPU memory — which
+ * reads as classic tiled/FB garbage even when the modifier really is LINEAR.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_winlator_sysvshm_SysVSharedMemory_syncDmaBuf(JNIEnv *env, jclass obj, jint fd,
+                                                      jboolean start, jboolean write) {
+    if (fd < 0) return JNI_FALSE;
+    struct dma_buf_sync sync;
+    memset(&sync, 0, sizeof(sync));
+    sync.flags = (start ? DMA_BUF_SYNC_START : DMA_BUF_SYNC_END) |
+                 (write ? DMA_BUF_SYNC_WRITE : DMA_BUF_SYNC_READ);
+    if (ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
+        __android_log_print(ANDROID_LOG_WARN, "SysVSHM",
+                            "DMA_BUF_IOCTL_SYNC fd=%d start=%d write=%d failed: %s",
+                            fd, start, write, strerror(errno));
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 JNIEXPORT jint JNICALL
