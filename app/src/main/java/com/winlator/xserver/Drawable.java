@@ -59,7 +59,13 @@ public class Drawable extends XResource {
     }
 
     static {
-        System.loadLibrary("winlator_11");
+        try {
+            System.loadLibrary("winlator_11");
+        } catch (UnsatisfiedLinkError e) {
+            // Host JVM / Robolectric unit tests do not ship Android NDK jniLibs on
+            // java.library.path. Raster natives are unused by those tests; device
+            // loads still require a real libwinlator_11.so in the APK.
+        }
     }
 
     public Drawable(int id, int width, int height, Visual visual) {
