@@ -104,11 +104,35 @@ Java_com_winlator_renderer_VulkanRenderer_nativeUpdateWindowContent(
         r->updateWindowContent(id,px,w,h,stride,x,y);
 }
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeUpdateWindowContentOpaque(
+    JNIEnv* env, jobject, jlong handle, jlong id, jobject buf, jshort w, jshort h, jshort stride, jint x, jint y)
+{
+    auto* r=reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r||!buf) return;
+    void* px=env->GetDirectBufferAddress(buf);
+    if (px && env->GetDirectBufferCapacity(buf)>=(jlong)stride*h*4)
+        r->updateWindowContent(id,px,w,h,stride,x,y,true);
+}
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeUpdateWindowContentAHB(
     JNIEnv*, jobject, jlong handle, jlong id, jlong ahbPtr, jshort w, jshort h, jint x, jint y)
 {
     auto* r=reinterpret_cast<VulkanRendererContext*>(handle);
     if (r&&ahbPtr) r->updateWindowContentAHB(id,reinterpret_cast<AHardwareBuffer*>(ahbPtr),w,h,x,y);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeUpdateWindowContentDmaBuf(
+    JNIEnv*, jobject, jlong handle, jlong id, jint fd, jint w, jint h, jint strideBytes,
+    jint drmFormat, jlong modifier, jint x, jint y)
+{
+    auto* r=reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->updateWindowContentDmaBuf(id, fd, w, h, strideBytes, drmFormat,
+                                        (uint64_t)modifier, x, y);
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeSupportsDmaBufImport(JNIEnv*, jobject, jlong handle) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(handle);
+    return r && r->supportsDmaBufImport() ? JNI_TRUE : JNI_FALSE;
 }
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeEnableXrTarget(JNIEnv*, jobject, jlong handle) {

@@ -11,6 +11,15 @@ public class GPUImage extends NativeTexture {
     private short stride;
     private static boolean supported = false;
 
+    /** True when this image wraps a guest dma-buf for GPU sampling (no CPU mapping). */
+    private boolean gpuOnlyImport = false;
+    private int dmaBufFd = -1;
+    private int dmaWidth;
+    private int dmaHeight;
+    private int dmaStrideBytes;
+    private int dmaDrmFormat;
+    private long dmaModifier;
+
     static {
         System.loadLibrary("extras");
     }
@@ -41,6 +50,80 @@ public class GPUImage extends NativeTexture {
         } else {
             System.err.println("Error: Failed to create hardware buffer");
         }
+    }
+
+    /**
+     * Import a guest DRI3 dma-buf as an AHardwareBuffer (via platform
+     * {@code AHardwareBuffer_createFromHandle}). Returns an empty image when the platform
+     * cannot wrap the fd — callers should fall back to mmap or VkImage import.
+     */
+    public static GPUImage fromDmaBuf(int fd, int width, int height, int strideBytes,
+                                      int drmFormat, long modifier) {
+        GPUImage image = new GPUImage();
+        image.hardwareBufferPtr = hardwareBufferFromDmaBuf(
+            fd, width, height, strideBytes, drmFormat, modifier);
+        if (image.hardwareBufferPtr != 0) {
+            // DRI3 buffers are GPU-produced; skip CPU lock so we never stall the guest.
+            image.gpuOnlyImport = true;
+            image.stride = (short) Math.max(1, strideBytes / 4);
+            image.dmaWidth = width;
+            image.dmaHeight = height;
+            image.dmaStrideBytes = strideBytes;
+            image.dmaDrmFormat = drmFormat;
+            image.dmaModifier = modifier;
+        }
+        return image;
+    }
+
+    /**
+     * GPU-only image that holds a dup'd dma-buf fd for Vulkan
+     * {@code VK_EXT_external_memory_dma_buf} import when AHB wrap is unavailable.
+     * Not eligible for SurfaceControl scanout (needs AHB).
+     */
+    public static GPUImage fromDmaBufFd(int fd, int width, int height, int strideBytes,
+                                        int drmFormat, long modifier) {
+        GPUImage image = new GPUImage();
+        int dup = dupDmaBufFd(fd);
+        if (dup < 0) return image;
+        image.gpuOnlyImport = true;
+        image.dmaBufFd = dup;
+        image.dmaWidth = width;
+        image.dmaHeight = height;
+        image.dmaStrideBytes = strideBytes;
+        image.dmaDrmFormat = drmFormat;
+        image.dmaModifier = modifier;
+        image.stride = (short) Math.max(1, strideBytes / 4);
+        return image;
+    }
+
+    private GPUImage() {}
+
+    public boolean isValid() {
+        return hardwareBufferPtr != 0 || dmaBufFd >= 0;
+    }
+
+    public boolean hasHardwareBuffer() {
+        return hardwareBufferPtr != 0;
+    }
+
+    public boolean hasDmaBufFd() {
+        return dmaBufFd >= 0;
+    }
+
+    public boolean isGpuOnlyImport() {
+        return gpuOnlyImport;
+    }
+
+    public int getDmaBufFd() { return dmaBufFd; }
+    public int getDmaWidth() { return dmaWidth; }
+    public int getDmaHeight() { return dmaHeight; }
+    public int getDmaStrideBytes() { return dmaStrideBytes; }
+    public int getDmaDrmFormat() { return dmaDrmFormat; }
+    public long getDmaModifier() { return dmaModifier; }
+
+    /** True when Native Rendering+ SurfaceControl scanout can consume this buffer. */
+    public boolean supportsDirectScanout() {
+        return hardwareBufferPtr != 0;
     }
 
     @Override
@@ -86,6 +169,10 @@ public class GPUImage extends NativeTexture {
             destroyHardwareBuffer(hardwareBufferPtr);
             hardwareBufferPtr = 0;
         }
+        if (dmaBufFd >= 0) {
+            closeDmaBufFd(dmaBufFd);
+            dmaBufFd = -1;
+        }
         virtualData = null;
         super.destroy();
     }
@@ -107,12 +194,15 @@ public class GPUImage extends NativeTexture {
     }
 
     public void lock() {
+        // GPU-only DRI3 imports must never CPU-lock (stalls ANV / breaks scanout).
+        if (gpuOnlyImport) return;
         if (hardwareBufferPtr != 0 && virtualData == null) {
             virtualData = lockHardwareBuffer(hardwareBufferPtr);
         }
     }
 
     public int unlock() {
+        if (gpuOnlyImport) return -1;
         if (hardwareBufferPtr != 0 && virtualData != null) {
             int fenceFd = unlockHardwareBuffer(hardwareBufferPtr);
             virtualData = null;
@@ -122,6 +212,13 @@ public class GPUImage extends NativeTexture {
     }
 
     private native long hardwareBufferFromSocket(int fd);
+
+    private static native long hardwareBufferFromDmaBuf(
+        int fd, int width, int height, int strideBytes, int drmFormat, long modifier);
+
+    private static native int dupDmaBufFd(int fd);
+
+    private static native void closeDmaBufFd(int fd);
 
     private native long createHardwareBuffer(short width, short height);
 

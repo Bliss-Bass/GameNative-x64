@@ -23,6 +23,7 @@
 #include <linux/dma-buf.h>
 #include <sys/ioctl.h>
 #include <stdint.h>
+#include <time.h>
 
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "System.out", __VA_ARGS__);
 
@@ -109,6 +110,28 @@ Java_com_winlator_sysvshm_SysVSharedMemory_triggerFence(JNIEnv *env, jclass obj,
 
     __atomic_store_n(value, 1, __ATOMIC_SEQ_CST);
     syscall(SYS_futex, value, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_com_winlator_sysvshm_SysVSharedMemory_awaitFence(JNIEnv *env, jclass obj, jobject fence,
+                                                      jlong timeoutMs) {
+    (void)obj;
+    int32_t *value = (int32_t *)(*env)->GetDirectBufferAddress(env, fence);
+    if (value == NULL) return;
+
+    if (__atomic_load_n(value, __ATOMIC_SEQ_CST) != 0) return;
+
+    struct timespec ts;
+    if (timeoutMs < 0) timeoutMs = 0;
+    ts.tv_sec = timeoutMs / 1000;
+    ts.tv_nsec = (timeoutMs % 1000) * 1000000L;
+    while (__atomic_load_n(value, __ATOMIC_SEQ_CST) == 0) {
+        int rc = syscall(SYS_futex, value, FUTEX_WAIT, 0, timeoutMs > 0 ? &ts : NULL, NULL, 0);
+        if (rc == 0) continue;
+        if (errno == ETIMEDOUT || errno == EAGAIN) break;
+        if (errno == EINTR) continue;
+        break;
+    }
 }
 
 /*

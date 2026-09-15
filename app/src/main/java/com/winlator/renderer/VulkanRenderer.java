@@ -58,6 +58,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private String forceFullscreenWMClass = null;
     private boolean cursorVisible = false;
     private boolean nativeMode = false;
+    private boolean autoScanoutAttempted = false;
+    private static volatile boolean dmaBufImportSupported = false;
+
+    /** True when the active Vulkan device exposed dma-buf external memory (x86 zero-copy). */
+    public static boolean isDmaBufImportSupported() {
+        return dmaBufImportSupported;
+    }
     private String driverPath = null;
     private int outputScalingMode = SCALE_FIT;
     private java.util.concurrent.ExecutorService initExecutor = null;
@@ -150,8 +157,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeDestroy(long handle);
     private native void nativeUpdateWindowContent(long handle, long id, java.nio.ByteBuffer pixels,
         short width, short height, short stride, int x, int y);
+    private native void nativeUpdateWindowContentOpaque(long handle, long id, java.nio.ByteBuffer pixels,
+        short width, short height, short stride, int x, int y);
     private native void nativeUpdateWindowContentAHB(long handle, long id, long ahbPtr,
         short width, short height, int x, int y);
+    private native void nativeUpdateWindowContentDmaBuf(long handle, long id, int fd,
+        int width, int height, int strideBytes, int drmFormat, long modifier, int x, int y);
+    private native boolean nativeSupportsDmaBufImport(long handle);
     private native void nativeSetTransform(long handle, float ox, float oy, float sx, float sy);
     private native void nativeSetPointerPos(long handle, short x, short y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
@@ -223,6 +235,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 }
                 nativeHandle = nativeInit(surface, xServer.screenInfo.width, xServer.screenInfo.height, driverPath, driverLibraryName, nativeLibDir);
                 if (nativeHandle != 0) {
+                    dmaBufImportSupported = nativeSupportsDmaBufImport(nativeHandle);
+                    android.util.Log.i("DRI3", "Vulkan dma-buf import supported=" + dmaBufImportSupported);
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
@@ -527,6 +541,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     }
                     return;
                 }
+                if (g.hasDmaBufFd()) {
+                    nativeUpdateWindowContentDmaBuf(nativeHandle, targetId, g.getDmaBufFd(),
+                        g.getDmaWidth(), g.getDmaHeight(), g.getDmaStrideBytes(),
+                        g.getDmaDrmFormat(), g.getDmaModifier(), rx, ry);
+                    return;
+                }
                 java.nio.ByteBuffer vd = g.getVirtualData();
                 if (vd != null) {
                     short s = g.getStride() > 0 ? g.getStride() : pixmap.width;
@@ -544,23 +564,22 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 int strideBytes = pixmap.getSharedStrideBytes();
                 if (strideBytes > 0) stridePx = (short)(strideBytes / 4);
                 else stridePx = (short)(buf.capacity() / (pixmap.height * 4));
-                // One-shot visibility check: all-zero after SYNC means the LINEAR dma-buf isn't
-                // CPU-coherent on this driver, and we need GPU import instead of mmap.
+                // One-shot visibility check for LINEAR mmap fallback diagnostics.
                 if (!dmaSampleLogged && dmaFd >= 0 && buf.capacity() >= 256) {
                     dmaSampleLogged = true;
                     int sum = 0;
                     for (int i = 0; i < 256; i++) sum += buf.get(i) & 0xff;
-                    int mid = (pixmap.height / 2) * stridePx * 4 + (pixmap.width / 2) * 4;
-                    int midSum = 0;
-                    if (mid + 16 < buf.capacity()) {
-                        for (int i = 0; i < 16; i++) midSum += buf.get(mid + i) & 0xff;
-                    }
                     android.util.Log.i("DRI3", "cpu sample after SYNC headSum=" + sum +
-                            " midSum=" + midSum + " " + pixmap.width + "x" + pixmap.height +
-                            " stridePx=" + stridePx);
+                            " " + pixmap.width + "x" + pixmap.height +
+                            " stridePx=" + stridePx + " opaque=" + pixmap.isForceOpaqueAlpha());
                 }
-                nativeUpdateWindowContent(nativeHandle, targetId, buf,
-                    pixmap.width, pixmap.height, stridePx, rx, ry);
+                if (pixmap.isForceOpaqueAlpha()) {
+                    nativeUpdateWindowContentOpaque(nativeHandle, targetId, buf,
+                        pixmap.width, pixmap.height, stridePx, rx, ry);
+                } else {
+                    nativeUpdateWindowContent(nativeHandle, targetId, buf,
+                        pixmap.width, pixmap.height, stridePx, rx, ry);
+                }
             } finally {
                 if (dmaFd >= 0) SysVSharedMemory.syncDmaBuf(dmaFd, false, false);
             }
@@ -608,6 +627,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     }
                     return;
                 }
+                if (g.hasDmaBufFd()) {
+                    nativeUpdateWindowContentDmaBuf(handle, drawableId, g.getDmaBufFd(),
+                        g.getDmaWidth(), g.getDmaHeight(), g.getDmaStrideBytes(),
+                        g.getDmaDrmFormat(), g.getDmaModifier(), rx, ry);
+                    return;
+                }
                 java.nio.ByteBuffer vd = g.getVirtualData();
                 if (vd != null) {
                     short s = g.getStride() > 0 ? g.getStride() : drawable.width;
@@ -619,8 +644,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             java.nio.ByteBuffer buf = drawable.getBuffer();
             if (buf == null) return;
             short stride = (short)(buf.capacity() / (drawable.height * 4));
-            nativeUpdateWindowContent(handle, drawableId, buf,
-                drawable.width, drawable.height, stride, rx, ry);
+            if (drawable.isForceOpaqueAlpha()) {
+                nativeUpdateWindowContentOpaque(handle, drawableId, buf,
+                    drawable.width, drawable.height, stride, rx, ry);
+            } else {
+                nativeUpdateWindowContent(handle, drawableId, buf,
+                    drawable.width, drawable.height, stride, rx, ry);
+            }
         }
     }
 
@@ -720,6 +750,27 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         xServerView.queueEvent(this::updateScene);
         final String msg = mode ? "Native Rendering+ Enabled" : "Native Rendering+ Disabled";
         xServerView.post(() -> Toast.makeText(xServerView.getContext(), msg, Toast.LENGTH_SHORT).show());
+    }
+
+    /**
+     * When an AHB-backed DRI3 pixmap with {@code isDirectScanout()} is presented and no
+     * compositor-only effect is active, enable Native Rendering+ scanout so SurfaceControl
+     * can display the buffer without the compositor shader. Runs at most once unless the
+     * user later toggles Native Rendering+ manually.
+     */
+    public void ensureScanoutForAhbPresent() {
+        if (effectsRequireCompositor) return;
+        if (!nativeMode) {
+            if (autoScanoutAttempted) return;
+            autoScanoutAttempted = true;
+            setNativeMode(true);
+            return;
+        }
+        synchronized (lock) {
+            if (nativeHandle != 0 && !nativeIsScanoutActive(nativeHandle)) {
+                establishScanout();
+            }
+        }
     }
 
     // Stands up the SurfaceControl layers and hands them to native for the

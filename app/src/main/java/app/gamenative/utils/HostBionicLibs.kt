@@ -190,7 +190,8 @@ object HostBionicLibs {
         //             call lands in Termux's libandroid-shmem and yields a shmid the server never
         //             issued, so ShmAttach fails and PutImage raises BadSHMSegment.
         //   shm       the same copy, but read out of a shared segment rather than the socket.
-        //   dri3      leave Mesa on the hardware WSI path; server accepts linear dma-bufs (DRI3 1.2).
+        //   dri3      leave Mesa on the hardware WSI path; server imports dma-bufs (AHB/Vulkan)
+        //             with LINEAR mmap+opaque upload as fallback.
         //
         // See docs/X86_64_VULKAN_PROVISIONING.md.
         // debug.gamenative.presentation={software|shm|dri3} overrides the Settings choice for A/B tests.

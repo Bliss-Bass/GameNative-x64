@@ -12,6 +12,10 @@
 #include <jni.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <dlfcn.h>
 
 #define LOG_TAG "System.out"
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -87,6 +91,162 @@ AHardwareBuffer* createHardwareBuffer(int width, int height) {
     return hardwareBuffer;
 }
 
+/*
+ * Wrap a dma-buf fd as an AHardwareBuffer when the platform supports
+ * AHardwareBuffer_createFromHandle (not in the NDK headers; resolve at runtime).
+ * This is the Android-native path that lets VulkanRenderer reuse importAHBToWinTex
+ * and SurfaceControl scanout for guest ANV DRI3 buffers.
+ */
+typedef struct native_handle {
+    int version;
+    int numFds;
+    int numInts;
+    int data[0];
+} native_handle_t;
+
+enum {
+    AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_REGISTER = 2,
+    AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE = 1,
+};
+
+typedef int (*PFN_AHardwareBuffer_createFromHandle)(
+    const AHardwareBuffer_Desc* desc,
+    const native_handle_t* handle,
+    int32_t method,
+    AHardwareBuffer** outBuffer);
+
+static PFN_AHardwareBuffer_createFromHandle loadCreateFromHandle(void) {
+    static PFN_AHardwareBuffer_createFromHandle fn;
+    static int resolved;
+    if (resolved) return fn;
+    resolved = 1;
+    void* lib = dlopen("libnativewindow.so", RTLD_NOW);
+    if (!lib) lib = dlopen("libandroid.so", RTLD_NOW);
+    if (!lib) return NULL;
+    fn = (PFN_AHardwareBuffer_createFromHandle)dlsym(lib, "AHardwareBuffer_createFromHandle");
+    return fn;
+}
+
+// fourcc helpers matching drm_fourcc.h
+#define GN_FOURCC(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b)<<8) | ((uint32_t)(c)<<16) | ((uint32_t)(d)<<24))
+#define DRM_FORMAT_ARGB8888 GN_FOURCC('A','R','2','4')
+#define DRM_FORMAT_XRGB8888 GN_FOURCC('X','R','2','4')
+#define DRM_FORMAT_ABGR8888 GN_FOURCC('A','B','2','4')
+#define DRM_FORMAT_XBGR8888 GN_FOURCC('X','B','2','4')
+
+static uint32_t ahbFormatForDrm(uint32_t drmFormat) {
+    switch (drmFormat) {
+        case DRM_FORMAT_ABGR8888:
+        case DRM_FORMAT_XBGR8888:
+            return AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+        case DRM_FORMAT_ARGB8888:
+        case DRM_FORMAT_XRGB8888:
+        default:
+            return HAL_PIXEL_FORMAT_BGRA_8888;
+    }
+}
+
+static AHardwareBuffer* tryCreateFromHandle(
+    PFN_AHardwareBuffer_createFromHandle createFromHandle,
+    int fd, int width, int height, int strideBytes, uint32_t ahbFormat, uint64_t modifier)
+{
+    (void)modifier;
+    int dupFd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (dupFd < 0) dupFd = dup(fd);
+    if (dupFd < 0) return NULL;
+
+    size_t handleBytes = sizeof(native_handle_t) + sizeof(int);
+    native_handle_t* handle = (native_handle_t*)calloc(1, handleBytes);
+    if (!handle) {
+        close(dupFd);
+        return NULL;
+    }
+    handle->version = sizeof(native_handle_t);
+    handle->numFds = 1;
+    handle->numInts = 0;
+    handle->data[0] = dupFd;
+
+    AHardwareBuffer_Desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.width = (uint32_t)width;
+    desc.height = (uint32_t)height;
+    desc.layers = 1;
+    desc.format = ahbFormat;
+    desc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+                 AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT |
+                 AHARDWAREBUFFER_USAGE_CPU_READ_RARELY;
+    desc.stride = (uint32_t)(strideBytes / 4);
+
+    AHardwareBuffer* ahb = NULL;
+    // CLONE: implementation dups fds; we keep ownership of dupFd + handle memory.
+    int err = createFromHandle(&desc, handle, AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE, &ahb);
+    if (err == 0 && ahb) {
+        free(handle);
+        close(dupFd);
+        return ahb;
+    }
+    // REGISTER: AHB takes ownership of the handle (and its fds).
+    err = createFromHandle(&desc, handle, AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_REGISTER, &ahb);
+    if (err == 0 && ahb) {
+        return ahb;
+    }
+    free(handle);
+    close(dupFd);
+    return NULL;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_winlator_renderer_GPUImage_hardwareBufferFromDmaBuf(
+    JNIEnv *env, jclass obj, jint fd, jint width, jint height, jint strideBytes,
+    jint drmFormat, jlong modifier)
+{
+    (void)env; (void)obj;
+    if (fd < 0 || width <= 0 || height <= 0 || strideBytes < width * 4) return 0;
+
+    PFN_AHardwareBuffer_createFromHandle createFromHandle = loadCreateFromHandle();
+    if (!createFromHandle) {
+        printf("hardwareBufferFromDmaBuf: AHardwareBuffer_createFromHandle unavailable\n");
+        return 0;
+    }
+
+    uint32_t formats[3];
+    int nFormats = 0;
+    formats[nFormats++] = ahbFormatForDrm((uint32_t)drmFormat);
+    if (formats[0] != HAL_PIXEL_FORMAT_BGRA_8888)
+        formats[nFormats++] = HAL_PIXEL_FORMAT_BGRA_8888;
+    if (formats[0] != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM)
+        formats[nFormats++] = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+
+    for (int i = 0; i < nFormats; i++) {
+        AHardwareBuffer* ahb = tryCreateFromHandle(
+            createFromHandle, fd, width, height, strideBytes, formats[i], (uint64_t)modifier);
+        if (ahb) {
+            printf("hardwareBufferFromDmaBuf: ok %dx%d stride=%d fmt=0x%x mod=0x%llx ahb=%p\n",
+                   width, height, strideBytes / 4, formats[i],
+                   (unsigned long long)modifier, (void*)ahb);
+            return (jlong)ahb;
+        }
+    }
+    printf("hardwareBufferFromDmaBuf: createFromHandle failed %dx%d mod=0x%llx drm=0x%x\n",
+           width, height, (unsigned long long)modifier, drmFormat);
+    return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_winlator_renderer_GPUImage_dupDmaBufFd(JNIEnv *env, jclass obj, jint fd) {
+    (void)env; (void)obj;
+    if (fd < 0) return -1;
+    int dupFd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (dupFd < 0) dupFd = dup(fd);
+    return dupFd;
+}
+
+JNIEXPORT void JNICALL
+Java_com_winlator_renderer_GPUImage_closeDmaBufFd(JNIEnv *env, jclass obj, jint fd) {
+    (void)env; (void)obj;
+    if (fd >= 0) close(fd);
+}
+
 // JNI method to extract a hardware buffer from a socketpair
 JNIEXPORT jlong JNICALL
 Java_com_winlator_renderer_GPUImage_hardwareBufferFromSocket(JNIEnv *env, jclass obj, jint fd) {
@@ -132,8 +292,10 @@ Java_com_winlator_renderer_GPUImage_createImageKHR(JNIEnv *env, jclass obj, jlon
 // JNI method to destroy a hardware buffer
 JNIEXPORT void JNICALL
 Java_com_winlator_renderer_GPUImage_destroyHardwareBuffer(JNIEnv *env, jclass obj, jlong hardwareBufferPtr) {
+    (void)env; (void)obj;
     AHardwareBuffer* hardwareBuffer = (AHardwareBuffer*)hardwareBufferPtr;
     if (hardwareBuffer) {
+        // May not be locked (DRI3 dma-buf imports skip CPU lock); ignore unlock errors.
         AHardwareBuffer_unlock(hardwareBuffer, NULL);
         AHardwareBuffer_release(hardwareBuffer);
     }

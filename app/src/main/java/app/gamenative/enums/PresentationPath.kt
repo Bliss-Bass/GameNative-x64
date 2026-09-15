@@ -29,8 +29,9 @@ enum class PresentationPath(
     SHM("shm", "sw", R.string.present_shm, R.string.present_shm_summary),
 
     /**
-     * DRI3 1.2 with linear dma-buf: skips Mesa's software-WSI readback. The server still mmap-copies
-     * into the compositor today; tiled zero-copy GPU import is a later step.
+     * DRI3 1.2 with GPU zero-copy when possible: guest ANV exports a dma-buf; the server imports
+     * it as AHardwareBuffer (scanout-capable) or Vulkan external memory, with LINEAR mmap+opaque
+     * upload as fallback.
      */
     DRI3("dri3", "", R.string.present_dri3, R.string.present_dri3_summary),
     ;

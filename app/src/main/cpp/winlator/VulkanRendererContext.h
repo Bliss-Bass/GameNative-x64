@@ -89,6 +89,7 @@ struct VkTable {
     PFN_vkGetFenceStatus GetFenceStatus;
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
+    PFN_vkGetMemoryFdPropertiesKHR GetMemoryFdPropertiesKHR;
 };
 
 #include <android/log.h>
@@ -138,7 +139,11 @@ public:
     void setTransform(float ox, float oy, float sx, float sy);
     void updatePointerPosition(short x, short y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
+    void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y, bool forceOpaqueAlpha);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
+    void updateWindowContentDmaBuf(int64_t id, int fd, int w, int h, int strideBytes,
+                                   int drmFormat, uint64_t modifier, int x, int y);
+    bool supportsDmaBufImport() const { return dmaBufImportSupported; }
     void updateCursorImage(void* pixels, short w, short h, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
@@ -223,6 +228,7 @@ private:
     float activeGamma = 1.0f;
     float maxAnisotropy           = 1.0f;
     bool  cubicSupported          = false;
+    bool  dmaBufImportSupported   = false;
     VkPhysicalDeviceMemoryProperties memProperties{};
     VkPresentModeKHR requestedPresentMode = VK_PRESENT_MODE_FIFO_KHR;
     uint32_t graphicsQueueFamilyIndex = 0;
@@ -375,6 +381,8 @@ private:
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  recreateWinTexView(WinTex& wt);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
+    bool  importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int strideBytes,
+                               int drmFormat, uint64_t modifier);
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();
     void  destroyWinTex(WinTex& wt);

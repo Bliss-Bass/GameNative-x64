@@ -112,6 +112,41 @@ public class SyncExtension implements Extension {
         }
     }
 
+    /**
+     * Block until a Present wait-fence is triggered (or {@code timeoutMs} elapses). Shared
+     * xshmfence mappings wait on the futex; local fences are polled.
+     */
+    public void waitUntilTriggered(int id, long timeoutMs) {
+        if (id == 0) return;
+        final long deadline = System.nanoTime() + Math.max(1L, timeoutMs) * 1_000_000L;
+        java.nio.ByteBuffer mapping;
+        synchronized (fences) {
+            if (fences.indexOfKey(id) < 0) return;
+            if (fences.get(id)) return;
+            mapping = sharedFences.get(id);
+        }
+        if (mapping != null) {
+            long remainingMs = Math.max(1L, (deadline - System.nanoTime()) / 1_000_000L);
+            SysVSharedMemory.awaitFence(mapping, remainingMs);
+            synchronized (fences) {
+                fences.put(id, true);
+            }
+            return;
+        }
+        while (System.nanoTime() < deadline) {
+            synchronized (fences) {
+                if (fences.indexOfKey(id) < 0) return;
+                if (fences.get(id)) return;
+            }
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     private void createFence(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         synchronized (fences) {
             inputStream.skip(4);

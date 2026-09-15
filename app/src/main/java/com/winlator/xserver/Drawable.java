@@ -142,7 +142,26 @@ public class Drawable extends XResource {
     }
 
     public boolean isDirectScanout() {
-        return false;
+        return directScanout;
+    }
+
+    public void setDirectScanout(boolean directScanout) {
+        this.directScanout = directScanout;
+    }
+
+    private boolean directScanout = false;
+
+    /**
+     * When true, CPU uploads from this drawable force alpha to opaque (XRGB/LINEAR dma-buf).
+     */
+    private boolean forceOpaqueAlpha = false;
+
+    public boolean isForceOpaqueAlpha() {
+        return forceOpaqueAlpha;
+    }
+
+    public void setForceOpaqueAlpha(boolean forceOpaqueAlpha) {
+        this.forceOpaqueAlpha = forceOpaqueAlpha;
     }
 
     public void setData(ByteBuffer data) {

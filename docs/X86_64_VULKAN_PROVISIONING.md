@@ -209,12 +209,17 @@ between three routes:
 * **Shared memory** (`sw`): the readback stays, but the frame does not travel through the socket;
   the server presents a pixmap backed by the guest's own segment. Measurably faster at game
   resolutions — see "The MIT-SHM path works" below for numbers and for what it took.
-* **Direct (DRI3)** (empty `MESA_VK_WSI_DEBUG`): leave Mesa on the hardware WSI path. The server
-  now advertises DRI3 1.2 and `GetSupportedModifiers` with **linear only**, so ANV exports a
-  CPU-mmapable dma-buf; Present copies those pixels into the compositor texture. That removes the
-  software-WSI readback (the expensive half of `sw`). Tiled Intel modifiers and true GPU
-  zero-copy import are still TODO — until then this is the middle path between shm and full
-  dma-buf scanout.
+* **Direct (DRI3)** (empty `MESA_VK_WSI_DEBUG`): Mesa hardware WSI. The server advertises DRI3 1.2
+  and `GetSupportedModifiers` (LINEAR plus Intel tiled on i915/xe). Import order:
+  1. **AHB wrap** (`AHardwareBuffer_createFromHandle`) → Present FLIP via
+     `nativeUpdateWindowContentAHB`; with Native Rendering+ and `isDirectScanout()`, SurfaceControl
+     scanout bypasses the compositor shader.
+  2. **Vulkan dma-buf** (`VK_EXT_external_memory_dma_buf` + DRM modifiers) when the host ICD
+     exposes it — compositor zero-copy without scanout.
+  3. **LINEAR mmap** + `DMA_BUF_IOCTL_SYNC` + opaque-alpha upload (XRGB) when GPU import fails.
+
+  Present waits on the Sync wait-fence before sampling so Mesa's idle fence / `FenceFromFD`
+  path stays correct.
 
 `debug.gamenative.presentation={software|shm|dri3}` overrides the Settings choice for A/B tests
 without navigating the UI.

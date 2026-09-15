@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <inttypes.h>
 #include <dlfcn.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "window_vert.h"
 #include "window_frag.h"
 
@@ -153,6 +155,8 @@ void VulkanRendererContext::loadDeviceDispatch() {
 
     vk_.GetAndroidHardwareBufferPropertiesANDROID =
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)d("vkGetAndroidHardwareBufferPropertiesANDROID");
+    vk_.GetMemoryFdPropertiesKHR =
+        (PFN_vkGetMemoryFdPropertiesKHR)d("vkGetMemoryFdPropertiesKHR");
 }
 
 void VulkanRendererContext::createInstance() {
@@ -215,18 +219,33 @@ void VulkanRendererContext::createLogicalDevice() {
 
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
+    bool hasAhb = false, hasExtMemFd = false, hasDmaBuf = false, hasDrmMod = false;
     { uint32_t n=0; if(enumDevExts) enumDevExts(physicalDevice,nullptr,&n,nullptr);
       std::vector<VkExtensionProperties> av(n);
       if(enumDevExts) enumDevExts(physicalDevice,nullptr,&n,av.data());
       for (auto& e:av) {
           if (strcmp(e.extensionName,"VK_EXT_filter_cubic")==0
            || strcmp(e.extensionName,"VK_IMG_filter_cubic")==0) cubicSupported=true;
+          if (strcmp(e.extensionName, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)==0)
+              hasAhb = true;
+          if (strcmp(e.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME)==0)
+              hasExtMemFd = true;
+          if (strcmp(e.extensionName, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME)==0)
+              hasDmaBuf = true;
+          if (strcmp(e.extensionName, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME)==0)
+              hasDrmMod = true;
       } }
     std::vector<const char*> extList = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME
     };
+    if (hasAhb) extList.push_back(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
+    if (hasExtMemFd) extList.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+    if (hasDmaBuf) extList.push_back(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+    if (hasDrmMod) extList.push_back(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
     if (cubicSupported) extList.push_back("VK_EXT_filter_cubic");
+    dmaBufImportSupported = hasExtMemFd && hasDmaBuf && hasDrmMod;
+    RLOG("createLogicalDevice: ahb=%d dmaBufImport=%d", hasAhb?1:0, dmaBufImportSupported?1:0);
+
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
@@ -656,6 +675,208 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     wt.w=(int)desc.width;
     wt.h=(int)desc.height;
     return true;
+}
+
+static VkFormat vkFormatForDrmFourcc(int drmFormat) {
+    // little-endian fourcc matching drm_fourcc.h
+    switch ((uint32_t)drmFormat) {
+        case 0x34325241: // AR24
+        case 0x34325258: // XR24
+            return VK_FORMAT_B8G8R8A8_UNORM;
+        case 0x34324241: // AB24
+        case 0x34324258: // XB24
+            return VK_FORMAT_R8G8B8A8_UNORM;
+        default:
+            return VK_FORMAT_B8G8R8A8_UNORM;
+    }
+}
+
+bool VulkanRendererContext::importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int strideBytes,
+                                                 int drmFormat, uint64_t modifier) {
+    if (!dmaBufImportSupported || !vk_.GetMemoryFdPropertiesKHR || fd < 0 || w <= 0 || h <= 0)
+        return false;
+    if (strideBytes < w * 4) return false;
+
+    int importFd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (importFd < 0) importFd = dup(fd);
+    if (importFd < 0) return false;
+
+    VkFormat format = vkFormatForDrmFourcc(drmFormat);
+
+    VkSubresourceLayout planeLayout{};
+    planeLayout.offset = 0;
+    planeLayout.rowPitch = (VkDeviceSize)strideBytes;
+    planeLayout.size = (VkDeviceSize)strideBytes * (VkDeviceSize)h;
+    planeLayout.arrayPitch = 0;
+    planeLayout.depthPitch = 0;
+
+    VkImageDrmFormatModifierExplicitCreateInfoEXT modInfo{};
+    modInfo.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
+    modInfo.drmFormatModifier = modifier;
+    modInfo.drmFormatModifierPlaneCount = 1;
+    modInfo.pPlaneLayouts = &planeLayout;
+
+    VkExternalMemoryImageCreateInfo emi{};
+    emi.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    emi.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    emi.pNext = &modInfo;
+
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.pNext = &emi;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = format;
+    ii.extent = {(uint32_t)w, (uint32_t)h, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (vk_.CreateImage(device, &ii, nullptr, &wt.img) != VK_SUCCESS) {
+        close(importFd);
+        wt.img = VK_NULL_HANDLE;
+        RLOG_E("importDmaBufToWinTex: CreateImage failed %dx%d mod=0x%llx",
+               w, h, (unsigned long long)modifier);
+        return false;
+    }
+
+    VkMemoryFdPropertiesKHR fdProps{};
+    fdProps.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
+    if (vk_.GetMemoryFdPropertiesKHR(device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+                                     importFd, &fdProps) != VK_SUCCESS) {
+        vk_.DestroyImage(device, wt.img, nullptr);
+        wt.img = VK_NULL_HANDLE;
+        close(importFd);
+        RLOG_E("importDmaBufToWinTex: GetMemoryFdPropertiesKHR failed");
+        return false;
+    }
+
+    VkMemoryRequirements req{};
+    vk_.GetImageMemoryRequirements(device, wt.img, &req);
+    uint32_t typeBits = req.memoryTypeBits & fdProps.memoryTypeBits;
+    if (typeBits == 0) typeBits = fdProps.memoryTypeBits;
+    uint32_t memType;
+    try {
+        memType = findMemType(typeBits, 0);
+    } catch (...) {
+        vk_.DestroyImage(device, wt.img, nullptr);
+        wt.img = VK_NULL_HANDLE;
+        close(importFd);
+        RLOG_E("importDmaBufToWinTex: no compatible memory type");
+        return false;
+    }
+
+    VkImportMemoryFdInfoKHR importInfo{};
+    importInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+    importInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    importInfo.fd = importFd; // ownership transferred on success
+
+    VkMemoryDedicatedAllocateInfo ded{};
+    ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+    ded.pNext = &importInfo;
+    ded.image = wt.img;
+
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = &ded;
+    mai.allocationSize = req.size ? req.size : planeLayout.size;
+    mai.memoryTypeIndex = memType;
+
+    if (vk_.AllocateMemory(device, &mai, nullptr, &wt.mem) != VK_SUCCESS) {
+        vk_.DestroyImage(device, wt.img, nullptr);
+        wt.img = VK_NULL_HANDLE;
+        close(importFd);
+        RLOG_E("importDmaBufToWinTex: AllocateMemory failed");
+        return false;
+    }
+    // importFd now owned by Vulkan
+    if (vk_.BindImageMemory(device, wt.img, wt.mem, 0) != VK_SUCCESS) {
+        destroyWinTex(wt);
+        RLOG_E("importDmaBufToWinTex: BindImageMemory failed");
+        return false;
+    }
+
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = wt.img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = format;
+    vi.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                     VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (vk_.CreateImageView(device, &vi, nullptr, &wt.view) != VK_SUCCESS) {
+        destroyWinTex(wt);
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo dsai{};
+    dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsai.descriptorPool = winTexPool;
+    dsai.descriptorSetCount = 1;
+    dsai.pSetLayouts = &dsLayout;
+    if (vk_.AllocateDescriptorSets(device, &dsai, &wt.ds) != VK_SUCCESS) {
+        destroyWinTex(wt);
+        return false;
+    }
+
+    VkDescriptorImageInfo dii{};
+    dii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    dii.imageView = wt.view;
+    dii.sampler = sampler;
+
+    VkWriteDescriptorSet wr{};
+    wr.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    wr.dstSet = wt.ds;
+    wr.dstBinding = 0;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.descriptorCount = 1;
+    wr.pImageInfo = &dii;
+    vk_.UpdateDescriptorSets(device, 1, &wr, 0, nullptr);
+
+    wt.needsTransition = true;
+    wt.isAHB = false;
+    wt.w = w;
+    wt.h = h;
+    RLOG("importDmaBufToWinTex: ok %dx%d stride=%d mod=0x%llx",
+         w, h, strideBytes, (unsigned long long)modifier);
+    return true;
+}
+
+void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int fd, int w, int h,
+                                                      int strideBytes, int drmFormat,
+                                                      uint64_t modifier, int, int) {
+    if (fd < 0 || w <= 0 || h <= 0) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+
+    WinTex& wt = texMap[id];
+    // Re-import when size changes or slot empty; Present flips replace the fd each frame.
+    if (wt.img == VK_NULL_HANDLE || wt.w != w || wt.h != h || wt.isAHB) {
+        if (wt.img != VK_NULL_HANDLE) {
+            if (!wt.isAHB) destroyWinTex(wt);
+            else wt = {};
+        }
+        WinTex imported{};
+        if (!importDmaBufToWinTex(imported, fd, w, h, strideBytes, drmFormat, modifier)) {
+            texMap.erase(id);
+            RLOG_E("updateWindowContentDmaBuf: import failed id=%" PRId64, id);
+            return;
+        }
+        wt = imported;
+    } else {
+        // Same dimensions: re-import into a fresh WinTex (fd is a new guest buffer).
+        WinTex imported{};
+        if (!importDmaBufToWinTex(imported, fd, w, h, strideBytes, drmFormat, modifier)) {
+            RLOG_E("updateWindowContentDmaBuf: re-import failed id=%" PRId64, id);
+            return;
+        }
+        destroyWinTex(wt);
+        wt = imported;
+    }
+    needsRender.store(true);
+    dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::destroyWinTex(WinTex& wt) {
@@ -1267,6 +1488,11 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
 }
 
 void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride, int, int) {
+    updateWindowContent(id, px, w, h, stride, 0, 0, false);
+}
+
+void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride,
+                                                int, int, bool forceOpaqueAlpha) {
     if (!px||w<=0||h<=0) return;
 
     void* mapped=nullptr;
@@ -1285,9 +1511,19 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
     const int32_t srcStride=stride>0?stride:w;
     uint32_t* src2=static_cast<uint32_t*>(px);
     uint8_t*  dst2=static_cast<uint8_t*>(mapped);
-    for (int row=0;row<h;++row)
-        memcpy(dst2+(size_t)row*dstPitch,
-               &src2[(size_t)row*srcStride],(size_t)w*4);
+    if (forceOpaqueAlpha) {
+        for (int row=0;row<h;++row) {
+            uint32_t* srcRow = &src2[(size_t)row*srcStride];
+            uint32_t* dstRow = reinterpret_cast<uint32_t*>(dst2+(size_t)row*dstPitch);
+            for (int col=0; col<w; ++col) {
+                dstRow[col] = srcRow[col] | 0xFF000000u;
+            }
+        }
+    } else {
+        for (int row=0;row<h;++row)
+            memcpy(dst2+(size_t)row*dstPitch,
+                   &src2[(size_t)row*srcStride],(size_t)w*4);
+    }
     {
         std::lock_guard<std::mutex> lk(renderMutex);
         auto it=texMap.find(id);

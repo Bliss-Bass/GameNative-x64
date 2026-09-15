@@ -318,10 +318,11 @@ public class PresentExtension implements Extension {
         int windowId = inputStream.readInt();
         int pixmapId = inputStream.readInt();
         int serial = inputStream.readInt();
-        inputStream.skip(8);
+        inputStream.skip(8); // valid-area, update-area
         short xOff = inputStream.readShort();
         short yOff = inputStream.readShort();
-        inputStream.skip(8);
+        inputStream.skip(4); // target-crtc
+        int waitFence = inputStream.readInt();
         int idleFence = inputStream.readInt();
         inputStream.skip(client.getRemainingRequestLength());
 
@@ -332,6 +333,12 @@ public class PresentExtension implements Extension {
 
         final Pixmap pixmap = client.xServer.pixmapManager.getPixmap(pixmapId);
         if (pixmap == null) throw new BadPixmap(pixmapId);
+
+        // Honor Present wait-fence so we sample only after the guest GPU finished the frame.
+        if (waitFence != 0) {
+            if (syncExtension == null) syncExtension = client.xServer.getExtension(SyncExtension.MAJOR_OPCODE);
+            if (syncExtension != null) syncExtension.waitUntilTriggered(waitFence, 33);
+        }
 
         Drawable content = window.getContent();
         int contentDepth = content.visual.depth;
@@ -355,15 +362,26 @@ public class PresentExtension implements Extension {
             return;
         }
 
-        // A shared pixmap's pixels were written straight into the client's segment, so nothing here
-        // knows they changed; and handing its texture to the window would show memory the client
-        // keeps rendering into rather than the frame it just presented. Shared storage therefore
-        // gets marked dirty and copied rather than swapped in.
+        // Shared mmap pixmaps must be copied; GPUImage/AHB-backed DRI3 pixmaps can flip.
         final boolean sharedStorage = pixmap.drawable.isUseSharedData();
+        final boolean gpuBacked = pixmap.drawable.getTexture() instanceof com.winlator.renderer.GPUImage;
         if (sharedStorage) pixmap.drawable.forceUpdate();
 
         synchronized (content.renderLock) {
-            if (asr != null && !sharedStorage) {
+            if ((asr != null || (vr != null && gpuBacked)) && !sharedStorage && gpuBacked) {
+                content.setTexture(pixmap.drawable.getTexture());
+                content.setDirectScanout(pixmap.drawable.isDirectScanout());
+                if (vr != null && content.isDirectScanout()) {
+                    vr.ensureScanoutForAhbPresent();
+                }
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
+                if (window.attributes.isMapped()) {
+                    if (vr != null) vr.onUpdateWindowContent(window);
+                    else asr.onUpdateWindowContent(window);
+                }
+                if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
+                else sendIdleNotify(window, pixmap, serial, idleFence);
+            } else if (asr != null && !sharedStorage) {
                 content.setTexture(pixmap.drawable.getTexture());
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
                 if (window.attributes.isMapped()) {

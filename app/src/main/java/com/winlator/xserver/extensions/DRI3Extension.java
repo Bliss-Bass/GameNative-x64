@@ -5,6 +5,7 @@ import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
 import com.winlator.renderer.AHBImage;
 import com.winlator.renderer.GPUImage;
 import com.winlator.renderer.NativeTexture;
+import com.winlator.renderer.Texture;
 import com.winlator.sysvshm.SysVSharedMemory;
 import com.winlator.xconnector.XConnectorEpoll;
 import com.winlator.xconnector.XInputStream;
@@ -34,21 +35,37 @@ import java.nio.ByteBuffer;
 /**
  * DRI3 for the in-app X server.
  *
- * <p>On x86_64 the working path today is DRI3 1.2 with <em>linear-only</em> modifiers: Mesa
- * exports a dma-buf we can {@code mmap}, and Present copies those pixels into the compositor
- * texture. That skips Mesa's software-WSI GPU→CPU readback (the expensive half of
- * {@code MESA_VK_WSI_DEBUG=sw}). Winlator's private modifier sentinels (1255 / 1274) stay for
- * the arm64 Vortek / AHB path. Real GPU import of tiled Intel modifiers is still TODO.
+ * <p>x86_64 prefers GPU zero-copy: import guest ANV dma-bufs as {@link GPUImage}
+ * (AHardwareBuffer via {@code createFromHandle}) so Present can sample through
+ * {@code nativeUpdateWindowContentAHB} / Native Rendering+ scanout. LINEAR mmap remains
+ * the fallback when AHB wrap fails. Winlator private modifiers 1255 / 1274 stay for arm64.
  */
 public class DRI3Extension implements Extension {
     public static final byte MAJOR_OPCODE = -102;
 
-    /** {@code DRM_FORMAT_MOD_LINEAR} — the only modifier we can mmap correctly today. */
+    /** {@code DRM_FORMAT_MOD_LINEAR}. */
     private static final long DRM_FORMAT_MOD_LINEAR = 0L;
+    /** Intel X-tiling — common ANV default for scanout-capable buffers. */
+    private static final long I915_FORMAT_MOD_X_TILED = 0x0100000000000001L;
+    private static final long I915_FORMAT_MOD_Y_TILED = 0x0100000000000002L;
+    private static final long I915_FORMAT_MOD_Yf_TILED = 0x0100000000000003L;
+    private static final long I915_FORMAT_MOD_4_TILED = 0x0100000000000004L;
+
+    /** DRM fourcc matching Mesa X11 WSI depth-24/32 visuals. */
+    private static final int DRM_FORMAT_XRGB8888 = 0x34325258; // 'XR24'
+    private static final int DRM_FORMAT_ARGB8888 = 0x34325241; // 'AR24'
 
     /** Highest version we implement (GetSupportedModifiers + PixmapFromBuffers). */
     private static final int SERVER_MAJOR = 1;
     private static final int SERVER_MINOR = 2;
+
+    private static final long[] SUPPORTED_MODIFIERS = new long[] {
+        DRM_FORMAT_MOD_LINEAR,
+        I915_FORMAT_MOD_X_TILED,
+        I915_FORMAT_MOD_Y_TILED,
+        I915_FORMAT_MOD_Yf_TILED,
+        I915_FORMAT_MOD_4_TILED,
+    };
 
     private byte firstEventId = 0;
     private byte firstErrorId = 0;
@@ -198,25 +215,65 @@ public class DRI3Extension implements Extension {
     }
 
     /**
-     * DRI3 1.2 GetSupportedModifiers. Advertise linear only so Mesa allocates CPU-mmapable
-     * buffers; tiled Intel modifiers would need a real GPU import path.
+     * DRI3 1.2 GetSupportedModifiers. Advertise LINEAR plus Intel tiled modifiers when the
+     * opened DRM render node is i915/xe so ANV can pick an efficient layout.
      */
     private void getSupportedModifiers(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         inputStream.skip(8); // window + depth + bpp + pad
-        android.util.Log.i("DRI3", "GetSupportedModifiers -> LINEAR only");
+        long[] mods = modifiersForRenderNode();
+        int n = mods.length;
+        android.util.Log.i("DRI3", "GetSupportedModifiers -> " + n + " mods");
 
-        // One LINEAR in both window and screen lists → 2 * 8 bytes of extra reply data = length 4.
+        // Each list is n * 8 bytes; reply length is in 4-byte units excluding the 32-byte header.
+        int extraWords = (n * 8 * 2) / 4;
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
             outputStream.writeByte((byte)0);
             outputStream.writeShort(client.getSequenceNumber());
-            outputStream.writeInt(4);
-            outputStream.writeInt(1); // num_window_modifiers
-            outputStream.writeInt(1); // num_screen_modifiers
+            outputStream.writeInt(extraWords);
+            outputStream.writeInt(n); // num_window_modifiers
+            outputStream.writeInt(n); // num_screen_modifiers
             outputStream.writePad(16);
-            outputStream.writeLong(DRM_FORMAT_MOD_LINEAR);
-            outputStream.writeLong(DRM_FORMAT_MOD_LINEAR);
+            for (long mod : mods) outputStream.writeLong(mod);
+            for (long mod : mods) outputStream.writeLong(mod);
         }
+    }
+
+    /** LINEAR always; Intel tiled when the DRM node looks like i915/xe. */
+    private static long[] modifiersForRenderNode() {
+        String name = drmDriverName();
+        if (name != null) {
+            String lower = name.toLowerCase(java.util.Locale.US);
+            if (lower.contains("i915") || lower.contains("xe") || lower.contains("intel")) {
+                return SUPPORTED_MODIFIERS;
+            }
+        }
+        // Non-Intel: LINEAR only — tiled import is Intel-specific in this server.
+        return new long[] { DRM_FORMAT_MOD_LINEAR };
+    }
+
+    private static String drmDriverName() {
+        java.io.File[] cards = new java.io.File("/sys/class/drm").listFiles();
+        if (cards != null) {
+            for (java.io.File f : cards) {
+                String n = f.getName();
+                if (!n.startsWith("renderD") && !n.startsWith("card")) continue;
+                java.io.File driver = new java.io.File(f, "device/driver");
+                try {
+                    String target = driver.getCanonicalPath();
+                    int slash = target.lastIndexOf('/');
+                    if (slash >= 0) return target.substring(slash + 1);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        // Bliss x86 often reports hardware=intel even when sysfs is sparse.
+        return android.os.Build.HARDWARE;
+    }
+
+    private static boolean isSupportedModifier(long modifier) {
+        for (long m : modifiersForRenderNode()) if (m == modifier) return true;
+        return false;
     }
 
     private void pixmapFromBuffer(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -272,13 +329,109 @@ public class DRI3Extension implements Extension {
 
         if (modifier == 1255) {
             pixmapFromHardwareBuffer(client, pixmapId, width, height, depth, fd);
-        } else if (modifier == 1274 || modifier == DRM_FORMAT_MOD_LINEAR) {
+            return;
+        }
+        if (modifier == 1274) {
             pixmapFromLinearFd(client, pixmapId, width, height, stride, offset, depth, fd, size);
-        } else {
+            return;
+        }
+        if (!isSupportedModifier(modifier)) {
             XConnectorEpoll.closeFd(fd);
             android.util.Log.w("DRI3", "unsupported modifier=0x" + Long.toHexString(modifier));
             throw new BadValue((int) modifier);
         }
+
+        // Prefer AHB wrap (true GPU zero-copy into VulkanRenderer / scanout).
+        int drmFormat = (depth == 32) ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888;
+        if (pixmapFromDmaBufAhb(client, pixmapId, width, height, stride, depth, fd, drmFormat, modifier)) {
+            return;
+        }
+        // Vulkan dma-buf import when the renderer probed EXT_external_memory_dma_buf.
+        if (com.winlator.renderer.VulkanRenderer.isDmaBufImportSupported()
+                && pixmapFromDmaBufVk(client, pixmapId, width, height, stride, depth, fd, drmFormat, modifier)) {
+            return;
+        }
+        // Tiled buffers cannot be safely mmap'd as linear — fail rather than show FB garbage.
+        if (modifier != DRM_FORMAT_MOD_LINEAR) {
+            XConnectorEpoll.closeFd(fd);
+            android.util.Log.w("DRI3", "GPU import failed for tiled mod=0x" + Long.toHexString(modifier));
+            throw new BadAlloc();
+        }
+        pixmapFromLinearFd(client, pixmapId, width, height, stride, offset, depth, fd, size);
+    }
+
+    /**
+     * Wrap dma-buf as GPUImage/AHB. On success the pixmap is GPU-backed and Present uses the
+     * AHB path; the original fd is closed (AHB holds its own reference). Scanout-eligible.
+     */
+    private boolean pixmapFromDmaBufAhb(XClient client, int pixmapId, short width, short height,
+                                        int stride, byte depth, int fd, int drmFormat, long modifier)
+            throws XRequestError {
+        if (Drawable.IS_ASR()) return false;
+        GPUImage image = GPUImage.fromDmaBuf(fd, width, height, stride, drmFormat, modifier);
+        if (!image.isValid() || !image.hasHardwareBuffer()) {
+            if (image.isValid()) image.destroy();
+            return false;
+        }
+
+        Visual visual = client.xServer.pixmapManager.getVisualForDepth(depth);
+        if (visual == null) {
+            image.destroy();
+            return false;
+        }
+        Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, visual);
+        if (drawable == null) {
+            image.destroy();
+            return false;
+        }
+        drawable.setTexture(image);
+        drawable.setDirectScanout(image.supportsDirectScanout());
+        drawable.setOnDestroyListener((d) -> {
+            Texture t = d.getTexture();
+            if (t instanceof GPUImage) ((GPUImage) t).destroy();
+        });
+        client.xServer.pixmapManager.createPixmap(drawable);
+        XConnectorEpoll.closeFd(fd);
+        android.util.Log.i("DRI3", "pixmapFromDmaBufAhb ok " + width + "x" + height +
+                " stride=" + stride + " mod=0x" + Long.toHexString(modifier));
+        return true;
+    }
+
+    /**
+     * Dup dma-buf into a GPUImage for Vulkan {@code VK_EXT_external_memory_dma_buf} import.
+     * Compositor zero-copy without AHB; not eligible for SurfaceControl scanout.
+     */
+    private boolean pixmapFromDmaBufVk(XClient client, int pixmapId, short width, short height,
+                                       int stride, byte depth, int fd, int drmFormat, long modifier)
+            throws XRequestError {
+        if (Drawable.IS_ASR()) return false;
+        GPUImage image = GPUImage.fromDmaBufFd(fd, width, height, stride, drmFormat, modifier);
+        if (!image.isValid() || !image.hasDmaBufFd()) {
+            if (image.isValid()) image.destroy();
+            return false;
+        }
+
+        Visual visual = client.xServer.pixmapManager.getVisualForDepth(depth);
+        if (visual == null) {
+            image.destroy();
+            return false;
+        }
+        Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, visual);
+        if (drawable == null) {
+            image.destroy();
+            return false;
+        }
+        drawable.setTexture(image);
+        drawable.setDirectScanout(false);
+        drawable.setOnDestroyListener((d) -> {
+            Texture t = d.getTexture();
+            if (t instanceof GPUImage) ((GPUImage) t).destroy();
+        });
+        client.xServer.pixmapManager.createPixmap(drawable);
+        XConnectorEpoll.closeFd(fd);
+        android.util.Log.i("DRI3", "pixmapFromDmaBufVk ok " + width + "x" + height +
+                " stride=" + stride + " mod=0x" + Long.toHexString(modifier));
+        return true;
     }
 
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd) throws IOException, XRequestError {
@@ -286,6 +439,7 @@ public class DRI3Extension implements Extension {
             NativeTexture image = Drawable.IS_ASR() ? new AHBImage(fd) : new GPUImage(fd);
             Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, image.getStride(), height, depth);
             drawable.setTexture(image);
+            drawable.setDirectScanout(true);
 
             client.xServer.pixmapManager.createPixmap(drawable);
         }
@@ -295,9 +449,8 @@ public class DRI3Extension implements Extension {
     }
 
     /**
-     * Map a linear dma-buf (or Winlator sentinel 1274) as shared pixmap storage. Present must copy
-     * rather than alias, because the client keeps rendering into the same buffer until IdleNotify.
-     * The fd is kept open for DMA_BUF_IOCTL_SYNC around each CPU read.
+     * Fallback: map a LINEAR dma-buf as shared pixmap storage. Present CPU-copies with
+     * DMA_BUF_IOCTL_SYNC and forces opaque alpha (XRGB). Not used for tiled modifiers.
      */
     private void pixmapFromLinearFd(XClient client, int pixmapId, short width, short height, int stride,
                                     int offset, byte depth, int fd, long size) throws IOException, XRequestError {
@@ -327,6 +480,7 @@ public class DRI3Extension implements Extension {
         }
         drawable.setSharedStrideBytes(stride);
         drawable.setDmaBufFd(fd);
+        drawable.setForceOpaqueAlpha(true);
         drawable.setOnDestroyListener((d) -> {
             ByteBuffer data = d.getData();
             if (data != null) SysVSharedMemory.unmapSHMSegment(data, data.capacity());
@@ -337,7 +491,7 @@ public class DRI3Extension implements Extension {
             }
         });
         client.xServer.pixmapManager.createPixmap(drawable);
-        android.util.Log.i("DRI3", "pixmapFromLinearFd ok " + width + "x" + height +
+        android.util.Log.i("DRI3", "pixmapFromLinearFd fallback " + width + "x" + height +
                 " stride=" + stride + " size=" + size + " fd=" + fd);
     }
 

@@ -154,6 +154,9 @@ public class SysVSharedMemory {
      */
     public static native void triggerFence(ByteBuffer fence);
 
+    /** Wait until an xshmfence is non-zero or {@code timeoutMs} elapses. */
+    public static native void awaitFence(ByteBuffer fence, long timeoutMs);
+
     /**
      * Bracket a CPU access to a dma-buf mapping. {@code start=true} before the access,
      * {@code start=false} after; {@code write=true} for CPU writes, false for reads.
