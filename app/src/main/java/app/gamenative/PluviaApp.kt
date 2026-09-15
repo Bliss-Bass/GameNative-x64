@@ -84,6 +84,18 @@ class PluviaApp : SplitCompatApplication() {
 
         Timber.i("HostCpu=%s supportedAbis=%s", HostCpu.current(), Build.SUPPORTED_ABIS.joinToString())
 
+        if (BuildConfig.BLISS_PORT_DEBUG) {
+            Thread({
+                val reading = app.gamenative.powercontrol.metrics.GpuUsageSampler().sample()
+                Timber.i(
+                    "GpuUsageSampler smoke: percent=%s mhz=%s source=%s",
+                    reading?.percent?.toString() ?: "null",
+                    reading?.mhz?.toString() ?: "null",
+                    reading?.source ?: "none",
+                )
+            }, "gpu-metrics-smoke").apply { isDaemon = true }.start()
+        }
+
         NetworkMonitor.init(this)
 
         // Init our custom crash handler.

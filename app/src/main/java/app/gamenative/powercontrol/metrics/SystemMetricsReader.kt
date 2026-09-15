@@ -117,7 +117,7 @@ object SystemMetricsSources {
 
         val paths = candidates.toList()
         gpuUsagePathsCache = paths
-        Timber.tag(TAG).v("Discovered GPU usage paths: %s", paths.joinToString())
+        Timber.tag(TAG).i("Discovered GPU usage paths: %s", paths.joinToString())
         return paths
     }
 
@@ -134,7 +134,7 @@ object SystemMetricsSources {
         val paths = drm ?: arm
         gpuFreqPathsCache = paths
         gpuFreqPathsResolved = true
-        Timber.tag(TAG).v("Discovered GPU freq paths: %s", paths ?: "none")
+        Timber.tag(TAG).i("Discovered GPU freq paths: %s", paths ?: "none")
         return paths
     }
 
