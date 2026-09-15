@@ -80,12 +80,18 @@ object LsfgVkManager {
     private const val ENV_CONFIG = "LSFG_CONFIG"
     private const val ENV_PROCESS = "LSFG_PROCESS"
 
-    // Current runtime version (bumped when the bundled .so changes)
-    private const val RUNTIME_VERSION = "v1.3.3-android-arm64-v8a"
+    // Current runtime version (bumped when the bundled .so changes).
+    // ABI-specific so an x86_64 drop does not skip installing over a stale arm64 stamp.
+    private fun runtimeVersion(): String =
+        if (HostCpu.current().isX86_64) "v1.0.4-android-x86_64" else "v1.3.3-android-arm64-v8a"
 
-    // Asset path for manifest (still in assets)
-    private const val ASSET_DIR = "lsfg_vk/android_arm64_v8a"
-    private const val ASSET_MANIFEST = "$ASSET_DIR/$MANIFEST_FILENAME"
+    // Asset path for the Vulkan layer manifest (library itself comes from jniLibs).
+    private fun assetManifestPath(): String =
+        if (HostCpu.current().isX86_64) {
+            "lsfg_vk/android_x86_64/$MANIFEST_FILENAME"
+        } else {
+            "lsfg_vk/android_arm64_v8a/$MANIFEST_FILENAME"
+        }
 
     // ---- Public API --------------------------------------------------------
 
@@ -259,7 +265,7 @@ object LsfgVkManager {
         val versionFile = File(layerDir, VERSION_FILENAME)
 
         val installedVersion = versionFile.takeIf { it.exists() }?.readText()?.trim().orEmpty()
-        val needsInstall = installedVersion != RUNTIME_VERSION ||
+        val needsInstall = installedVersion != runtimeVersion() ||
             !libFile.isFile || !manifestFile.isFile
 
         var success = true
@@ -282,14 +288,14 @@ object LsfgVkManager {
                     }
                 }
                 // Write the manifest with patched library_path
-                val manifestText = context.assets.open(ASSET_MANIFEST)
+                val manifestText = context.assets.open(assetManifestPath())
                     .bufferedReader().use { it.readText() }
                     .replace(
                         "\"library_path\": \"$LIB_FILENAME\"",
                         "\"library_path\": \"$MANIFEST_LIBRARY_PATH\""
                     )
                 FileUtils.writeString(manifestFile, manifestText)
-                FileUtils.writeString(versionFile, RUNTIME_VERSION)
+                FileUtils.writeString(versionFile, runtimeVersion())
 
                 // Set executable permissions
                 if (libFile.exists()) FileUtils.chmod(libFile, 0b111101101)
@@ -298,7 +304,7 @@ object LsfgVkManager {
 
                 val ok = libFile.isFile && manifestFile.isFile
                 if (ok) {
-                    Timber.tag(TAG).i("Installed LSFG runtime %s into %s", RUNTIME_VERSION, rootDir)
+                    Timber.tag(TAG).i("Installed LSFG runtime %s into %s", runtimeVersion(), rootDir)
                 } else {
                     Timber.tag(TAG).e("Runtime installation verification failed")
                     success = false
@@ -308,7 +314,7 @@ object LsfgVkManager {
                 success = false
             }
         } else {
-            Timber.tag(TAG).d("Runtime %s already installed in %s", RUNTIME_VERSION, rootDir)
+            Timber.tag(TAG).d("Runtime %s already installed in %s", runtimeVersion(), rootDir)
         }
 
         // Delete the Lossless Scaling container if it exists (no longer needed)
