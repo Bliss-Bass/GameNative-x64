@@ -711,11 +711,7 @@ object PerfSampler {
 
         private fun readGpuMhz(): Int? {
             val raw = SystemMetricsSources.readLongFromLine(gpuFreqPath ?: return null) ?: return null
-            return when {
-                raw >= 100_000_000L -> (raw / 1_000_000L).toInt()
-                raw >= 100_000L -> (raw / 1_000L).toInt()
-                else -> raw.toInt()
-            }
+            return SystemMetricsSources.normalizeGpuFreqToMhz(raw)
         }
 
         @RequiresApi(Build.VERSION_CODES.Q)
@@ -781,23 +777,8 @@ object PerfSampler {
             return byMax.map { (max, cores) -> PerfCluster(cores.sorted().toIntArray(), max) }
         }
 
-        private fun discoverGpuFreqPath(): String? {
-            listOf(
-                "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",
-                "/sys/class/kgsl/kgsl-3d0/gpuclk",
-                "/sys/class/kgsl/kgsl-3d0/clock_mhz",
-            ).firstOrNull { File(it).canRead() }?.let { return it }
-            for (root in listOf(File("/sys/class/devfreq"), File("/sys/devices/virtual/devfreq"))) {
-                val nodes = root.listFiles { file -> file.isDirectory } ?: continue
-                for (node in nodes) {
-                    val path = node.path.lowercase(Locale.US)
-                    if (listOf("gpu", "mali", "g3d", "kgsl").none { path.contains(it) }) continue
-                    val file = File(node, "cur_freq")
-                    if (file.canRead()) return file.path
-                }
-            }
-            return null
-        }
+        private fun discoverGpuFreqPath(): String? =
+            SystemMetricsSources.discoverGpuActFreqPath()
 
         private fun discoverSkinTempPaths(): List<String> {
             return listOf(File("/sys/class/thermal"), File("/sys/devices/virtual/thermal")).flatMap { root ->

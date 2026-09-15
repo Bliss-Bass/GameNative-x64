@@ -13,7 +13,15 @@ enum class CpuUsageSource {
 
 data class CpuUsageReading(val percent: Int, val source: CpuUsageSource)
 
-data class GpuUsageReading(val percent: Int, val source: String)
+data class GpuUsageReading(val percent: Int, val source: String, val mhz: Int? = null)
+
+data class GpuFreqReading(
+    val mhz: Int,
+    val maxMhz: Int,
+    val ratioPercent: Int,
+    val actPath: String,
+    val maxPath: String,
+)
 
 /**
  * Device sysfs discovery shared by the metrics collector and the on-screen HUD.
@@ -24,6 +32,12 @@ object SystemMetricsSources {
 
     @Volatile
     private var gpuUsagePathsCache: List<String>? = null
+
+    @Volatile
+    private var gpuFreqPathsCache: Pair<String, String>? = null
+
+    @Volatile
+    private var gpuFreqPathsResolved: Boolean = false
 
     @Volatile
     private var thermalZonesCache: List<Pair<String, String>>? = null
@@ -65,6 +79,13 @@ object SystemMetricsSources {
             "/sys/class/devfreq/gpu/load",
         ).forEach(::add)
 
+        // AMDGPU exposes a real busy percentage under the DRM card device.
+        File("/sys/class/drm").listFiles { file ->
+            file.isDirectory && file.name.matches(Regex("card\\d+"))
+        }?.forEach { card ->
+            add("${card.path}/device/gpu_busy_percent")
+        }
+
         listOf(
             File("/sys/class/devfreq"),
             File("/sys/devices/virtual/devfreq"),
@@ -98,6 +119,99 @@ object SystemMetricsSources {
         gpuUsagePathsCache = paths
         Timber.tag(TAG).v("Discovered GPU usage paths: %s", paths.joinToString())
         return paths
+    }
+
+    /**
+     * Intel i915 / Xe expose act/cur + max MHz under `/sys/class/drm/cardN/`.
+     * ARM platforms keep kgsl/mali/devfreq cur_freq (Hz/kHz). Returns actPath to maxPath.
+     */
+    @Synchronized
+    fun gpuFreqPaths(): Pair<String, String>? {
+        if (gpuFreqPathsResolved) return gpuFreqPathsCache
+
+        val drm = discoverDrmGpuFreqPaths()
+        val arm = discoverArmGpuFreqPath()?.let { it to it }
+        val paths = drm ?: arm
+        gpuFreqPathsCache = paths
+        gpuFreqPathsResolved = true
+        Timber.tag(TAG).v("Discovered GPU freq paths: %s", paths ?: "none")
+        return paths
+    }
+
+    /**
+     * Current GPU clock in MHz, plus act/max ratio as a load stand-in when no busy node exists.
+     */
+    fun sampleGpuFreq(): GpuFreqReading? {
+        val (actPath, maxPath) = gpuFreqPaths() ?: return null
+        val actRaw = readLongFromLine(actPath) ?: return null
+        val actMhz = normalizeGpuFreqToMhz(actRaw) ?: return null
+        val maxMhz = if (actPath == maxPath) {
+            // Single-node ARM cur_freq: try sibling max_freq, else treat current as both.
+            readLongFromLine(File(File(actPath).parent, "max_freq").path)
+                ?.let { normalizeGpuFreqToMhz(it) }
+                ?: actMhz
+        } else {
+            readLongFromLine(maxPath)?.let { normalizeGpuFreqToMhz(it) } ?: return null
+        }
+        if (maxMhz <= 0) return null
+        val ratio = ((actMhz * 100L) / maxMhz).toInt().coerceIn(0, 100)
+        return GpuFreqReading(
+            mhz = actMhz,
+            maxMhz = maxMhz,
+            ratioPercent = ratio,
+            actPath = actPath,
+            maxPath = maxPath,
+        )
+    }
+
+    fun discoverGpuActFreqPath(): String? = gpuFreqPaths()?.first
+
+    private fun discoverDrmGpuFreqPaths(): Pair<String, String>? {
+        val cards = File("/sys/class/drm").listFiles { file ->
+            file.isDirectory && file.name.matches(Regex("card\\d+"))
+        } ?: return null
+
+        for (card in cards.sortedBy { it.name }) {
+            val act = listOf("gt_act_freq_mhz", "gt_cur_freq_mhz")
+                .map { File(card, it) }
+                .firstOrNull { it.canRead() }
+                ?: continue
+            val max = listOf("gt_max_freq_mhz", "gt_boost_freq_mhz", "gt_RP0_freq_mhz")
+                .map { File(card, it) }
+                .firstOrNull { it.canRead() }
+                ?: continue
+            return act.path to max.path
+        }
+        return null
+    }
+
+    private fun discoverArmGpuFreqPath(): String? {
+        listOf(
+            "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",
+            "/sys/class/kgsl/kgsl-3d0/gpuclk",
+            "/sys/class/kgsl/kgsl-3d0/clock_mhz",
+        ).firstOrNull { File(it).canRead() }?.let { return it }
+
+        for (root in listOf(File("/sys/class/devfreq"), File("/sys/devices/virtual/devfreq"))) {
+            val nodes = root.listFiles { file -> file.isDirectory } ?: continue
+            for (node in nodes) {
+                val path = node.path.lowercase(Locale.US)
+                if (listOf("gpu", "mali", "g3d", "kgsl").none { path.contains(it) }) continue
+                val file = File(node, "cur_freq")
+                if (file.canRead()) return file.path
+            }
+        }
+        return null
+    }
+
+    /** Values may already be MHz (Intel DRM) or Hz/kHz (devfreq / kgsl). */
+    fun normalizeGpuFreqToMhz(raw: Long): Int? {
+        if (raw <= 0L) return null
+        return when {
+            raw >= 100_000_000L -> (raw / 1_000_000L).toInt()
+            raw >= 100_000L -> (raw / 1_000L).toInt()
+            else -> raw.toInt()
+        }
     }
 
     /**
@@ -380,10 +494,20 @@ class GpuUsageSampler {
     }
 
     fun sample(): GpuUsageReading? {
-        return SystemMetricsSources.gpuUsagePaths()
+        val freq = SystemMetricsSources.sampleGpuFreq()
+        val busy = SystemMetricsSources.gpuUsagePaths()
             .asSequence()
             .mapNotNull { readSample(it) }
             .firstOrNull()
+        return when {
+            busy != null -> busy.copy(mhz = freq?.mhz ?: busy.mhz)
+            freq != null -> GpuUsageReading(
+                percent = freq.ratioPercent,
+                source = "${freq.actPath}/${File(freq.maxPath).name}",
+                mhz = freq.mhz,
+            )
+            else -> null
+        }
     }
 
     private fun readSample(path: String): GpuUsageReading? {

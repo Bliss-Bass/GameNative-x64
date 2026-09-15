@@ -308,7 +308,9 @@ class PerformanceHudView(
 
     private fun collectSnapshot(currentFps: Float): HudSnapshot {
         val cpuPercent = cpuSampler.sample()?.percent
-        val gpuPercent = gpuSampler.sample()?.percent
+        val gpuReading = gpuSampler.sample()
+        val gpuPercent = gpuReading?.percent
+        val gpuMhz = gpuReading?.mhz
         val batterySnapshot = collectBatterySnapshot()
         return HudSnapshot(
             fpsValue = currentFps,
@@ -316,7 +318,12 @@ class PerformanceHudView(
             gpuValue = gpuPercent?.toFloat(),
             fps = String.format(Locale.US, "FPS %.1f", currentFps),
             cpu = cpuPercent?.let { "CPU $it%" },
-            gpu = gpuPercent?.let { "GPU $it%" },
+            gpu = when {
+                gpuPercent != null && gpuMhz != null -> "GPU $gpuPercent% ${gpuMhz}MHz"
+                gpuPercent != null -> "GPU $gpuPercent%"
+                gpuMhz != null -> "GPU ${gpuMhz}MHz"
+                else -> null
+            },
             ram = "RAM ${readUsedRamText()}",
             battery = batterySnapshot.percent?.let { "BAT $it%" },
             power = batterySnapshot.powerWatts?.let { watts ->
