@@ -1465,6 +1465,18 @@ object PrefManager {
         }
 
     /**
+     * How large GameNative's Compose UI draws relative to the system density. 100 is stock;
+     * raise it on dense panels where the library and settings feel too small. Applied via
+     * [app.gamenative.ui.util.AppUiScale] — not the same as [linuxUiScalePercent].
+     */
+    private val APP_UI_SCALE_PERCENT = intPreferencesKey("app_ui_scale_percent")
+    var appUiScalePercent: Int
+        get() = getPref(APP_UI_SCALE_PERCENT, 100)
+        set(value) {
+            setPref(APP_UI_SCALE_PERCENT, value)
+        }
+
+    /**
      * How long a Linux session lives after its window is closed. See [LinuxSessionMode]; stored
      * by key so a value from another build degrades to the default rather than throwing.
      */

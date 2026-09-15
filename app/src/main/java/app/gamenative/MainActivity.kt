@@ -56,7 +56,9 @@ import app.gamenative.service.epic.EpicService
 import app.gamenative.ui.LinuxSessionActivity
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
+import app.gamenative.ui.util.AppUiScale
 import app.gamenative.ui.util.LocalSnackbarHostController
+import app.gamenative.ui.util.ProvideAppUiScale
 import app.gamenative.ui.util.SnackbarHostController
 import app.gamenative.utils.AnimatedPngDecoder
 import app.gamenative.data.GameSource
@@ -238,6 +240,7 @@ class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
         // Initialize PrefManager to read language setting
         PrefManager.init(newBase)
+        AppUiScale.syncFromPrefs()
 
         // Apply the saved language preference before creating the activity
         val languageCode = PrefManager.appLanguage
@@ -358,7 +361,9 @@ class MainActivity : ComponentActivity() {
                 LocalCoilImageLoader provides imageLoader,
                 LocalSnackbarHostController provides snackbarController,
             ) {
-                PluviaMain()
+                ProvideAppUiScale {
+                    PluviaMain()
+                }
             }
         }
         installPointerCaptureDispatch()

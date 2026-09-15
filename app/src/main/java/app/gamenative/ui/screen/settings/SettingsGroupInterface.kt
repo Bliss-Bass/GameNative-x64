@@ -64,6 +64,7 @@ import app.gamenative.ui.component.settings.SettingsMultiListDropdown
 import app.gamenative.ui.component.settings.SettingsTextField
 import app.gamenative.ui.component.ACHIEVEMENT_NOTIFICATION_POSITION
 import app.gamenative.ui.enums.LibraryTab
+import app.gamenative.ui.util.AppUiScale
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 import app.gamenative.utils.IconSwitcher
@@ -258,6 +259,31 @@ fun SettingsGroupInterface(
     }
 
     SettingsGroup(modifier = Modifier.background(Color.Transparent)) {
+        val uiScaleChoices = remember { AppUiScale.SCALE_CHOICES }
+        var uiScaleIndex by rememberSaveable {
+            mutableStateOf(
+                uiScaleChoices.indexOf(AppUiScale.sanitize(PrefManager.appUiScalePercent))
+                    .takeIf { it >= 0 } ?: uiScaleChoices.indexOf(AppUiScale.DEFAULT_SCALE_PERCENT),
+            )
+        }
+        SettingsListDropdown(
+            title = { Text(text = stringResource(R.string.settings_interface_ui_scale_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_interface_ui_scale_subtitle)) },
+            items = uiScaleChoices.map { percent ->
+                if (percent == AppUiScale.DEFAULT_SCALE_PERCENT) {
+                    stringResource(R.string.settings_interface_ui_scale_match, percent)
+                } else {
+                    stringResource(R.string.settings_interface_ui_scale_value, percent)
+                }
+            },
+            value = uiScaleIndex,
+            onItemSelected = { idx ->
+                uiScaleIndex = idx
+                AppUiScale.setPercent(uiScaleChoices[idx])
+            },
+            colors = settingsTileColorsAlt(),
+        )
+
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_achievement_show_notification)) },

@@ -1159,6 +1159,10 @@
 
     <!-- Settings: Interface Group -->
     <string name="settings_interface_title">Interface</string>
+    <string name="settings_interface_ui_scale_title">App UI size</string>
+    <string name="settings_interface_ui_scale_subtitle">Scale GameNative\'s library and settings. Separate from Linux session size and Android system display size.</string>
+    <string name="settings_interface_ui_scale_value">%1$d%%</string>
+    <string name="settings_interface_ui_scale_match">%1$d%% (match system)</string>
     <string name="settings_interface_external_links_title">Open web links externally</string>
     <string name="settings_interface_external_links_subtitle">Links open with your main web browser</string>
     <string name="settings_interface_hide_statusbar_title">Hide status bar when not in game</string>

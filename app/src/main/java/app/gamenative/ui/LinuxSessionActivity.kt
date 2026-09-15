@@ -13,6 +13,8 @@ import app.gamenative.enums.AppTheme
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.theme.PluviaTheme
+import app.gamenative.ui.util.AppUiScale
+import app.gamenative.ui.util.ProvideAppUiScale
 import timber.log.Timber
 
 /**
@@ -47,25 +49,28 @@ class LinuxSessionActivity : ComponentActivity() {
 
         Timber.i("[LinuxSessionActivity]: opening %s (%s)", label ?: entryId ?: "linux app", argv)
 
+        AppUiScale.syncFromPrefs()
         setContent {
             val theme = PrefManager.appTheme
-            PluviaTheme(
-                isDark = when (theme) {
-                    AppTheme.AUTO -> isSystemInDarkTheme()
-                    AppTheme.DAY -> false
-                    AppTheme.NIGHT, AppTheme.AMOLED -> true
-                },
-                isAmoled = theme == AppTheme.AMOLED,
-                style = PrefManager.appThemePalette,
-            ) {
-                LinuxDesktopScreen(
-                    argv = argv,
-                    entryId = entryId,
-                    label = label,
-                    // The session's own window: when the last thing in it exits there is nothing
-                    // left to show, so the window goes too.
-                    onExit = { finish() },
-                )
+            ProvideAppUiScale {
+                PluviaTheme(
+                    isDark = when (theme) {
+                        AppTheme.AUTO -> isSystemInDarkTheme()
+                        AppTheme.DAY -> false
+                        AppTheme.NIGHT, AppTheme.AMOLED -> true
+                    },
+                    isAmoled = theme == AppTheme.AMOLED,
+                    style = PrefManager.appThemePalette,
+                ) {
+                    LinuxDesktopScreen(
+                        argv = argv,
+                        entryId = entryId,
+                        label = label,
+                        // The session's own window: when the last thing in it exits there is nothing
+                        // left to show, so the window goes too.
+                        onExit = { finish() },
+                    )
+                }
             }
         }
     }
