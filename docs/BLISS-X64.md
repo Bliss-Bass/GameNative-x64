@@ -44,10 +44,11 @@ Ubuntu's archive `firefox` / `chromium-browser` packages are **snap transitional
 not work under our PRoot session, so those installs never appear in Linux Apps.
 
 The rootfs therefore ships Mozilla's APT source (`packages.mozilla.org`) by default, pins
-it above Ubuntu, and holds `snapd` / the transitional stubs at priority -10. Opening a
-Linux session applies the policy once (stamp `.apt_policy_version`) and installs the real
-Firefox `.deb` so it shows up in the Apps list. Chromium has no equivalent Mozilla/Ubuntu
-deb — use Firefox, or install a third-party Chromium/Chrome deb yourself.
+it above Ubuntu, and holds `snapd` / the transitional stubs at priority -10. `ca-certificates`
+is installed with the graphical session packages before that HTTPS source is enabled.
+Opening a Linux session applies the policy once (stamp `.apt_policy_version`) and installs
+the real Firefox `.deb` so it shows up in the Apps list. Chromium has no equivalent
+Mozilla/Ubuntu deb — use Firefox, or install a third-party Chromium/Chrome deb yourself.
 
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.

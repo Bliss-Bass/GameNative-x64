@@ -37,7 +37,7 @@ object LinuxRootfs {
      * rootfs: [ensureDisplaySession] rewrites the files and, when the stamp advances, runs
      * apt once to drop snap stubs and prefer Mozilla's firefox deb.
      */
-    private const val APT_POLICY_VERSION = 1
+    private const val APT_POLICY_VERSION = 2
 
     private const val MOZILLA_KEY_URL = "https://packages.mozilla.org/apt/repo-signing-key.gpg"
     private const val MOZILLA_KEY_PATH = "etc/apt/keyrings/packages.mozilla.org.asc"
@@ -67,8 +67,11 @@ object LinuxRootfs {
      * - The font packages are not optional here: Recommends are off, so nothing else pulls
      *   them in, and both a bitmap font for xterm and a scalable one for everything that
      *   draws through Xft have to be present or clients fail to start on a missing font.
+     * - ca-certificates is required before any HTTPS APT source (Mozilla) can be fetched:
+     *   ubuntu-base ships none, and apt-get update against packages.mozilla.org fails without it.
      */
     private val DISPLAY_PACKAGES = listOf(
+        "ca-certificates",
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
@@ -339,10 +342,10 @@ object LinuxRootfs {
      * so "installed" stays a single question.
      */
     private fun installDisplaySession(context: Context, rootfs: File, onProgress: (Progress) -> Unit) {
-        // Mozilla/nosnap sources before the first apt-get update so firefox resolves to a
-        // real deb rather than Ubuntu's snap transitional package.
-        writeAptPolicyFiles(rootfs)
-        ensureMozillaKey(rootfs)
+        // Ubuntu HTTP archives first: mozilla.sources is HTTPS and needs ca-certificates,
+        // which ubuntu-base does not ship. Nosnap pins can land immediately.
+        writeNosnapPins(rootfs)
+        File(rootfs, MOZILLA_SOURCES_PATH).delete()
 
         onProgress(Progress("Fetching package lists", -1f))
         // The base image ships no package lists at all, so this is not optional.
@@ -375,6 +378,18 @@ object LinuxRootfs {
             timeoutSeconds = 1800,
         )
         Timber.i("[LinuxRootfs]: apt-get install:\n%s", install.takeLast(4000))
+
+        // ca-certificates is in DISPLAY_PACKAGES; Mozilla HTTPS is safe from here.
+        writeMozillaAptSource(rootfs)
+        ensureMozillaKey(rootfs)
+        onProgress(Progress("Fetching Mozilla package lists", -1f))
+        val mozillaUpdate = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get update",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: mozilla apt-get update:\n%s", mozillaUpdate.takeLast(2000))
 
         applyAptPolicyPackages(context, rootfs, onProgress)
         aptPolicyStampFile(context).writeText(APT_POLICY_VERSION.toString())
@@ -513,9 +528,9 @@ object LinuxRootfs {
             """.trimIndent() + "\n",
         )
 
-        // Static apt policy (Mozilla + no-snap). The signing key is fetched later in
-        // [ensureAptPolicy] once the network is known to be available.
-        writeAptPolicyFiles(rootfs)
+        // Static apt policy (nosnap). Mozilla's HTTPS source is added after
+        // ca-certificates is installed — see [installDisplaySession] / [ensureAptPolicy].
+        writeNosnapPins(rootfs)
 
         // Directories PRoot binds over or the guest expects to exist.
         for (dir in listOf("dev", "proc", "sys", "tmp", "root", "run")) {
@@ -525,11 +540,30 @@ object LinuxRootfs {
     }
 
     /**
-     * Writes Mozilla's APT source and pins that keep Ubuntu's snap transitional
-     * `firefox` / `chromium-browser` packages from winning. Snap itself is held off so
-     * `apt install firefox` yields a real `.deb` with a desktop entry the Apps list can see.
+     * Holds Ubuntu's snap transitional `firefox` / `chromium-browser` and snapd itself
+     * so they cannot win over a later Mozilla install.
      */
-    private fun writeAptPolicyFiles(rootfs: File) {
+    private fun writeNosnapPins(rootfs: File) {
+        File(rootfs, "etc/apt/preferences.d").mkdirs()
+        File(rootfs, NOSNAP_PIN_PATH).writeText(
+            """
+            Package: snapd
+            Pin: release a=*
+            Pin-Priority: -10
+
+            Package: firefox
+            Pin: release o=Ubuntu
+            Pin-Priority: -10
+
+            Package: chromium-browser
+            Pin: release o=Ubuntu
+            Pin-Priority: -10
+            """.trimIndent() + "\n",
+        )
+    }
+
+    /** Mozilla APT source + pin. Call only after ca-certificates is installed in the guest. */
+    private fun writeMozillaAptSource(rootfs: File) {
         File(rootfs, "etc/apt/keyrings").mkdirs()
         File(rootfs, "etc/apt/sources.list.d").mkdirs()
         File(rootfs, "etc/apt/preferences.d").mkdirs()
@@ -552,23 +586,6 @@ object LinuxRootfs {
             Pin-Priority: 1001
             """.trimIndent() + "\n",
         )
-
-        // Negative pins beat Ubuntu's transitional snap stubs and keep snapd itself out.
-        File(rootfs, NOSNAP_PIN_PATH).writeText(
-            """
-            Package: snapd
-            Pin: release a=*
-            Pin-Priority: -10
-
-            Package: firefox
-            Pin: release o=Ubuntu
-            Pin-Priority: -10
-
-            Package: chromium-browser
-            Pin: release o=Ubuntu
-            Pin-Priority: -10
-            """.trimIndent() + "\n",
-        )
     }
 
     /**
@@ -583,12 +600,19 @@ object LinuxRootfs {
         rootfs: File,
         onProgress: (Progress) -> Unit = {},
     ) {
-        writeAptPolicyFiles(rootfs)
-        ensureMozillaKey(rootfs)
+        writeNosnapPins(rootfs)
 
         val stamp = aptPolicyStampFile(context)
         val installed = stamp.takeIf { it.isFile }?.readText()?.trim().orEmpty()
-        if (installed == APT_POLICY_VERSION.toString()) return
+        if (installed == APT_POLICY_VERSION.toString() &&
+            File(rootfs, "etc/ssl/certs/ca-certificates.crt").isFile &&
+            File(rootfs, MOZILLA_SOURCES_PATH).isFile
+        ) {
+            return
+        }
+
+        // Drop Mozilla temporarily so apt-get update can use Ubuntu HTTP without CA certs.
+        File(rootfs, MOZILLA_SOURCES_PATH).delete()
 
         onProgress(Progress("Configuring package sources", -1f))
         val update = LinuxProgramLauncher.runWithOutput(
@@ -598,6 +622,26 @@ object LinuxRootfs {
             timeoutSeconds = 600,
         )
         Timber.i("[LinuxRootfs]: apt policy update:\n%s", update.takeLast(2000))
+
+        onProgress(Progress("Installing CA certificates", -1f))
+        val certs = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get install -y -o Dpkg::Use-Pty=0 ca-certificates",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: ca-certificates:\n%s", certs.takeLast(2000))
+
+        writeMozillaAptSource(rootfs)
+        ensureMozillaKey(rootfs)
+        onProgress(Progress("Fetching Mozilla package lists", -1f))
+        val mozillaUpdate = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get update",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: mozilla apt-get update:\n%s", mozillaUpdate.takeLast(2000))
 
         applyAptPolicyPackages(context, rootfs, onProgress)
         LinuxProgramLauncher.runWithOutput(context, "apt-get clean", extraEnv = APT_ENV, timeoutSeconds = 120)
