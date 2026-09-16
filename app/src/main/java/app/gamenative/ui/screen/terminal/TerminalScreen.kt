@@ -68,19 +68,28 @@ fun TerminalScreen(onBack: () -> Unit) {
     var progress by remember { mutableStateOf<LinuxRootfs.Progress?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var installed by remember { mutableStateOf(LinuxRootfs.isInstalled(context)) }
-    var preparing by remember { mutableStateOf(false) }
+    // False until ensureDisplaySession finishes so Terminal never mounts in the gap between
+    // installed=true and preparing=true (that gap disposed the shell and called onBack).
+    var sessionReady by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(installed) }
 
     // Existing userlands skip install(), so Mozilla/nosnap apt policy would never land unless
     // we run the same ensure path the graphical session uses.
     LaunchedEffect(installed) {
-        if (!installed || !LinuxRootfs.isSupported()) return@LaunchedEffect
+        if (!installed || !LinuxRootfs.isSupported()) {
+            sessionReady = false
+            preparing = false
+            return@LaunchedEffect
+        }
         preparing = true
+        sessionReady = false
         LinuxRootfs.ensureDisplaySession(context) { progress = it }
             .onFailure {
                 Timber.w(it, "[TerminalScreen]: could not refresh Linux session packages")
             }
         progress = null
         preparing = false
+        sessionReady = true
     }
 
     Column(
@@ -100,15 +109,21 @@ fun TerminalScreen(onBack: () -> Unit) {
 
                 error != null -> Message(error!!)
 
-                installed -> Terminal(onSessionEnded = onBack)
+                installed && sessionReady -> Terminal(onSessionEnded = onBack)
 
                 else -> InstallPrompt(
                     onInstall = {
                         installing = true
                         error = null
+                        sessionReady = false
                         scope.launch {
                             LinuxRootfs.install(context) { progress = it }
-                                .onSuccess { installed = true }
+                                .onSuccess {
+                                    // Keep the progress UI up until LaunchedEffect's ensure finishes;
+                                    // flipping installed alone would mount Terminal for one frame.
+                                    preparing = true
+                                    installed = true
+                                }
                                 .onFailure { error = it.message ?: it.toString() }
                             installing = false
                         }
