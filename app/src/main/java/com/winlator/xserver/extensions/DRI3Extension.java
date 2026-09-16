@@ -239,36 +239,10 @@ public class DRI3Extension implements Extension {
         }
     }
 
-    /** LINEAR always; Intel tiled when the DRM node looks like i915/xe. */
+    /** LINEAR always until tiled AHB/Vk import is proven; advertising tiled made ANV
+     *  pick I915_FORMAT_MOD_4_TILED and Present went black (CreateImage aux mismatch). */
     private static long[] modifiersForRenderNode() {
-        String name = drmDriverName();
-        if (name != null) {
-            String lower = name.toLowerCase(java.util.Locale.US);
-            if (lower.contains("i915") || lower.contains("xe") || lower.contains("intel")) {
-                return SUPPORTED_MODIFIERS;
-            }
-        }
-        // Non-Intel: LINEAR only — tiled import is Intel-specific in this server.
         return new long[] { DRM_FORMAT_MOD_LINEAR };
-    }
-
-    private static String drmDriverName() {
-        java.io.File[] cards = new java.io.File("/sys/class/drm").listFiles();
-        if (cards != null) {
-            for (java.io.File f : cards) {
-                String n = f.getName();
-                if (!n.startsWith("renderD") && !n.startsWith("card")) continue;
-                java.io.File driver = new java.io.File(f, "device/driver");
-                try {
-                    String target = driver.getCanonicalPath();
-                    int slash = target.lastIndexOf('/');
-                    if (slash >= 0) return target.substring(slash + 1);
-                } catch (IOException ignored) {
-                }
-            }
-        }
-        // Bliss x86 often reports hardware=intel even when sysfs is sparse.
-        return android.os.Build.HARDWARE;
     }
 
     private static boolean isSupportedModifier(long modifier) {
@@ -346,8 +320,10 @@ public class DRI3Extension implements Extension {
         if (pixmapFromDmaBufAhb(client, pixmapId, width, height, stride, depth, fd, drmFormat, modifier)) {
             return;
         }
-        // Vulkan dma-buf import when the renderer probed EXT_external_memory_dma_buf.
-        if (com.winlator.renderer.VulkanRenderer.isDmaBufImportSupported()
+        // Vk dma-buf import is LINEAR-only for now: tiled modifiers fail CreateImage with
+        // ANV "wrong aux usage" and leave a blank Present path.
+        if (modifier == DRM_FORMAT_MOD_LINEAR
+                && com.winlator.renderer.VulkanRenderer.isDmaBufImportSupported()
                 && pixmapFromDmaBufVk(client, pixmapId, width, height, stride, depth, fd, drmFormat, modifier)) {
             return;
         }
