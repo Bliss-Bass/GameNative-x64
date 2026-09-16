@@ -65,6 +65,10 @@ the utility sandbox blocks dlopen of system ffmpeg and tabs still report no AAC 
 Audio must remain in the utility process; disabling it makes play fail with
 `NS_ERROR_DOM_MEDIA_DENIED_IN_NON_UTILITY` (RDD cannot decode audio).
 
+Widevine/EME is enabled by default via `distribution/policies.json`
+(`EncryptedMediaExtensions`) and `defaults/pref/gamenative-media.js`. Firefox still
+downloads the proprietary CDM on first use; until then DRM sites may show as unsupported.
+
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
 

@@ -453,6 +453,23 @@ object LinuxRootfs {
             pref("media.rdd-ffmpeg.enabled", true);
             pref("media.ffvpx.enabled", true);
             pref("media.utility-process.enabled", true);
+            // Widevine / EME: without this Firefox waits for an "Enable DRM" click, and DRM
+            // demos report EME unsupported until the CDM is installed.
+            pref("media.eme.enabled", true);
+            pref("media.gmp-widevinecdm.enabled", true);
+            pref("media.gmp-widevinecdm.visible", true);
+            pref("media.gmp-manager.updateEnabled", true);
+            """.trimIndent() + "\n"
+
+        val policies = """
+            {
+              "policies": {
+                "EncryptedMediaExtensions": {
+                  "Enabled": true,
+                  "Locked": true
+                }
+              }
+            }
             """.trimIndent() + "\n"
 
         for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
@@ -469,6 +486,8 @@ object LinuxRootfs {
             }
             val prefDir = File(appDir, "defaults/pref").apply { mkdirs() }
             File(prefDir, "gamenative-media.js").writeText(prefs)
+            val distDir = File(appDir, "distribution").apply { mkdirs() }
+            File(distDir, "policies.json").writeText(policies)
         }
     }
 
