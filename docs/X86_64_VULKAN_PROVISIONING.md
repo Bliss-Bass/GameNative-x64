@@ -415,3 +415,10 @@ Ship a Custom Game that boots the X server and runs Termux `vkcube` natively (no
 See [tools/vkcube-debug-container/README.md](../tools/vkcube-debug-container/README.md). Set
 Frame presentation to Direct (DRI3) or `debug.gamenative.presentation=dri3`, launch
 **vkcube-debug**, and watch `DRI3` logcat for AHB / Vulkan dma-buf / LINEAR fallback.
+
+## LSFG-VK on DRI3
+
+Once Direct (DRI3) presents are healthy (`importDmaBufToWinTex: ok … mod=0x0`), enable
+LSFG on a Bionic Steam game (Lossless Scaling owned). Expect `LsfgVkManager: LSFG armed`
+at launch and `files/imagefs*/home/xuser-*/.config/lsfg-vk/stats.txt` with
+`fps ≈ base × multiplier` and low `gen_skips`. See [BLISS-X64.md](BLISS-X64.md).

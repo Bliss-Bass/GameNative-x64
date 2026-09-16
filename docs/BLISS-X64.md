@@ -25,6 +25,18 @@ ships x86_64 redirect binaries.
 
 See [ax86-graphics.md](ax86-graphics.md) for Mesa/Vulkan boot props on Lineout images.
 
+## LSFG-VK (frame generation) on x86_64
+
+Bionic containers can arm Lossless Scaling FG on Mesa (Intel/AMD). Rebuild the layer with
+`./scripts/build-x86_64-lsfg.sh` (submodule `lsfg-vk-android` at **v1.0.4-android**); the
+APK ships `liblsfg-vk-layer.so` under `modernX64/jniLibs/x86_64/` plus
+`assets/lsfg_vk/android_x86_64/`.
+
+Requirements: Bionic container, Graphics → enable LSFG, Steam app **993090**
+(`Lossless.dll`) installed. Launch logs `LsfgVkManager: LSFG armed…`; live proof is
+`~/.config/lsfg-vk/stats.txt` (`fps` ≈ `base` × multiplier). Prefer DRI3 presents
+(`debug.gamenative.presentation=dri3`) so FG frames stay cheap.
+
 ## Upstream
 
 Contribute `HostCpu`, launcher branches, and CI in small PRs to
