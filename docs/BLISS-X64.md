@@ -62,6 +62,8 @@ open but never start playback. `ffmpeg` is installed so Firefox can decode AAC
 (`audio/mp4a-latm`) and other codecs it does not ship itself. Firefox children also need
 `MOZ_DISABLE_UTILITY_SANDBOX=1` and libavcodec symlinks under `/usr/lib/firefox` — otherwise
 the utility sandbox blocks dlopen of system ffmpeg and tabs still report no AAC decoder.
+Audio must remain in the utility process; disabling it makes play fail with
+`NS_ERROR_DOM_MEDIA_DENIED_IN_NON_UTILITY` (RDD cannot decode audio).
 
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.

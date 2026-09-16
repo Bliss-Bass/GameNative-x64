@@ -434,6 +434,10 @@ object LinuxRootfs {
      * may never successfully link `libavcodec.so.60` from `/usr/lib/x86_64-linux-gnu`, so
      * YouTube keeps failing with `no decoder found for audio/mp4a-latm` after `ffmpeg` is
      * installed. Symlinks into the app dir and a defaults pref close that gap.
+     *
+     * Audio decoding must stay in the utility process (`media.utility-process.enabled`);
+     * Firefox 15x rejects RDD audio with `NS_ERROR_DOM_MEDIA_DENIED_IN_NON_UTILITY`. The
+     * utility sandbox is disabled separately via `MOZ_DISABLE_UTILITY_SANDBOX`.
      */
     private fun ensureFirefoxMediaCodecs(rootfs: File) {
         val codec = File(rootfs, "usr/lib/x86_64-linux-gnu/libavcodec.so.60")
@@ -448,7 +452,7 @@ object LinuxRootfs {
             pref("media.ffmpeg.enabled", true);
             pref("media.rdd-ffmpeg.enabled", true);
             pref("media.ffvpx.enabled", true);
-            pref("media.utility-process.enabled", false);
+            pref("media.utility-process.enabled", true);
             """.trimIndent() + "\n"
 
         for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
