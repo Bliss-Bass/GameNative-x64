@@ -69,9 +69,12 @@ object LinuxRootfs {
      *   draws through Xft have to be present or clients fail to start on a missing font.
      * - ca-certificates is required before any HTTPS APT source (Mozilla) can be fetched:
      *   ubuntu-base ships none, and apt-get update against packages.mozilla.org fails without it.
+     * - dbus-x11 provides dbus-launch. Firefox warns (and a11y fails) without a session bus
+     *   helper; Recommends are off so nothing else pulls it in.
      */
     private val DISPLAY_PACKAGES = listOf(
         "ca-certificates",
+        "dbus-x11",
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
@@ -109,6 +112,7 @@ object LinuxRootfs {
         "usr/bin/xsetroot",
         "usr/bin/wmctrl",
         "usr/bin/xprop",
+        "usr/bin/dbus-launch",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 

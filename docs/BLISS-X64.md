@@ -50,6 +50,11 @@ Opening a Linux session applies the policy once (stamp `.apt_policy_version`) an
 the real Firefox `.deb` so it shows up in the Apps list. Chromium has no equivalent
 Mozilla/Ubuntu deb — use Firefox, or install a third-party Chromium/Chrome deb yourself.
 
+Browsing under PRoot also needs Firefox's content sandbox off: user namespaces / seccomp are
+not available, and content processes otherwise SIGSEGV (`MOZ_DISABLE_CONTENT_SANDBOX=1` is set
+in the guest env). `dbus-x11` is installed so `dbus-launch` exists for GTK/Firefox session bus
+setup.
+
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
 

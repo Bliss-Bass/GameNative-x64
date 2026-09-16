@@ -103,6 +103,13 @@ object LinuxProgramLauncher {
             // Toolkits refuse to start without a runtime dir and otherwise warn on every launch.
             put("XDG_RUNTIME_DIR", "/tmp")
             if (hasDisplay) put("DISPLAY", ":0")
+            // Firefox (and Chromium-family browsers) spawn content processes behind a Linux
+            // user-namespace / seccomp sandbox. Under PRoot those helpers SIGSEGV immediately,
+            // so tabs open but never load. The sandbox cannot work here; disable it for the
+            // whole graphical guest rather than special-casing browser argv.
+            put("MOZ_DISABLE_CONTENT_SANDBOX", "1")
+            put("MOZ_DISABLE_GMP_SANDBOX", "1")
+            put("MOZ_DISABLE_RDD_SANDBOX", "1")
             putAll(extraEnv)
         }
 
