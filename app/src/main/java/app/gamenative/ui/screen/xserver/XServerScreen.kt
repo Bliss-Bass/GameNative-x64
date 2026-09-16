@@ -135,6 +135,7 @@ import app.gamenative.utils.HostBionicLibs
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.HostGraphicsEnv
 import app.gamenative.utils.HostDisplayEnv
+import app.gamenative.utils.NativePresentTest
 import app.gamenative.utils.PointerCaptureCompat
 import app.gamenative.utils.BlissPortDebug
 import app.gamenative.utils.GameSessionMemory
@@ -4009,6 +4010,35 @@ private fun setupXEnvironment(
             xServer.screenInfo.toString(),
             containerVariantChanged,
         )
+
+        // Native DRI3 smoke: CustomGames/vkcube-debug/vkcube — skip Wine, run the Android ELF.
+        val presentTestFolder = if (gameSource == GameSource.CUSTOM_GAME) {
+            Container.drivesIterator(container.drives).asSequence()
+                .firstOrNull { it[0] == "A" }?.get(1)
+        } else null
+        val presentTestSource = presentTestFolder
+            ?.takeIf { NativePresentTest.isPresentTestContainer(container, it) }
+            ?.let { NativePresentTest.findVkcubeInFolder(java.io.File(it)) }
+        val presentTestVkcube = presentTestSource?.let { NativePresentTest.ensureRunnable(context, it) }
+        if (presentTestVkcube != null) {
+            val dims = container.screenSize.split("x")
+            val w = dims.getOrNull(0)?.toIntOrNull() ?: 1280
+            val h = dims.getOrNull(1)?.toIntOrNull() ?: 800
+            NativePresentTest.applyLaunchOverride(envVars, presentTestVkcube, w, h, frameCount = 0)
+            if (container.executablePath.isEmpty()) {
+                container.executablePath = NativePresentTest.EXECUTABLE_PATH
+                container.saveData()
+            }
+            preInstallCommands = emptyList()
+            // Unused when GUEST_PROGRAM_LAUNCHER_COMMAND is set; keep a harmless placeholder.
+            gameExecutable = "true"
+            Timber.tag("XServerScreen").i(
+                "Native present test: launching %s at %dx%d (DRI3/path=%s)",
+                presentTestVkcube.absolutePath, w, h,
+                PrefManager.presentationPath.key,
+            )
+        }
+
         guestProgramLauncherComponent.guestExecutable =
             preInstallCommands.firstOrNull()?.executable ?: gameExecutable
         guestProgramLauncherComponent.isWoW64Mode = wow64Mode
@@ -4028,6 +4058,14 @@ private fun setupXEnvironment(
         if (HostCpu.current().isX86_64) {
             HostDisplayEnv.applyForX86_64Guest(envVars, imageFs)
             HostBionicLibs.applyGuestVulkanEnv(envVars, context)
+        }
+
+        // Re-apply after container envVars merge so a stale MESA_VK_WSI_DEBUG cannot stick.
+        if (presentTestVkcube != null) {
+            val dims = container.screenSize.split("x")
+            val w = dims.getOrNull(0)?.toIntOrNull() ?: 1280
+            val h = dims.getOrNull(1)?.toIntOrNull() ?: 800
+            NativePresentTest.applyLaunchOverride(envVars, presentTestVkcube, w, h, frameCount = 0)
         }
 
         if (gameSource == GameSource.STEAM) {

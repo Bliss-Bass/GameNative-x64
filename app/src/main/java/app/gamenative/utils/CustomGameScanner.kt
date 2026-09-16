@@ -421,8 +421,17 @@ object CustomGameScanner {
         return findUniqueExeRelativeToFolder(gameFolderPath) ?: ""
     }
 
+    /** True when this custom-game folder is the DRI3 vkcube smoke package. */
+    fun isNativePresentTestFolder(folderPath: String): Boolean =
+        NativePresentTest.findVkcubeInFolder(File(folderPath)) != null
+
     fun findUniqueExeRelativeToFolder(folder: File): String? {
         if (!folder.exists() || !folder.isDirectory) return null
+
+        // Native DRI3 smoke binary — preferred over any incidental .exe in the folder.
+        if (NativePresentTest.findVkcubeInFolder(folder) != null) {
+            return NativePresentTest.EXECUTABLE_PATH
+        }
 
         fun File.isValidExe(): Boolean = this.isFile && this.name.endsWith(".exe", ignoreCase = true) &&
             !this.name.startsWith("unins", ignoreCase = true)

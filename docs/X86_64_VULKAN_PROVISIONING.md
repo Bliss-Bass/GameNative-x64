@@ -403,3 +403,15 @@ clearly visible in `vkcube` (57.7 fps shared memory vs 44.1 fps over the socket,
 
 So the presentation work is worth continuing for headroom, not for HL2's menu frame rate, and a
 DRI3 comparison should be made with `vkcube` rather than a game.
+
+### vkcube-debug custom game (recommended)
+
+Ship a Custom Game that boots the X server and runs Termux `vkcube` natively (no Wine):
+
+```bash
+./tools/vkcube-debug-container/install.sh <device-serial>
+```
+
+See [tools/vkcube-debug-container/README.md](../tools/vkcube-debug-container/README.md). Set
+Frame presentation to Direct (DRI3) or `debug.gamenative.presentation=dri3`, launch
+**vkcube-debug**, and watch `DRI3` logcat for AHB / Vulkan dma-buf / LINEAR fallback.
