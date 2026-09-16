@@ -59,7 +59,9 @@ Audio for Linux apps uses the same bionic PulseAudio + AAudio sink as games: the
 socket is created at `{rootfs}/tmp/.sound/PS0`, `PULSE_SERVER` is set in the guest, and
 `libpulse0` is installed so Cubeb can connect. Without that bridge, YouTube and similar sites
 open but never start playback. `ffmpeg` is installed so Firefox can decode AAC
-(`audio/mp4a-latm`) and other codecs it does not ship itself.
+(`audio/mp4a-latm`) and other codecs it does not ship itself. Firefox children also need
+`MOZ_DISABLE_UTILITY_SANDBOX=1` and libavcodec symlinks under `/usr/lib/firefox` — otherwise
+the utility sandbox blocks dlopen of system ffmpeg and tabs still report no AAC decoder.
 
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.

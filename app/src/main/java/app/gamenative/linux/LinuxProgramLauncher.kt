@@ -110,6 +110,10 @@ object LinuxProgramLauncher {
             put("MOZ_DISABLE_CONTENT_SANDBOX", "1")
             put("MOZ_DISABLE_GMP_SANDBOX", "1")
             put("MOZ_DISABLE_RDD_SANDBOX", "1")
+            // Utility process is where Firefox 15x may try media codecs; its sandbox blocks
+            // dlopen of system libavcodec, so AAC (YouTube) fails with "no decoder found"
+            // even when ffmpeg is installed and the RDD process has already mapped it.
+            put("MOZ_DISABLE_UTILITY_SANDBOX", "1")
             // Host AAudio Pulse daemon; see [LinuxPulse]. Without this Cubeb falls through to
             // ALSA against Android's /dev/snd and media that needs an audio clock never starts.
             put("PULSE_SERVER", LinuxPulse.GUEST_SERVER)

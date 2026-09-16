@@ -423,6 +423,49 @@ object LinuxRootfs {
         LinuxDesktopConfig.writeWindowManagerConfigs(rootfs)
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
         writeXdefaults(rootfs)
+        ensureFirefoxMediaCodecs(rootfs)
+    }
+
+    /**
+     * Makes system libavcodec visible to Firefox content/utility children and forces the
+     * OS FFmpeg path for AAC.
+     *
+     * Those children set `LD_LIBRARY_PATH=/usr/lib/firefox` and (with the utility sandbox)
+     * may never successfully link `libavcodec.so.60` from `/usr/lib/x86_64-linux-gnu`, so
+     * YouTube keeps failing with `no decoder found for audio/mp4a-latm` after `ffmpeg` is
+     * installed. Symlinks into the app dir and a defaults pref close that gap.
+     */
+    private fun ensureFirefoxMediaCodecs(rootfs: File) {
+        val codec = File(rootfs, "usr/lib/x86_64-linux-gnu/libavcodec.so.60")
+        if (!codec.exists()) return
+
+        val libs = listOf(
+            "libavcodec.so.60" to "/usr/lib/x86_64-linux-gnu/libavcodec.so.60",
+            "libavutil.so.58" to "/usr/lib/x86_64-linux-gnu/libavutil.so.58",
+            "libswresample.so.4" to "/usr/lib/x86_64-linux-gnu/libswresample.so.4",
+        )
+        val prefs = """
+            pref("media.ffmpeg.enabled", true);
+            pref("media.rdd-ffmpeg.enabled", true);
+            pref("media.ffvpx.enabled", true);
+            pref("media.utility-process.enabled", false);
+            """.trimIndent() + "\n"
+
+        for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
+            val appDir = File(rootfs, dirName)
+            if (!appDir.isDirectory) continue
+            for ((name, target) in libs) {
+                val link = File(appDir, name)
+                if (link.exists()) continue
+                runCatching {
+                    java.nio.file.Files.createSymbolicLink(link.toPath(), java.nio.file.Paths.get(target))
+                }.onFailure {
+                    Timber.w(it, "[LinuxRootfs]: could not link %s into %s", name, dirName)
+                }
+            }
+            val prefDir = File(appDir, "defaults/pref").apply { mkdirs() }
+            File(prefDir, "gamenative-media.js").writeText(prefs)
+        }
     }
 
     /**
