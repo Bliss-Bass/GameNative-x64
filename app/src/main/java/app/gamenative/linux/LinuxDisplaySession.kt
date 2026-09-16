@@ -161,51 +161,57 @@ class LinuxDisplaySession private constructor(
         )
         clearStaleDisplay()
 
-        // -localhost so the desktop is not reachable from the network: this is a transport
-        // between two processes on one device, not a remote desktop.
-        server = start(
-            "/usr/bin/Xtigervnc :$display" +
-                " -geometry ${width}x$height" +
-                " -depth 24" +
-                " -dpi $dpi" +
-                " -rfbport $port" +
-                " -SecurityTypes None" +
-                " -localhost" +
-                " -AlwaysShared" +
-                " -desktop gamenative",
-            tag = "Xtigervnc",
-        ) ?: throw IOException("Could not start the X server")
+        // Audio before any client that might open Cubeb/Pulse (browsers, media players).
+        LinuxPulse.acquire(context)
+        try {
+            // -localhost so the desktop is not reachable from the network: this is a transport
+            // between two processes on one device, not a remote desktop.
+            server = start(
+                "/usr/bin/Xtigervnc :$display" +
+                    " -geometry ${width}x$height" +
+                    " -depth 24" +
+                    " -dpi $dpi" +
+                    " -rfbport $port" +
+                    " -SecurityTypes None" +
+                    " -localhost" +
+                    " -AlwaysShared" +
+                    " -desktop gamenative",
+                tag = "Xtigervnc",
+            ) ?: throw IOException("Could not start the X server")
 
-        awaitGreeting()
+            awaitGreeting()
 
-        val desktop = mode == LinuxDesktopConfig.Mode.DESKTOP
-        val rc = if (desktop) LinuxDesktopConfig.DESKTOP_RC else LinuxDesktopConfig.APP_RC
+            val desktop = mode == LinuxDesktopConfig.Mode.DESKTOP
+            val rc = if (desktop) LinuxDesktopConfig.DESKTOP_RC else LinuxDesktopConfig.APP_RC
 
-        // Built from what is installed right now, since apt runs in our own terminal.
-        if (desktop) {
-            LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context))
+            // Built from what is installed right now, since apt runs in our own terminal.
+            if (desktop) {
+                LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context))
+            }
+
+            // Started after the server is up: they all connect to it, and none of them retries.
+            wm = start("/usr/bin/openbox --config-file $rc", tag = "openbox")
+            settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
+
+            // Only for an application, whose window is the Android window and should fill it. On a
+            // desktop, a window that asked to be small is one the user can move and resize.
+            if (!desktop) {
+                fitter = start("/bin/sh ${LinuxDesktopConfig.FIT_WINDOWS}", tag = "fit-windows")
+            }
+
+            if (desktop) {
+                // Not left to the X server, whose idea of an unset root window is a monochrome
+                // weave. Runs and exits, so it is not one of the processes we hold on to.
+                start("/usr/bin/xsetroot -solid ${LinuxDesktopConfig.BACKGROUND}", tag = "xsetroot")
+                panel = start("/usr/bin/tint2 -c ${LinuxDesktopConfig.PANEL_RC}", tag = "tint2")
+            }
+
+            isRunning = true
+            Timber.i("[LinuxDisplaySession]: display :%d ready (%s)", display, mode.name.lowercase())
+        } catch (t: Throwable) {
+            LinuxPulse.release(context)
+            throw t
         }
-
-
-        // Started after the server is up: they all connect to it, and none of them retries.
-        wm = start("/usr/bin/openbox --config-file $rc", tag = "openbox")
-        settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
-
-        // Only for an application, whose window is the Android window and should fill it. On a
-        // desktop, a window that asked to be small is one the user can move and resize.
-        if (!desktop) {
-            fitter = start("/bin/sh ${LinuxDesktopConfig.FIT_WINDOWS}", tag = "fit-windows")
-        }
-
-        if (desktop) {
-            // Not left to the X server, whose idea of an unset root window is a monochrome
-            // weave. Runs and exits, so it is not one of the processes we hold on to.
-            start("/usr/bin/xsetroot -solid ${LinuxDesktopConfig.BACKGROUND}", tag = "xsetroot")
-            panel = start("/usr/bin/tint2 -c ${LinuxDesktopConfig.PANEL_RC}", tag = "tint2")
-        }
-
-        isRunning = true
-        Timber.i("[LinuxDisplaySession]: display :%d ready (%s)", display, mode.name.lowercase())
     }
 
     /**
@@ -364,6 +370,7 @@ class LinuxDisplaySession private constructor(
 
         clearStaleDisplay()
         release(port)
+        LinuxPulse.release(context)
         Timber.i("[LinuxDisplaySession]: display :%d stopped", display)
     }
 }

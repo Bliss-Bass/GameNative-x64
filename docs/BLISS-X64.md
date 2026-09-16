@@ -55,6 +55,11 @@ not available, and content processes otherwise SIGSEGV (`MOZ_DISABLE_CONTENT_SAN
 in the guest env). `dbus-x11` is installed so `dbus-launch` exists for GTK/Firefox session bus
 setup.
 
+Audio for Linux apps uses the same bionic PulseAudio + AAudio sink as games: the daemon's
+socket is created at `{rootfs}/tmp/.sound/PS0`, `PULSE_SERVER` is set in the guest, and
+`libpulse0` is installed so Cubeb can connect. Without that bridge, YouTube and similar sites
+open but never start playback.
+
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
 

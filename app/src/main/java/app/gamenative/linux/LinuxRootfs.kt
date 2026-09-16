@@ -71,10 +71,13 @@ object LinuxRootfs {
      *   ubuntu-base ships none, and apt-get update against packages.mozilla.org fails without it.
      * - dbus-x11 provides dbus-launch. Firefox warns (and a11y fails) without a session bus
      *   helper; Recommends are off so nothing else pulls it in.
+     * - libpulse0 is the Cubeb/Pulse client. The server is the host AAudio daemon ([LinuxPulse]);
+     *   without the client library Firefox never reaches it and YouTube stalls with no playback.
      */
     private val DISPLAY_PACKAGES = listOf(
         "ca-certificates",
         "dbus-x11",
+        "libpulse0",
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
@@ -113,6 +116,7 @@ object LinuxRootfs {
         "usr/bin/wmctrl",
         "usr/bin/xprop",
         "usr/bin/dbus-launch",
+        "usr/lib/x86_64-linux-gnu/libpulse.so.0",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 
