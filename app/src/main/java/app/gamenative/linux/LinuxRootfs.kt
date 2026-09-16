@@ -33,6 +33,19 @@ object LinuxRootfs {
     private const val LAYOUT_VERSION = 4
 
     /**
+     * Bump when Mozilla/nosnap apt policy files change. Applied without re-unpacking the
+     * rootfs: [ensureDisplaySession] rewrites the files and, when the stamp advances, runs
+     * apt once to drop snap stubs and prefer Mozilla's firefox deb.
+     */
+    private const val APT_POLICY_VERSION = 1
+
+    private const val MOZILLA_KEY_URL = "https://packages.mozilla.org/apt/repo-signing-key.gpg"
+    private const val MOZILLA_KEY_PATH = "etc/apt/keyrings/packages.mozilla.org.asc"
+    private const val MOZILLA_SOURCES_PATH = "etc/apt/sources.list.d/mozilla.sources"
+    private const val MOZILLA_PIN_PATH = "etc/apt/preferences.d/mozilla"
+    private const val NOSNAP_PIN_PATH = "etc/apt/preferences.d/nosnap"
+
+    /**
      * What the graphical session is built from. All of it comes from apt, which is the
      * point of running a glibc userland: none of it has to be cross-compiled for bionic.
      *
@@ -113,6 +126,9 @@ object LinuxRootfs {
 
     private fun stampFile(context: Context): File = File(rootDir(context), ".rootfs_version")
 
+    private fun aptPolicyStampFile(context: Context): File =
+        File(rootDir(context), ".apt_policy_version")
+
     fun isSupported(): Boolean = Build.SUPPORTED_ABIS.contains("x86_64")
 
     fun isInstalled(context: Context): Boolean =
@@ -184,6 +200,7 @@ object LinuxRootfs {
                 // small files, and it is how a change to them reaches a userland that is
                 // otherwise complete.
                 configureSession(context, rootfs)
+                ensureAptPolicy(context, rootfs, onProgress)
             } else {
                 Timber.i("[LinuxRootfs]: completing the graphical session install")
                 installDisplaySession(context, rootfs, onProgress)
@@ -202,6 +219,7 @@ object LinuxRootfs {
         LinuxAppReconciler.retireAll(context)
 
         stampFile(context).delete()
+        aptPolicyStampFile(context).delete()
         rootfsDir(context).deleteRecursively()
     }
 
@@ -321,6 +339,11 @@ object LinuxRootfs {
      * so "installed" stays a single question.
      */
     private fun installDisplaySession(context: Context, rootfs: File, onProgress: (Progress) -> Unit) {
+        // Mozilla/nosnap sources before the first apt-get update so firefox resolves to a
+        // real deb rather than Ubuntu's snap transitional package.
+        writeAptPolicyFiles(rootfs)
+        ensureMozillaKey(rootfs)
+
         onProgress(Progress("Fetching package lists", -1f))
         // The base image ships no package lists at all, so this is not optional.
         val update = LinuxProgramLauncher.runWithOutput(
@@ -352,6 +375,9 @@ object LinuxRootfs {
             timeoutSeconds = 1800,
         )
         Timber.i("[LinuxRootfs]: apt-get install:\n%s", install.takeLast(4000))
+
+        applyAptPolicyPackages(context, rootfs, onProgress)
+        aptPolicyStampFile(context).writeText(APT_POLICY_VERSION.toString())
 
         // The .debs are no use once unpacked, and this reclaims a hundred megabytes or so
         // of the app's storage.
@@ -487,10 +513,142 @@ object LinuxRootfs {
             """.trimIndent() + "\n",
         )
 
+        // Static apt policy (Mozilla + no-snap). The signing key is fetched later in
+        // [ensureAptPolicy] once the network is known to be available.
+        writeAptPolicyFiles(rootfs)
+
         // Directories PRoot binds over or the guest expects to exist.
         for (dir in listOf("dev", "proc", "sys", "tmp", "root", "run")) {
             File(rootfs, dir).mkdirs()
         }
         chmod(File(rootfs, "tmp"), 511) // 0777
+    }
+
+    /**
+     * Writes Mozilla's APT source and pins that keep Ubuntu's snap transitional
+     * `firefox` / `chromium-browser` packages from winning. Snap itself is held off so
+     * `apt install firefox` yields a real `.deb` with a desktop entry the Apps list can see.
+     */
+    private fun writeAptPolicyFiles(rootfs: File) {
+        File(rootfs, "etc/apt/keyrings").mkdirs()
+        File(rootfs, "etc/apt/sources.list.d").mkdirs()
+        File(rootfs, "etc/apt/preferences.d").mkdirs()
+
+        File(rootfs, MOZILLA_SOURCES_PATH).writeText(
+            """
+            Types: deb
+            URIs: https://packages.mozilla.org/apt
+            Suites: mozilla
+            Components: main
+            Architectures: amd64
+            Signed-By: /$MOZILLA_KEY_PATH
+            """.trimIndent() + "\n",
+        )
+
+        File(rootfs, MOZILLA_PIN_PATH).writeText(
+            """
+            Package: *
+            Pin: origin packages.mozilla.org
+            Pin-Priority: 1001
+            """.trimIndent() + "\n",
+        )
+
+        // Negative pins beat Ubuntu's transitional snap stubs and keep snapd itself out.
+        File(rootfs, NOSNAP_PIN_PATH).writeText(
+            """
+            Package: snapd
+            Pin: release a=*
+            Pin-Priority: -10
+
+            Package: firefox
+            Pin: release o=Ubuntu
+            Pin-Priority: -10
+
+            Package: chromium-browser
+            Pin: release o=Ubuntu
+            Pin-Priority: -10
+            """.trimIndent() + "\n",
+        )
+    }
+
+    /**
+     * Ensures Mozilla/nosnap apt policy is on disk and, when the policy stamp advances,
+     * refreshes apt and replaces snap transitional browsers with Mozilla's firefox deb.
+     *
+     * Safe to call on every session start: rewriting the files is cheap, and the apt work
+     * only runs when [APT_POLICY_VERSION] changes.
+     */
+    private fun ensureAptPolicy(
+        context: Context,
+        rootfs: File,
+        onProgress: (Progress) -> Unit = {},
+    ) {
+        writeAptPolicyFiles(rootfs)
+        ensureMozillaKey(rootfs)
+
+        val stamp = aptPolicyStampFile(context)
+        val installed = stamp.takeIf { it.isFile }?.readText()?.trim().orEmpty()
+        if (installed == APT_POLICY_VERSION.toString()) return
+
+        onProgress(Progress("Configuring package sources", -1f))
+        val update = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get update",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: apt policy update:\n%s", update.takeLast(2000))
+
+        applyAptPolicyPackages(context, rootfs, onProgress)
+        LinuxProgramLauncher.runWithOutput(context, "apt-get clean", extraEnv = APT_ENV, timeoutSeconds = 120)
+        stamp.writeText(APT_POLICY_VERSION.toString())
+    }
+
+    /**
+     * Purges snapd / Ubuntu snap-stub browsers and installs Mozilla Firefox so the Apps
+     * list gets a real `.desktop` entry.
+     */
+    private fun applyAptPolicyPackages(
+        context: Context,
+        rootfs: File,
+        onProgress: (Progress) -> Unit,
+    ) {
+        onProgress(Progress("Removing snap packages", -1f))
+        val purge = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get remove -y --purge -o Dpkg::Use-Pty=0 snapd firefox chromium-browser",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        Timber.i("[LinuxRootfs]: snap purge:\n%s", purge.takeLast(2000))
+        for (leftover in listOf("snap", "var/snap", "var/lib/snapd")) {
+            File(rootfs, leftover).deleteRecursively()
+        }
+
+        onProgress(Progress("Installing Firefox from Mozilla", -1f))
+        val firefox = LinuxProgramLauncher.runWithOutput(
+            context,
+            "apt-get install -y -o Dpkg::Use-Pty=0 firefox",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 1800,
+        )
+        Timber.i("[LinuxRootfs]: mozilla firefox:\n%s", firefox.takeLast(2000))
+    }
+
+    /** Fetches Mozilla's APT signing key into the rootfs when missing or empty. */
+    private fun ensureMozillaKey(rootfs: File) {
+        val key = File(rootfs, MOZILLA_KEY_PATH)
+        if (key.isFile && key.length() > 0L) return
+        key.parentFile?.mkdirs()
+        val client = OkHttpClient()
+        val response = client.newCall(Request.Builder().url(MOZILLA_KEY_URL).build()).execute()
+        response.use {
+            if (!it.isSuccessful) {
+                throw IOException("Mozilla APT key download failed: HTTP ${it.code}")
+            }
+            key.outputStream().use { out -> it.body.byteStream().copyTo(out) }
+        }
+        chmod(key, 420) // 0644
+        Timber.i("[LinuxRootfs]: wrote Mozilla APT key (%d bytes)", key.length())
     }
 }

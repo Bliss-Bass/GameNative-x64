@@ -2494,7 +2494,7 @@
     <string name="linux_apps_unsupported">Linux apps require an x86_64 device.</string>
     <string name="linux_apps_not_installed">A Linux userland is needed before apps can be installed. Set it up in the Linux terminal, then install apps with apt.</string>
     <string name="linux_apps_open_terminal">Open terminal</string>
-    <string name="linux_apps_empty">No Linux apps are installed yet. Install some with apt in the Linux terminal — anything with a desktop entry appears here.</string>
+    <string name="linux_apps_empty">No Linux apps are installed yet. In the Linux terminal run apt install firefox (Mozilla\'s APT is already configured). Snap packages will not appear here.</string>
     <string name="linux_apps_refresh">Refresh</string>
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
     <string name="linux_apps_pin">Add to home screen</string>

@@ -95,6 +95,11 @@ object LinuxAppScanner {
         for (dir in APPLICATION_DIRS) {
             val files = File(rootfs, dir).listFiles { file -> file.extension == "desktop" } ?: continue
             for (file in files) {
+                // Snap's own helpers are not apps the user asked to launch, and Ubuntu's
+                // snap-stub browser packages ship NoDisplay entries that only confuse.
+                if (file.name.startsWith("snap-") || file.name.startsWith("io.snapcraft.")) {
+                    continue
+                }
                 val app = runCatching { parse(file.readText(), rootfs) }
                     .onFailure { Timber.w(it, "[LinuxAppScanner]: could not read %s", file.name) }
                             .getOrNull() ?: continue

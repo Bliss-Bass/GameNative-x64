@@ -37,6 +37,18 @@ Requirements: Bionic container, Graphics → enable LSFG, Steam app **993090**
 `~/.config/lsfg-vk/stats.txt` (`fps` ≈ `base` × multiplier). Prefer DRI3 presents
 (`debug.gamenative.presentation=dri3`) so FG frames stay cheap.
 
+## Linux Apps and browsers
+
+Ubuntu's archive `firefox` / `chromium-browser` packages are **snap transitional stubs**
+(`NoDisplay` desktop entries, `/usr/bin/firefox` only wraps `/snap/bin/firefox`). Snap does
+not work under our PRoot session, so those installs never appear in Linux Apps.
+
+The rootfs therefore ships Mozilla's APT source (`packages.mozilla.org`) by default, pins
+it above Ubuntu, and holds `snapd` / the transitional stubs at priority -10. Opening a
+Linux session applies the policy once (stamp `.apt_policy_version`) and installs the real
+Firefox `.deb` so it shows up in the Apps list. Chromium has no equivalent Mozilla/Ubuntu
+deb — use Firefox, or install a third-party Chromium/Chrome deb yourself.
+
 ## Upstream
 
 Contribute `HostCpu`, launcher branches, and CI in small PRs to
