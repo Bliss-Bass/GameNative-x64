@@ -2496,6 +2496,11 @@
     <string name="linux_apps_open_terminal">Open terminal</string>
     <string name="linux_apps_empty">No Linux apps are installed yet. In the Linux terminal run apt install firefox (Mozilla\'s APT is already configured). Snap packages will not appear here.</string>
     <string name="linux_apps_refresh">Refresh</string>
+    <string name="linux_apps_reset">Reset Linux environment</string>
+    <string name="linux_apps_reset_title">Reset Linux environment?</string>
+    <string name="linux_apps_reset_message">Deletes the Linux userland and all packages installed with apt. You will need to set it up again from the terminal.</string>
+    <string name="linux_apps_reset_confirm">Reset</string>
+    <string name="linux_apps_resetting">Removing Linux environment…</string>
     <string name="linux_apps_terminal_app">Runs in a terminal</string>
     <string name="linux_apps_pin">Add to home screen</string>
     <string name="linux_session_mode_title">When a Linux app is closed</string>

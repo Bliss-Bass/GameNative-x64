@@ -16,11 +16,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -29,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -90,6 +93,8 @@ fun LinuxAppsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
+    var confirmReset by remember { mutableStateOf(false) }
+    var resetting by remember { mutableStateOf(false) }
 
     // Which applications are up. Collected rather than read once: a session can end on its own
     // when the last window in it exits, and the row's controls must not outlive it.
@@ -115,30 +120,72 @@ fun LinuxAppsScreen(
         withContext(Dispatchers.IO) { LinuxAppReconciler.reconcile(context, found) }
     }
 
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { if (!resetting) confirmReset = false },
+            title = { Text(stringResource(R.string.linux_apps_reset_title)) },
+            text = { Text(stringResource(R.string.linux_apps_reset_message)) },
+            confirmButton = {
+                TextButton(
+                    enabled = !resetting,
+                    onClick = {
+                        resetting = true
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                LinuxSessions.stopAll(context)
+                                LinuxRootfs.uninstall(context)
+                            }
+                            resetting = false
+                            confirmReset = false
+                            refreshKey++
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.linux_apps_reset_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !resetting, onClick = { confirmReset = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .pluviaTopSafeAreaPadding(),
     ) {
-        val onRefresh: (() -> Unit)? =
-            if (LinuxRootfs.isInstalled(context)) {
-                { refreshKey++ }
-            } else {
-                null
-            }
+        val installed = LinuxRootfs.isInstalled(context)
         Header(
             onBack = onBack,
-            onRefresh = onRefresh,
+            onRefresh = if (installed) {{ refreshKey++ }} else null,
+            onReset = if (installed && !resetting) {{ confirmReset = true }} else null,
             running = sessions.size,
             onStopAll = { LinuxSessions.stopAll(context) },
         )
 
-        if (LinuxRootfs.isInstalled(context) && !storageGranted) {
+        if (resetting) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Text(
+                        text = stringResource(R.string.linux_apps_resetting),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                }
+            }
+            return@Column
+        }
+
+        if (installed && !storageGranted) {
             StorageBanner(onGrant = { LinuxStorage.requestAccess(context) })
         }
 
-        if (LinuxRootfs.isInstalled(context)) {
+        if (installed) {
             ScaleRow()
             SessionModeRow()
         }
@@ -148,7 +195,7 @@ fun LinuxAppsScreen(
             when {
                 !LinuxRootfs.isSupported() -> Message(stringResource(R.string.linux_apps_unsupported))
 
-                !LinuxRootfs.isInstalled(context) -> Message(
+                !installed -> Message(
                     text = stringResource(R.string.linux_apps_not_installed),
                     actionLabel = stringResource(R.string.linux_apps_open_terminal),
                     onAction = onOpenTerminal,
@@ -481,6 +528,7 @@ private fun AppIcon(iconPath: String?) {
 private fun Header(
     onBack: () -> Unit,
     onRefresh: (() -> Unit)?,
+    onReset: (() -> Unit)?,
     running: Int,
     onStopAll: () -> Unit,
 ) {
@@ -528,6 +576,16 @@ private fun Header(
                 Icon(
                     imageVector = Icons.Filled.Refresh,
                     contentDescription = stringResource(R.string.linux_apps_refresh),
+                    tint = Color.White.copy(alpha = 0.8f),
+                )
+            }
+        }
+
+        if (onReset != null) {
+            IconButton(onClick = onReset, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.DeleteForever,
+                    contentDescription = stringResource(R.string.linux_apps_reset),
                     tint = Color.White.copy(alpha = 0.8f),
                 )
             }

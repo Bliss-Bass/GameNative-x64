@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +68,20 @@ fun TerminalScreen(onBack: () -> Unit) {
     var progress by remember { mutableStateOf<LinuxRootfs.Progress?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var installed by remember { mutableStateOf(LinuxRootfs.isInstalled(context)) }
+    var preparing by remember { mutableStateOf(false) }
+
+    // Existing userlands skip install(), so Mozilla/nosnap apt policy would never land unless
+    // we run the same ensure path the graphical session uses.
+    LaunchedEffect(installed) {
+        if (!installed || !LinuxRootfs.isSupported()) return@LaunchedEffect
+        preparing = true
+        LinuxRootfs.ensureDisplaySession(context) { progress = it }
+            .onFailure {
+                Timber.w(it, "[TerminalScreen]: could not refresh Linux session packages")
+            }
+        progress = null
+        preparing = false
+    }
 
     Column(
         modifier = Modifier
@@ -81,7 +96,7 @@ fun TerminalScreen(onBack: () -> Unit) {
             when {
                 !LinuxRootfs.isSupported() -> Message(stringResource(R.string.terminal_unsupported_abi))
 
-                installing -> InstallProgress(progress)
+                installing || preparing -> InstallProgress(progress)
 
                 error != null -> Message(error!!)
 

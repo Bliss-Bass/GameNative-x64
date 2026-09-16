@@ -49,6 +49,9 @@ Linux session applies the policy once (stamp `.apt_policy_version`) and installs
 Firefox `.deb` so it shows up in the Apps list. Chromium has no equivalent Mozilla/Ubuntu
 deb — use Firefox, or install a third-party Chromium/Chrome deb yourself.
 
+To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
+`adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
+
 ## Upstream
 
 Contribute `HostCpu`, launcher branches, and CI in small PRs to
