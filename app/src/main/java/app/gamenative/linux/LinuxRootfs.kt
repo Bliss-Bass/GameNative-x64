@@ -73,11 +73,14 @@ object LinuxRootfs {
      *   helper; Recommends are off so nothing else pulls it in.
      * - libpulse0 is the Cubeb/Pulse client. The server is the host AAudio daemon ([LinuxPulse]);
      *   without the client library Firefox never reaches it and YouTube stalls with no playback.
+     * - ffmpeg (libavcodec) supplies AAC (`audio/mp4a-latm`) and related patent codecs Firefox
+     *   does not ship. Without it YouTube fatals with "no decoder found for audio/mp4a-latm".
      */
     private val DISPLAY_PACKAGES = listOf(
         "ca-certificates",
         "dbus-x11",
         "libpulse0",
+        "ffmpeg",
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
@@ -117,6 +120,7 @@ object LinuxRootfs {
         "usr/bin/xprop",
         "usr/bin/dbus-launch",
         "usr/lib/x86_64-linux-gnu/libpulse.so.0",
+        "usr/bin/ffmpeg",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 
