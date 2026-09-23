@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -816,7 +817,7 @@ abstract class BaseAppScreen {
             .distinct()
 
     /**
-     * Get the Add To App List menu option, or null where a launcher entry cannot be built.
+     * Get the Add / Remove App List menu option, or null where a launcher entry cannot be built.
      *
      * Beside Create shortcut rather than replacing it: a shortcut goes where the user puts it on
      * the home screen, while this puts the game in the all-apps list and in search alongside every
@@ -834,26 +835,59 @@ abstract class BaseAppScreen {
         val gameId = getGameId(libraryItem)
         val gameName = getGameName(context, libraryItem)
         val artwork = stubArtwork(context, libraryItem)
+        var listRefresh by remember(libraryItem.appId) { mutableStateOf(0) }
+        val inAppList by produceState(initialValue = false, libraryItem.appId, listRefresh) {
+            value = withContext(Dispatchers.IO) {
+                GameStubs.isInstalled(context, gameId, gameSource)
+            }
+        }
 
-        return AppMenuOption(
-            optionType = AppOptionMenuType.AddToAppList,
-            onClick = {
-                CoroutineScope(Dispatchers.IO).launch {
-                    GameStubs.add(
-                        context = context,
-                        gameId = gameId,
-                        source = gameSource,
-                        label = gameName,
-                        artwork = artwork,
-                    )
-                        .onSuccess { SnackbarManager.show(context.getString(R.string.stub_added, gameName)) }
-                        .onFailure { error ->
-                            Timber.w(error, "Could not add %s to the app list", gameName)
-                            SnackbarManager.show(context.getString(R.string.stub_add_failed, gameName))
-                        }
-                }
-            },
-        )
+        return if (inAppList) {
+            AppMenuOption(
+                optionType = AppOptionMenuType.RemoveFromAppList,
+                onClick = {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        GameStubs.remove(
+                            context = context,
+                            entryId = GameStubs.entryIdFor(gameId, gameSource),
+                            packageName = GameStubs.packageNameFor(gameId, gameSource),
+                            suppress = true,
+                        )
+                            .onSuccess {
+                                SnackbarManager.show(context.getString(R.string.stub_removed, gameName))
+                                withContext(Dispatchers.Main) { listRefresh++ }
+                            }
+                            .onFailure { error ->
+                                Timber.w(error, "Could not remove %s from the app list", gameName)
+                                SnackbarManager.show(context.getString(R.string.stub_remove_failed, gameName))
+                            }
+                    }
+                },
+            )
+        } else {
+            AppMenuOption(
+                optionType = AppOptionMenuType.AddToAppList,
+                onClick = {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        GameStubs.add(
+                            context = context,
+                            gameId = gameId,
+                            source = gameSource,
+                            label = gameName,
+                            artwork = artwork,
+                        )
+                            .onSuccess {
+                                SnackbarManager.show(context.getString(R.string.stub_added, gameName))
+                                withContext(Dispatchers.Main) { listRefresh++ }
+                            }
+                            .onFailure { error ->
+                                Timber.w(error, "Could not add %s to the app list", gameName)
+                                SnackbarManager.show(context.getString(R.string.stub_add_failed, gameName))
+                            }
+                    }
+                },
+            )
+        }
     }
 
     /**

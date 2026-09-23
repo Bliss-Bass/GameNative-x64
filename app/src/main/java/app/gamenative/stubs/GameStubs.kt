@@ -2,6 +2,7 @@ package app.gamenative.stubs
 
 import android.content.Context
 import app.gamenative.data.GameSource
+import app.gamenative.stubs.StubInstallerClient
 import app.gamenative.utils.SteamGridDB
 import java.io.File
 import app.gamenative.utils.createAdaptiveIconBitmap
@@ -98,14 +99,14 @@ object GameStubs {
     }
 
     /**
-     * Brings the entry published for one game back in step, if there is one.
+     * Brings the entry published for one game back in step, if there is one -- and, when the ROM's
+     * stub installer is present, publishes a missing entry for an installed game automatically.
      *
      * Per game rather than over the whole library: this runs where a game's name, artwork and
      * installed state are already in hand, so it costs nothing to check, and a library-wide pass
      * would have to resolve every game to answer the same question.
      *
-     * Only ever takes back or repairs, never adds. Publishing is the user's decision, and a game
-     * whose entry they removed should not have one reappear because it is still installed.
+     * Entries the user removed stay suppressed until they add them again from the game menu.
      */
     suspend fun reconcile(
         context: Context,
@@ -116,28 +117,40 @@ object GameStubs {
         artwork: List<String>,
     ) {
         val entryId = entryIdFor(gameId, source)
-        val record = StubRegistry.games.of(context, entryId) ?: return
+        val record = StubRegistry.games.of(context, entryId)
 
         runCatching {
-            // Removed by the user in Settings. Their decision stands, and forgetting it here is
-            // what stops a later change to the game from quietly reinstalling it.
-            if (record.packageName !in Stubs.installed(context, listOf(record.packageName))) {
-                Timber.i("[GameStubs]: %s is gone from the device, forgetting it", record.packageName)
-                StubRegistry.games.forget(context, entryId)
+            if (record != null) {
+                // Removed by the user in Settings. Suppress so auto-publish does not put it back.
+                if (record.packageName !in Stubs.installed(context, listOf(record.packageName))) {
+                    Timber.i("[GameStubs]: %s is gone from the device, suppressing it", record.packageName)
+                    StubRegistry.games.forget(context, entryId)
+                    StubRegistry.games.suppress(context, entryId)
+                    return
+                }
+
+                if (!installed) {
+                    Timber.i("[GameStubs]: %s is no longer installed, taking its entry back", entryId)
+                    // Game uninstalled -- allow auto-publish if they install it again.
+                    remove(context, entryId, record.packageName, suppress = false)
+                    return
+                }
+
+                if (contentFingerprint(context, label, artwork) != record.fingerprint) {
+                    Timber.i("[GameStubs]: %s changed, republishing its entry", entryId)
+                    add(context, gameId, source, label, artwork)
+                        .onFailure { Timber.w(it, "[GameStubs]: could not republish %s", entryId) }
+                }
                 return
             }
 
-            if (!installed) {
-                Timber.i("[GameStubs]: %s is no longer installed, taking its entry back", entryId)
-                remove(context, entryId, record.packageName)
-                return
-            }
+            if (!installed) return
+            if (StubRegistry.games.isSuppressed(context, entryId)) return
+            if (!isSupported(context) || !StubInstallerClient.isAvailable(context)) return
 
-            if (contentFingerprint(context, label, artwork) != record.fingerprint) {
-                Timber.i("[GameStubs]: %s changed, republishing its entry", entryId)
-                add(context, gameId, source, label, artwork)
-                    .onFailure { Timber.w(it, "[GameStubs]: could not republish %s", entryId) }
-            }
+            Timber.i("[GameStubs]: auto-publishing %s into the app list", entryId)
+            add(context, gameId, source, label, artwork)
+                .onFailure { Timber.w(it, "[GameStubs]: could not auto-publish %s", entryId) }
         }.onFailure { Timber.w(it, "[GameStubs]: could not reconcile %s", entryId) }
     }
 
@@ -151,10 +164,21 @@ object GameStubs {
      *
      * The record is dropped only once the stub is known to be gone, so that a refused prompt does
      * not leave a package behind that nothing remembers.
+     *
+     * [suppress] is true when the user asked to leave the drawer; false when the game itself was
+     * uninstalled and may return.
      */
-    suspend fun remove(context: Context, entryId: String, packageName: String): Result<Unit> =
+    suspend fun remove(
+        context: Context,
+        entryId: String,
+        packageName: String,
+        suppress: Boolean = true,
+    ): Result<Unit> =
         Stubs.remove(context, packageName).map { gone ->
-            if (gone) StubRegistry.games.forget(context, entryId)
+            if (gone) {
+                StubRegistry.games.forget(context, entryId)
+                if (suppress) StubRegistry.games.suppress(context, entryId)
+            }
         }
 
     /**

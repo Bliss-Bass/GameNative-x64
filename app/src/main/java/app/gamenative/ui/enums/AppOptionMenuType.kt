@@ -7,6 +7,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     StorePage(R.string.option_open_store_page),
     CreateShortcut(R.string.create_shortcut),
     AddToAppList(R.string.add_to_app_list),
+    RemoveFromAppList(R.string.remove_from_app_list),
     ExportFrontend(R.string.option_export_for_frontend),
     CopyLaunchLink(R.string.option_copy_launch_link),
     RunContainer(R.string.option_open_container),

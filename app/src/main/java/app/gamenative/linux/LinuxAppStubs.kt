@@ -64,7 +64,8 @@ object LinuxAppStubs {
      * Gives [app] an entry in the all-apps list, and remembers having done so.
      *
      * Also the path a changed entry takes: the version code rises above the recorded one, which is
-     * what lets the install replace the stub already there.
+     * what lets the install replace the stub already there. Clears any prior removal so an
+     * explicit add (or auto-publish) is not blocked by an old suppression.
      */
     suspend fun add(context: Context, app: LinuxAppScanner.LinuxApp): Result<Unit> {
         val packageName = packageNameFor(app)
@@ -103,10 +104,21 @@ object LinuxAppStubs {
      *
      * The record is dropped only once the stub is known to be gone, so that a refused prompt does
      * not leave a package behind that nothing remembers.
+     *
+     * [suppress] is true when the user asked to leave the drawer (keeps auto-publish from putting
+     * it back). False when the application itself left the userland and may be reinstalled later.
      */
-    suspend fun remove(context: Context, entryId: String, packageName: String): Result<Unit> =
+    suspend fun remove(
+        context: Context,
+        entryId: String,
+        packageName: String,
+        suppress: Boolean = true,
+    ): Result<Unit> =
         Stubs.remove(context, packageName).map { gone ->
-            if (gone) StubRegistry.linux.forget(context, entryId)
+            if (gone) {
+                StubRegistry.linux.forget(context, entryId)
+                if (suppress) StubRegistry.linux.suppress(context, entryId)
+            }
         }
 
     /**

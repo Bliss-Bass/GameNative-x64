@@ -2525,8 +2525,11 @@
     <string name="settings_steamgriddb_key_subtitle">Your own key, used in place of the one built in</string>
     <string name="settings_steamgriddb_key_missing">Needed for lookup — get a free key at steamgriddb.com</string>
     <string name="add_to_app_list">Add to app list</string>
+    <string name="remove_from_app_list">Remove from app list</string>
     <string name="stub_added">%1$s added to the app list</string>
     <string name="stub_add_failed">Could not add %1$s to the app list</string>
+    <string name="stub_removed">%1$s removed from the app list</string>
+    <string name="stub_remove_failed">Could not remove %1$s from the app list</string>
     <string name="stub_install_failed">The app list entry could not be installed</string>
     <string name="linux_shortcut_gone">This Linux app is no longer installed</string>
     <string name="linux_storage_title">Linux apps cannot see your files</string>

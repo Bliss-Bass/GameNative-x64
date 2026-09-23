@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Terminal
@@ -217,6 +218,14 @@ fun LinuxAppsScreen(
                         val session = sessions.firstOrNull {
                             it.key == LinuxSessions.keyFor(app.entryId, app.launchArgv)
                         }
+                        val stubsSupported = LinuxAppStubs.isSupported(context)
+                        val inDrawer by produceState(false, app.entryId, refreshKey) {
+                            value = if (!stubsSupported) {
+                                false
+                            } else {
+                                withContext(Dispatchers.IO) { LinuxAppStubs.isInstalled(context, app) }
+                            }
+                        }
                         AppRow(
                             app = app,
                             session = session,
@@ -224,8 +233,18 @@ fun LinuxAppsScreen(
                             onStop = { LinuxSessions.stop(context, it.key) },
                             onRestart = { LinuxSessions.restart(context, it.key) },
                             onPin = { scope.launch { createLinuxAppShortcut(context, app) } },
-                            onAddToDrawer = if (LinuxAppStubs.isSupported(context)) {
-                                { scope.launch { addToDrawer(context, app) } }
+                            inDrawer = inDrawer.takeIf { stubsSupported },
+                            onToggleDrawer = if (stubsSupported) {
+                                {
+                                    scope.launch {
+                                        if (inDrawer) {
+                                            removeFromDrawer(context, app)
+                                        } else {
+                                            addToDrawer(context, app)
+                                        }
+                                        refreshKey++
+                                    }
+                                }
                             } else {
                                 null
                             },
@@ -245,9 +264,24 @@ fun LinuxAppsScreen(
  */
 private suspend fun addToDrawer(context: Context, app: LinuxAppScanner.LinuxApp) {
     LinuxAppStubs.add(context, app)
+        .onSuccess {
+            SnackbarManager.show(context.getString(R.string.stub_added, app.name))
+        }
         .onFailure {
             Timber.e(it, "[LinuxAppsScreen]: could not build a stub for %s", app.name)
             SnackbarManager.show(context.getString(R.string.stub_add_failed, app.name))
+        }
+}
+
+/** Takes [app]'s stub out of the all-apps list and remembers the user asked it gone. */
+private suspend fun removeFromDrawer(context: Context, app: LinuxAppScanner.LinuxApp) {
+    LinuxAppStubs.remove(context, app.entryId, LinuxAppStubs.packageNameFor(app), suppress = true)
+        .onSuccess {
+            SnackbarManager.show(context.getString(R.string.stub_removed, app.name))
+        }
+        .onFailure {
+            Timber.e(it, "[LinuxAppsScreen]: could not remove stub for %s", app.name)
+            SnackbarManager.show(context.getString(R.string.stub_remove_failed, app.name))
         }
 }
 
@@ -412,7 +446,9 @@ private fun AppRow(
     onStop: (LinuxSessions.Snapshot) -> Unit,
     onRestart: (LinuxSessions.Snapshot) -> Unit,
     onPin: () -> Unit,
-    onAddToDrawer: (() -> Unit)?,
+    /** Null when stubs are unavailable; otherwise whether this app is in the drawer. */
+    inDrawer: Boolean?,
+    onToggleDrawer: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -477,11 +513,17 @@ private fun AppRow(
             }
         }
 
-        if (onAddToDrawer != null) {
-            IconButton(onClick = onAddToDrawer, modifier = Modifier.size(44.dp)) {
+        if (onToggleDrawer != null && inDrawer != null) {
+            IconButton(onClick = onToggleDrawer, modifier = Modifier.size(44.dp)) {
                 Icon(
-                    imageVector = Icons.Filled.Apps,
-                    contentDescription = stringResource(R.string.add_to_app_list),
+                    imageVector = if (inDrawer) {
+                        Icons.Filled.RemoveCircleOutline
+                    } else {
+                        Icons.Filled.Apps
+                    },
+                    contentDescription = stringResource(
+                        if (inDrawer) R.string.remove_from_app_list else R.string.add_to_app_list,
+                    ),
                     tint = Color.White.copy(alpha = 0.7f),
                 )
             }

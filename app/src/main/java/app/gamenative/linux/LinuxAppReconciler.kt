@@ -1,6 +1,7 @@
 package app.gamenative.linux
 
 import android.content.Context
+import app.gamenative.stubs.StubInstallerClient
 import app.gamenative.stubs.StubRegistry
 import app.gamenative.stubs.Stubs
 import app.gamenative.utils.retireLinuxShortcuts
@@ -16,8 +17,9 @@ import timber.log.Timber
  * entries in the all-apps list, shortcuts on the home screen -- against what the scan found, and
  * take back whatever no longer stands for anything.
  *
- * Only ever takes back or repairs, never adds. Publishing is the user's decision, and an
- * application they removed an entry for should not have one reappear because it is still installed.
+ * When the ROM's stub installer (the Bliss addon) is present, applications that appear in the
+ * userland are published into the all-apps list automatically. Entries the user removed stay
+ * suppressed until they add them again from Linux Apps.
  */
 object LinuxAppReconciler {
 
@@ -42,27 +44,38 @@ object LinuxAppReconciler {
     /** Takes back everything we have published, for when the userland itself is going away. */
     suspend fun retireAll(context: Context) = reconcile(context, emptyList())
 
-    /** Takes back the all-apps entries that no longer match an entry in the userland. */
+    /**
+     * Whether silent auto-publish is available: trampoline packaged and the privileged installer
+     * on device. Without the installer, each stub would need a user install prompt, which is not
+     * what "newly installed appears in the drawer" means.
+     */
+    private fun canAutoPublish(context: Context): Boolean =
+        LinuxAppStubs.isSupported(context) && StubInstallerClient.isAvailable(context)
+
+    /** Takes back, repairs, and (when the addon is present) publishes all-apps entries. */
     private suspend fun reconcileStubs(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
         val records = StubRegistry.linux.all(context)
-        if (records.isEmpty()) return
-
-        val installed = Stubs.installed(context, records.map { it.packageName })
         val byEntry = apps.associateBy { it.entryId }
+        val installed = if (records.isEmpty()) {
+            emptySet()
+        } else {
+            Stubs.installed(context, records.map { it.packageName })
+        }
 
         for (record in records) {
-            // Removed by the user in Settings. Their decision stands, and forgetting it here is
-            // what stops a later change to the entry from quietly reinstalling it.
+            // Removed by the user in Settings. Suppress so auto-publish does not put it back.
             if (record.packageName !in installed) {
-                Timber.i("[LinuxAppReconciler]: %s is gone from the device, forgetting it", record.packageName)
+                Timber.i("[LinuxAppReconciler]: %s is gone from the device, suppressing it", record.packageName)
                 StubRegistry.linux.forget(context, record.entryId)
+                StubRegistry.linux.suppress(context, record.entryId)
                 continue
             }
 
             val app = byEntry[record.entryId]
             if (app == null) {
                 Timber.i("[LinuxAppReconciler]: %s no longer exists, taking its entry back", record.entryId)
-                LinuxAppStubs.remove(context, record.entryId, record.packageName)
+                // Gone from apt, not a user drawer preference -- allow auto-publish if reinstalled.
+                LinuxAppStubs.remove(context, record.entryId, record.packageName, suppress = false)
                 continue
             }
 
@@ -71,6 +84,16 @@ object LinuxAppReconciler {
                 LinuxAppStubs.add(context, app)
                     .onFailure { Timber.w(it, "[LinuxAppReconciler]: could not republish %s", record.entryId) }
             }
+        }
+
+        if (!canAutoPublish(context)) return
+
+        for (app in apps) {
+            if (StubRegistry.linux.of(context, app.entryId) != null) continue
+            if (StubRegistry.linux.isSuppressed(context, app.entryId)) continue
+            Timber.i("[LinuxAppReconciler]: auto-publishing %s into the app list", app.entryId)
+            LinuxAppStubs.add(context, app)
+                .onFailure { Timber.w(it, "[LinuxAppReconciler]: could not auto-publish %s", app.entryId) }
         }
     }
 }
