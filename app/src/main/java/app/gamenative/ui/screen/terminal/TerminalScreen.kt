@@ -45,7 +45,7 @@ import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxShellSession
 import app.gamenative.ui.theme.PluviaTheme
-import app.gamenative.ui.util.pluviaTopSafeAreaPadding
+import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
@@ -94,11 +94,13 @@ fun TerminalScreen(onBack: () -> Unit) {
     }
 
     Column(
+        // safeDrawing (not top-only): freeform captionBar from desktop mode plus SmartDock's
+        // navigationBars when the window overlaps the reserved dock.
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .pluviaTopSafeAreaPadding()
-            .imePadding(),
+            .pluviaSafeDrawingPadding()
+            .imePadding()
+            .background(MaterialTheme.colorScheme.background),
     ) {
         TerminalHeader(onBack = onBack)
 

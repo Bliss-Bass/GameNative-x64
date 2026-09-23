@@ -106,6 +106,7 @@ import app.gamenative.ui.screen.xserver.XServerScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.LocalSnackbarHostController
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.DebugReportUtils
@@ -1644,10 +1645,16 @@ fun PluviaMain(
                 )
             }
 
-            // Connection status banner (overlay) - dismissible so users can access navigation
+            // Connection status banner (overlay) - dismissible so users can access navigation.
+            // Must clear the freeform captionBar: this sits above NavHost and previously drew
+            // under SmartDock-DFC / desktop title decoration.
             if (state.currentScreen != PluviaScreen.LoginUser && !connectionBannerDismissed && initialConnectDone && !state.isSteamConnected &&
                 SteamUtils.hasStoredCredentials()) {
-                Box(modifier = Modifier.zIndex(5f)) {
+                Box(
+                    modifier = Modifier
+                        .zIndex(5f)
+                        .pluviaTopSafeAreaPadding(),
+                ) {
                     ConnectionStatusBanner(
                         connectionState = state.connectionState,
                         connectionMessage = state.connectionMessage,

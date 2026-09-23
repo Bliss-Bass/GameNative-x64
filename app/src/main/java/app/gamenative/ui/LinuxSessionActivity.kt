@@ -7,8 +7,11 @@ import android.os.Bundle
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.net.toUri
+import android.graphics.Color.TRANSPARENT
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
 import app.gamenative.linux.LinuxSessions
@@ -35,6 +38,12 @@ import timber.log.Timber
 class LinuxSessionActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
+        // Match MainActivity: edge-to-edge so freeform captionBar / SmartDock navigationBars
+        // reach Compose (LinuxDesktopScreen pads with WindowInsets.safeDrawing).
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(TRANSPARENT),
+        )
         super.onCreate(state)
 
         val argv = intent.getStringExtra(EXTRA_ARGV)

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -26,7 +27,12 @@ enum class WindowWidthClass {
     EXPANDED, // > 840dp
 }
 
-/** Top/side insets for app chrome in fullscreen and freeform/desktop windowed mode. */
+/**
+ * Top/side insets for app chrome in fullscreen and freeform/desktop windowed mode.
+ *
+ * Desktop freeform (SmartDock-DFC) attaches a [WindowInsets.captionBar] source to the task;
+ * status bars alone are not enough under the window title decoration.
+ */
 @Composable
 fun pluviaTopContentHorizontalInsets(): WindowInsets =
     WindowInsets.statusBars
@@ -37,6 +43,14 @@ fun pluviaTopContentHorizontalInsets(): WindowInsets =
 @Composable
 fun Modifier.pluviaTopSafeAreaPadding(): Modifier =
     windowInsetsPadding(pluviaTopContentHorizontalInsets())
+
+/**
+ * Full safe drawing insets: caption / status / cutout on top, and SmartDock's navigationBars
+ * (dock) on the bottom when a window overlaps the reserved dock space.
+ */
+@Composable
+fun Modifier.pluviaSafeDrawingPadding(): Modifier =
+    windowInsetsPadding(WindowInsets.safeDrawing)
 
 @Composable
 fun rememberWindowWidthClass(): WindowWidthClass {

@@ -916,9 +916,12 @@ class MainActivity : ComponentActivity() {
      */
     private fun applyImmersiveMode() {
         if (isInMultiWindowMode) {
-            // Freeform/desktop windowed mode: keep content below the system caption bar.
+            // Freeform/desktop (SmartDock-DFC): stay edge-to-edge so Compose still receives the
+            // task's captionBar and navigationBars insets. setDecorFitsSystemWindows(true)
+            // FORCE_CONSUMEs those sources without actually shifting freeform content below the
+            // caption, which leaves chrome (and overlays) drawn under the title decoration.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                window.setDecorFitsSystemWindows(true)
+                window.setDecorFitsSystemWindows(false)
                 window.insetsController?.show(systemBarInsetTypes())
             } else {
                 @Suppress("DEPRECATION")
