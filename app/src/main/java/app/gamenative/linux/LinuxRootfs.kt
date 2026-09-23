@@ -75,12 +75,16 @@ object LinuxRootfs {
      *   without the client library Firefox never reaches it and YouTube stalls with no playback.
      * - ffmpeg (libavcodec) supplies AAC (`audio/mp4a-latm`) and related patent codecs Firefox
      *   does not ship. Without it YouTube fatals with "no decoder found for audio/mp4a-latm".
+     * - librsvg2-common is the SVG gdk-pixbuf loader. Recommends are off, so GTK apps that
+     *   ship SVG assets (Pitivi's greeter emblems, for example) otherwise crash at import with
+     *   "Couldn't recognize the image file format" and leave an empty black session.
      */
     private val DISPLAY_PACKAGES = listOf(
         "ca-certificates",
         "dbus-x11",
         "libpulse0",
         "ffmpeg",
+        "librsvg2-common",
         "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
@@ -121,6 +125,9 @@ object LinuxRootfs {
         "usr/bin/dbus-launch",
         "usr/lib/x86_64-linux-gnu/libpulse.so.0",
         "usr/bin/ffmpeg",
+        // gdk-pixbuf module API dir has been 2.10.0 for years; librsvg2-common drops the SVG
+        // loader here. Presence is how we know ensureDisplaySession pulled the package in.
+        "usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so",
         "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     )
 
@@ -424,6 +431,35 @@ object LinuxRootfs {
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
         writeXdefaults(rootfs)
         ensureFirefoxMediaCodecs(rootfs)
+        ensureOpenshotLaunchWrapper(rootfs)
+    }
+
+    /**
+     * Puts a `/usr/local/bin/openshot-qt` shim ahead of the packaged `/usr/bin/openshot-qt`.
+     *
+     * OpenShot 4.x's `launch.py` does `from qt_api import …` before appending its package
+     * directory to `sys.path`. Under a normal desktop install that often works by accident;
+     * under our PRoot entry-point launch it dies with `ModuleNotFoundError: No module named
+     * 'qt_api'` and the session stays an empty black desktop. Setting `PYTHONPATH` to the
+     * package dir fixes it. Guest `PATH` prefers `/usr/local/bin`, so existing stubs and
+     * `.desktop` Exec lines that say bare `openshot-qt` pick this up without a rescan.
+     */
+    private fun ensureOpenshotLaunchWrapper(rootfs: File) {
+        val real = File(rootfs, "usr/bin/openshot-qt")
+        val wrapper = File(rootfs, "usr/local/bin/openshot-qt")
+        if (!real.isFile) {
+            if (wrapper.exists()) wrapper.delete()
+            return
+        }
+        wrapper.parentFile?.mkdirs()
+        wrapper.writeText(
+            """|#!/bin/sh
+            |# Written by GameNative. See ensureOpenshotLaunchWrapper.
+            |export PYTHONPATH="/usr/lib/python3/dist-packages/openshot_qt${'$'}{PYTHONPATH:+:${'$'}PYTHONPATH}"
+            |exec /usr/bin/openshot-qt "${'$'}@"
+            |""".trimMargin(),
+        )
+        wrapper.setExecutable(true, false)
     }
 
     /**

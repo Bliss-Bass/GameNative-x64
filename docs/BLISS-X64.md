@@ -69,6 +69,12 @@ Widevine/EME is enabled by default via `distribution/policies.json`
 (`EncryptedMediaExtensions`) and `defaults/pref/gamenative-media.js`. Firefox still
 downloads the proprietary CDM on first use; until then DRM sites may show as unsupported.
 
+Graphical session packages also include `librsvg2-common` (SVG gdk-pixbuf loader). Without
+it, GTK apps that ship SVG assets — notably Pitivi — crash at import and leave a black
+session. OpenShot 4.x needs its package dir on `PYTHONPATH` for `from qt_api import …`;
+`configureSession` writes a `/usr/local/bin/openshot-qt` shim when the real binary is
+installed so drawer stubs keep working.
+
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
 
