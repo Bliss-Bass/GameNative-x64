@@ -299,13 +299,44 @@ class RfbView(
         if (!client.isConnected) return false
         requestFocus()
 
+        val pad = isTouchpadDevice(event)
+        val mouse = isMouseLike(event)
+        if (event.actionMasked != MotionEvent.ACTION_MOVE || event.pointerCount >= 2 ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
+            event.actionMasked == MotionEvent.ACTION_DOWN ||
+            isGesturePadScroll(event)
+        ) {
+            val gestureY = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                event.getAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE)
+            } else {
+                0f
+            }
+            Timber.i(
+                "[RfbView]: touch action=%s pointers=%d src=0x%x pad=%b mouse=%b class=%d device=%s x=%.1f y=%.1f raw=%.1f,%.1f vscroll=%.3f hscroll=%.3f gscrollY=%.3f",
+                MotionEvent.actionToString(event.action),
+                event.pointerCount,
+                event.source,
+                pad,
+                mouse,
+                if (android.os.Build.VERSION.SDK_INT >= 29) event.classification else -1,
+                event.device?.name ?: "?",
+                event.x,
+                event.y,
+                event.rawX,
+                event.rawY,
+                event.getAxisValue(MotionEvent.AXIS_VSCROLL),
+                event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+                gestureY,
+            )
+        }
+
         // USB pads are often IDC'd as touchScreen (BlissTouchMapper) while still exposing a
         // TOUCHPAD device class / "Touchpad" name. Absolute-mapping those contacts warps the
         // guest cursor independently of Android's pointer — including during two-finger scroll.
-        if (isTouchpadDevice(event)) {
+        if (pad) {
             return handlePhysicalTouchpad(event)
         }
-        if (isMouseLike(event)) {
+        if (mouse) {
             return handleMouseLikeTouch(event)
         }
         return handleTouchscreen(event)
@@ -336,14 +367,25 @@ class RfbView(
      *
      * One-finger motion is owned by the companion mouse HOVER_MOVE stream (Android cursor).
      * Two-finger motion becomes wheel clicks at the current guest pointer — do not move it.
+     *
+     * Modern InputReader (TouchpadInputMapper) does **not** emit ACTION_SCROLL for two-finger
+     * scroll. It sends a fake one-pointer stream classified as TWO_FINGER_SWIPE with
+     * AXIS_GESTURE_SCROLL_* distances in display pixels — see UncapturedGestureConverter.
      */
     private fun handlePhysicalTouchpad(event: MotionEvent): Boolean {
+        if (consumeGesturePadScroll(event)) return true
+
         val multi = event.pointerCount >= 2 ||
             event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
             event.actionMasked == MotionEvent.ACTION_POINTER_UP ||
             touchScrollActive
 
         if (!multi) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN ||
+                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
+            ) {
+                Timber.i("[RfbView]: pad one-finger consumed (hover owns cursor)")
+            }
             // Consume one-finger pad contacts so a touchScreen IDC cannot treat them as
             // absolute screen taps. Cursor tracking stays on HOVER_MOVE.
             if (event.actionMasked == MotionEvent.ACTION_UP && touchpadMayTap &&
@@ -367,7 +409,67 @@ class RfbView(
         return handleTouchpadDigitizer(event)
     }
 
+    /**
+     * True when InputReader is delivering a precision-touchpad two-finger scroll as a fake
+     * single-finger gesture (classification + GESTURE_SCROLL axes), not raw multi-touch.
+     */
+    private fun isGesturePadScroll(event: MotionEvent): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 29) return false
+        if (event.classification == MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE) return true
+        if (android.os.Build.VERSION.SDK_INT < 34) return false
+        return event.getAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE) != 0f ||
+            event.getAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_X_DISTANCE) != 0f
+    }
+
+    /** Emit RFB wheel clicks from GESTURE_SCROLL_* axes; leave guest cursor alone. */
+    private fun consumeGesturePadScroll(event: MotionEvent): Boolean {
+        if (!isGesturePadScroll(event)) return false
+        touchpadMayTap = false
+        cancelRightClick()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchScrollActive = true
+                scrollAccumV = 0f
+                scrollAccumH = 0f
+                Timber.i("[RfbView]: pad gesture scroll begin at guest=%d,%d", cursorX, cursorY)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                touchScrollActive = true
+                // Axes are per-sample display-pixel deltas; process history then the current sample.
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    for (h in 0 until event.historySize) {
+                        emitGestureScrollSample(
+                            event.getHistoricalAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE, h),
+                            event.getHistoricalAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_X_DISTANCE, h),
+                        )
+                    }
+                    emitGestureScrollSample(
+                        event.getAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE),
+                        event.getAxisValue(MotionEvent.AXIS_GESTURE_SCROLL_X_DISTANCE),
+                    )
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                Timber.i("[RfbView]: pad gesture scroll end")
+                touchScrollActive = false
+            }
+            else -> Unit
+        }
+        return true
+    }
+
+    /**
+     * GESTURE_SCROLL_* is already finger-delta with InputReader's sign; negate so finger-down
+     * matches [emitScrollFromDelta] (positive → wheel up / natural content scroll).
+     */
+    private fun emitGestureScrollSample(gestureScrollY: Float, gestureScrollX: Float) {
+        if (gestureScrollY == 0f && gestureScrollX == 0f) return
+        emitScrollFromDelta(-gestureScrollY, -gestureScrollX)
+    }
+
     private fun handleMouseLikeTouch(event: MotionEvent): Boolean {
+        if (consumeGesturePadScroll(event)) return true
+
         // Multi-contact "mouse" streams are almost always a touchpad the framework still
         // tagged as SOURCE_MOUSE. Never absolute-warp from those — treat as scroll.
         if (event.pointerCount >= 2 ||
@@ -425,6 +527,13 @@ class RfbView(
                         touchScrollLastY = midY
                         touchScrollLastX = midX
                     } else {
+                        Timber.i(
+                            "[RfbView]: pad two-finger scroll delta dy=%.1f dx=%.1f at guest=%d,%d",
+                            midY - touchScrollLastY,
+                            midX - touchScrollLastX,
+                            cursorX,
+                            cursorY,
+                        )
                         emitScrollFromDelta(midY - touchScrollLastY, midX - touchScrollLastX)
                         touchScrollLastY = midY
                         touchScrollLastX = midX
@@ -551,6 +660,7 @@ class RfbView(
     }
 
     private fun emitWheel(button: Int) {
+        Timber.i("[RfbView]: emitWheel button=0x%x at %d,%d mask=0x%x", button, cursorX, cursorY, buttonMask)
         submit(InputEvent.Pointer(cursorX, cursorY, buttonMask or button, coalescable = false))
         submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
     }
@@ -609,8 +719,30 @@ class RfbView(
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (!client.isConnected) return false
 
+        Timber.i(
+            "[RfbView]: generic action=%s pointers=%d src=0x%x device=%s x=%.1f y=%.1f raw=%.1f,%.1f local=%.1f,%.1f vscroll=%.3f hscroll=%.3f btn=0x%x",
+            MotionEvent.actionToString(event.action),
+            event.pointerCount,
+            event.source,
+            event.device?.name ?: "?",
+            event.x,
+            event.y,
+            event.rawX,
+            event.rawY,
+            localX(event),
+            localY(event),
+            event.getAxisValue(MotionEvent.AXIS_VSCROLL),
+            event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+            event.buttonState,
+        )
+
         when (event.actionMasked) {
             MotionEvent.ACTION_HOVER_MOVE -> {
+                // During TWO_FINGER_SWIPE InputReader exits hover; if a stray hover arrives,
+                // do not warp the guest pointer while a pad scroll gesture is active.
+                if (touchScrollActive && isTouchpadDevice(event)) {
+                    return true
+                }
                 // rawX/rawY → view-local so Activity-forwarded window coords still align with
                 // the Android cursor under freeform caption insets.
                 val x = toDesktopX(localX(event))
