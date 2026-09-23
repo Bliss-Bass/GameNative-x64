@@ -76,8 +76,10 @@ session. OpenShot 4.x needs its package dir on `PYTHONPATH` for `from qt_api imp
 installed so drawer stubs keep working.
 
 When the Bliss stub-installer addon is on the device, Linux apps discovered by a scan and
-installed games are published into the Android app drawer automatically. Removing an entry
-from Linux Apps (or the game menu) suppresses auto-publish until the user adds it again.
+installed games are published into the Android app drawer automatically. A scan also runs when
+leaving the Linux terminal or stopping a Linux session (so apt installs appear without opening
+Linux Apps). Removing an entry from Linux Apps (or the game menu) suppresses auto-publish until
+the user adds it again.
 
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.

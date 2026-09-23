@@ -111,7 +111,8 @@ fun LinuxAppsScreen(
     }
 
     // Reading a few dozen small files, off the main thread. Rescanned on request because
-    // apt runs in the terminal, out of sight of this screen.
+    // apt runs in the terminal, out of sight of this screen. Session leave / stop also
+    // reconcile via [LinuxAppReconciler.request]; this path keeps the list itself current.
     val apps by produceState<List<LinuxAppScanner.LinuxApp>?>(initialValue = null, refreshKey) {
         val found = withContext(Dispatchers.IO) { LinuxAppScanner.scan(context) }
         value = found

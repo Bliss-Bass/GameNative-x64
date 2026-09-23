@@ -186,7 +186,11 @@ class LinuxDisplaySession private constructor(
 
             // Built from what is installed right now, since apt runs in our own terminal.
             if (desktop) {
-                LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context))
+                val apps = LinuxAppScanner.scan(context)
+                LinuxDesktopConfig.writeDesktop(context, apps)
+                // Opening the desktop is another moment apps become visible; publish stubs here
+                // so a visit to Linux Apps is not required after an earlier apt install.
+                LinuxAppReconciler.reconcile(context, apps)
             }
 
             // Started after the server is up: they all connect to it, and none of them retries.

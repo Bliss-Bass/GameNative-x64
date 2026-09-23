@@ -5,7 +5,10 @@ import app.gamenative.stubs.StubInstallerClient
 import app.gamenative.stubs.StubRegistry
 import app.gamenative.stubs.Stubs
 import app.gamenative.utils.retireLinuxShortcuts
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -23,12 +26,15 @@ import timber.log.Timber
  */
 object LinuxAppReconciler {
 
+    /** Fire-and-forget scans after a terminal or graphical session where apt may have run. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * Reconciles against [apps], the result of a scan.
      *
-     * Runs after a scan rather than on a schedule: apt runs in our own terminal, so the moment the
-     * user can see a change is the moment we can too, and a background pass would only remove
-     * things while they were not looking.
+     * Runs after a scan rather than on a schedule: apt runs in our own terminal (and sometimes
+     * inside a desktop session), so the moment the user leaves that session is the moment we can
+     * see the change -- without a background pass removing things while they were not looking.
      */
     suspend fun reconcile(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
         runCatching {
@@ -39,6 +45,30 @@ object LinuxAppReconciler {
             reconcileStubs(context, live)
             withContext(Dispatchers.Main) { retireLinuxShortcuts(context, live) }
         }.onFailure { Timber.w(it, "[LinuxAppReconciler]: could not reconcile") }
+    }
+
+    /** Scan the userland, then reconcile. Shared by the Linux Apps screen and session hooks. */
+    suspend fun scanAndReconcile(context: Context) {
+        if (!LinuxRootfs.isInstalled(context)) {
+            reconcile(context, emptyList())
+            return
+        }
+        val apps = LinuxAppScanner.scan(context)
+        reconcile(context, apps)
+    }
+
+    /**
+     * Schedules a scan + reconcile on a process-scoped IO job.
+     *
+     * Call when the user leaves the terminal or a Linux session stops: that is when apt installs
+     * from those surfaces become visible without opening Linux Apps.
+     */
+    fun request(context: Context) {
+        val app = context.applicationContext
+        scope.launch {
+            Timber.i("[LinuxAppReconciler]: session-triggered scan")
+            scanAndReconcile(app)
+        }
     }
 
     /** Takes back everything we have published, for when the userland itself is going away. */

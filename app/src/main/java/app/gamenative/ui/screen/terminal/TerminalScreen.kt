@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
+import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxShellSession
 import app.gamenative.ui.theme.PluviaTheme
@@ -147,6 +148,9 @@ private fun Terminal(onSessionEnded: () -> Unit) {
             session.value?.finishIfRunning()
             session.value = null
             terminalView.value = null
+            // Apt runs here; publish drawer stubs once the shell is gone without requiring a
+            // visit to Linux Apps.
+            LinuxAppReconciler.request(context)
         }
     }
 

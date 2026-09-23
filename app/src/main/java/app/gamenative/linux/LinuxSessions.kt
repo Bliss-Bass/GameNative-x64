@@ -160,6 +160,8 @@ object LinuxSessions {
         scope.launch {
             session.session.stop()
             LinuxSessionService.stopIfIdle(context)
+            // Desktop (and apps that shell out to apt) may have changed .desktop entries.
+            LinuxAppReconciler.request(context)
         }
     }
 
@@ -170,6 +172,7 @@ object LinuxSessions {
         scope.launch {
             all.forEach { it.session.stop() }
             LinuxSessionService.stopIfIdle(context)
+            LinuxAppReconciler.request(context)
         }
     }
 
