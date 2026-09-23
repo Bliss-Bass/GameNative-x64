@@ -270,9 +270,10 @@ class RfbView(
     private var scrollAccumV = 0f
     private var scrollAccumH = 0f
 
-    /** Two-finger scroll on the touchscreen; cancelled when the second finger lifts. */
+    /** Two-finger scroll on the touchscreen/touchpad; cancelled when the second finger lifts. */
     private var touchScrollActive = false
     private var touchScrollLastY = 0f
+    private var touchScrollLastX = 0f
     private var touchFingerCount = 0
 
     @SuppressLint("ClickableViewAccessibility")
@@ -280,14 +281,21 @@ class RfbView(
         if (!client.isConnected) return false
         requestFocus()
 
-        // Mice and touchpads must not take the touchscreen path: ACTION_DOWN there always
-        // synthesizes button 1, which turns a two-finger scroll into a drag and eats the
-        // gesture Android would otherwise deliver as ACTION_SCROLL.
+        // Precision touchpads often tag contacts as SOURCE_TOUCHPAD|SOURCE_MOUSE. Absolute
+        // mapping of those coordinates warps the guest cursor while Android's stays put.
+        if (event.isFromSource(InputDevice.SOURCE_TOUCHPAD)) {
+            val multi = event.pointerCount >= 2 ||
+                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
+                event.actionMasked == MotionEvent.ACTION_POINTER_UP ||
+                touchScrollActive
+            if (multi) return handleTouchpadDigitizer(event)
+            // One finger while also SOURCE_MOUSE: HOVER_MOVE owns the system cursor — do not
+            // also apply relative pad deltas or the two pointers drift apart.
+            if (event.isFromSource(InputDevice.SOURCE_MOUSE)) return true
+            return handleTouchpadDigitizer(event)
+        }
         if (isMouseLike(event)) {
             return handleMouseLikeTouch(event)
-        }
-        if (isTouchpadDigitizer(event)) {
-            return handleTouchpadDigitizer(event)
         }
         return handleTouchscreen(event)
     }
@@ -297,14 +305,16 @@ class RfbView(
         event.isFromSource(InputDevice.SOURCE_MOUSE) ||
             event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
 
-    /**
-     * A touchpad reporting finger contacts rather than a remapped mouse. Two-finger motion
-     * is scroll; one finger moves the guest cursor without pressing a button until a tap.
-     */
-    private fun isTouchpadDigitizer(event: MotionEvent): Boolean =
-        event.isFromSource(InputDevice.SOURCE_TOUCHPAD) && !event.isFromSource(InputDevice.SOURCE_MOUSE)
-
     private fun handleMouseLikeTouch(event: MotionEvent): Boolean {
+        // Multi-contact "mouse" streams are almost always a touchpad the framework still
+        // tagged as SOURCE_MOUSE. Never absolute-warp from those — treat as scroll.
+        if (event.pointerCount >= 2 ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_UP
+        ) {
+            return handleTouchpadDigitizer(event)
+        }
+
         val x = toDesktopX(event.x)
         val y = toDesktopY(event.y)
         cursorX = x
@@ -321,6 +331,10 @@ class RfbView(
         return true
     }
 
+    /**
+     * Touchpad finger contacts: one finger moves the guest cursor relatively (no button until
+     * tap); two fingers scroll via wheel clicks without moving the pointer.
+     */
     private fun handleTouchpadDigitizer(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -335,7 +349,9 @@ class RfbView(
                     cancelRightClick()
                     touchScrollActive = true
                     touchScrollLastY = (event.getY(0) + event.getY(1)) * 0.5f
+                    touchScrollLastX = (event.getX(0) + event.getX(1)) * 0.5f
                     scrollAccumV = 0f
+                    scrollAccumH = 0f
                 } else {
                     touchScrollActive = false
                     touchpadMayTap = true
@@ -349,12 +365,16 @@ class RfbView(
                 if (event.pointerCount >= 2) {
                     touchpadMayTap = false
                     val midY = (event.getY(0) + event.getY(1)) * 0.5f
+                    val midX = (event.getX(0) + event.getX(1)) * 0.5f
                     if (!touchScrollActive) {
                         touchScrollActive = true
                         touchScrollLastY = midY
+                        touchScrollLastX = midX
                     } else {
-                        emitScrollFromDelta(midY - touchScrollLastY)
+                        // Pad Y often grows downward like a screen; match touchscreen scroll sense.
+                        emitScrollFromDelta(midY - touchScrollLastY, midX - touchScrollLastX)
                         touchScrollLastY = midY
+                        touchScrollLastX = midX
                     }
                 } else if (!touchScrollActive) {
                     if (movedFarFrom(event.x, event.y)) touchpadMayTap = false
@@ -409,14 +429,18 @@ class RfbView(
                     }
                     touchScrollActive = true
                     touchScrollLastY = (event.getY(0) + event.getY(1)) * 0.5f
+                    touchScrollLastX = (event.getX(0) + event.getX(1)) * 0.5f
                     scrollAccumV = 0f
+                    scrollAccumH = 0f
                 }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (touchScrollActive && event.pointerCount >= 2) {
                     val midY = (event.getY(0) + event.getY(1)) * 0.5f
-                    emitScrollFromDelta(midY - touchScrollLastY)
+                    val midX = (event.getX(0) + event.getX(1)) * 0.5f
+                    emitScrollFromDelta(midY - touchScrollLastY, midX - touchScrollLastX)
                     touchScrollLastY = midY
+                    touchScrollLastX = midX
                 } else if (!touchScrollActive) {
                     if (movedFarFrom(event.x, event.y)) cancelRightClick()
                     val x = toDesktopX(event.x)
@@ -451,13 +475,15 @@ class RfbView(
     }
 
     /**
-     * Converts a finger-drag distance in view pixels into RFB wheel clicks.
+     * Converts finger-drag distance in view/pad pixels into RFB wheel clicks.
      *
      * Threshold matches the Wine [com.winlator.widget.TouchpadView] path closely enough that the
-     * same physical motion scrolls about as far in either session type.
+     * same physical motion scrolls about as far in either session type. Positive [deltaViewY]
+     * (finger moved down) scrolls up, matching typical touchpad/content scroll.
      */
-    private fun emitScrollFromDelta(deltaViewY: Float) {
+    private fun emitScrollFromDelta(deltaViewY: Float, deltaViewX: Float = 0f) {
         scrollAccumV += deltaViewY
+        scrollAccumH += deltaViewX
         val step = TOUCH_SCROLL_STEP_PX
         while (scrollAccumV <= -step) {
             emitWheel(BUTTON_WHEEL_DOWN)
@@ -466,6 +492,14 @@ class RfbView(
         while (scrollAccumV >= step) {
             emitWheel(BUTTON_WHEEL_UP)
             scrollAccumV -= step
+        }
+        while (scrollAccumH <= -step) {
+            emitWheel(BUTTON_WHEEL_LEFT)
+            scrollAccumH += step
+        }
+        while (scrollAccumH >= step) {
+            emitWheel(BUTTON_WHEEL_RIGHT)
+            scrollAccumH -= step
         }
     }
 
@@ -530,6 +564,8 @@ class RfbView(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_HOVER_MOVE -> {
+                // System cursor position — the only absolute mouse stream that should set
+                // guest coords, so Linux and Android pointers stay aligned.
                 val x = toDesktopX(event.x)
                 val y = toDesktopY(event.y)
                 cursorX = x
@@ -537,11 +573,8 @@ class RfbView(
                 submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
             }
             MotionEvent.ACTION_SCROLL -> {
-                // Keep the pointer where the system cursor is so wheel events hit the right widget.
-                if (event.x != 0f || event.y != 0f || width > 0) {
-                    cursorX = toDesktopX(event.x)
-                    cursorY = toDesktopY(event.y)
-                }
+                // Leave cursorX/Y alone. Scroll events' x/y are not always the system cursor
+                // (and width>0 used to force a warp to 0,0), which detached the guest pointer.
                 emitAxisScroll(event.getAxisValue(MotionEvent.AXIS_VSCROLL), vertical = true)
                 emitAxisScroll(event.getAxisValue(MotionEvent.AXIS_HSCROLL), vertical = false)
             }
