@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -11,6 +12,7 @@ import androidx.core.net.toUri
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
 import app.gamenative.linux.LinuxSessions
+import app.gamenative.linux.rfb.RfbView
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.AppUiScale
@@ -73,6 +75,30 @@ class LinuxSessionActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Compose's hierarchy does not always deliver mouse-wheel / touchpad ACTION_SCROLL to a
+     * nested [app.gamenative.linux.rfb.RfbView]. Forwarding from the activity keeps Android's
+     * scroll gestures reaching the RFB session the same way they reach the Wine touchpad view.
+     */
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        val focus = currentFocus
+        if (focus is RfbView && focus.onGenericMotionEvent(event)) return true
+        // Walk children: SurfaceView focus can be flaky under Compose AndroidView.
+        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
+        if (content != null && dispatchGenericMotionToRfb(content, event)) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    private fun dispatchGenericMotionToRfb(view: android.view.View, event: MotionEvent): Boolean {
+        if (view is RfbView) return view.onGenericMotionEvent(event)
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (dispatchGenericMotionToRfb(view.getChildAt(i), event)) return true
+            }
+        }
+        return false
     }
 
     companion object {

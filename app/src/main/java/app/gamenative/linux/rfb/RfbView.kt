@@ -255,39 +255,229 @@ class RfbView(
 
     /** View coordinates to desktop coordinates, which differ until a resize has landed. */
     private fun toDesktopX(x: Float): Int =
-        if (width == 0) 0 else (x * client.width / width).roundToInt()
+        if (width == 0) 0 else (x * client.width / width).roundToInt().coerceIn(0, (client.width - 1).coerceAtLeast(0))
 
     private fun toDesktopY(y: Float): Int =
-        if (height == 0) 0 else (y * client.height / height).roundToInt()
+        if (height == 0) 0 else (y * client.height / height).roundToInt().coerceIn(0, (client.height - 1).coerceAtLeast(0))
+
+    /**
+     * Guest pointer position for relative devices (touchpads). Absolute mouse/touchscreen
+     * events overwrite this so the next relative delta still starts from where the cursor is.
+     */
+    private var cursorX = 0
+    private var cursorY = 0
+
+    private var scrollAccumV = 0f
+    private var scrollAccumH = 0f
+
+    /** Two-finger scroll on the touchscreen; cancelled when the second finger lifts. */
+    private var touchScrollActive = false
+    private var touchScrollLastY = 0f
+    private var touchFingerCount = 0
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!client.isConnected) return false
         requestFocus()
 
+        // Mice and touchpads must not take the touchscreen path: ACTION_DOWN there always
+        // synthesizes button 1, which turns a two-finger scroll into a drag and eats the
+        // gesture Android would otherwise deliver as ACTION_SCROLL.
+        if (isMouseLike(event)) {
+            return handleMouseLikeTouch(event)
+        }
+        if (isTouchpadDigitizer(event)) {
+            return handleTouchpadDigitizer(event)
+        }
+        return handleTouchscreen(event)
+    }
+
+    /** USB/BT mice and the system cursor after the framework has remapped a pad. */
+    private fun isMouseLike(event: MotionEvent): Boolean =
+        event.isFromSource(InputDevice.SOURCE_MOUSE) ||
+            event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+
+    /**
+     * A touchpad reporting finger contacts rather than a remapped mouse. Two-finger motion
+     * is scroll; one finger moves the guest cursor without pressing a button until a tap.
+     */
+    private fun isTouchpadDigitizer(event: MotionEvent): Boolean =
+        event.isFromSource(InputDevice.SOURCE_TOUCHPAD) && !event.isFromSource(InputDevice.SOURCE_MOUSE)
+
+    private fun handleMouseLikeTouch(event: MotionEvent): Boolean {
         val x = toDesktopX(event.x)
         val y = toDesktopY(event.y)
+        cursorX = x
+        cursorY = y
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL,
+            -> {
+                buttonMask = mouseButtons(event)
+                submit(InputEvent.Pointer(x, y, buttonMask, coalescable = event.actionMasked == MotionEvent.ACTION_MOVE))
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    private fun handleTouchpadDigitizer(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                touchFingerCount = event.pointerCount
+                if (event.pointerCount >= 2) {
+                    // Drop any click the first finger may have been about to make.
+                    touchpadMayTap = false
+                    if (buttonMask and BUTTON_LEFT != 0) {
+                        buttonMask = buttonMask and BUTTON_LEFT.inv()
+                        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
+                    }
+                    cancelRightClick()
+                    touchScrollActive = true
+                    touchScrollLastY = (event.getY(0) + event.getY(1)) * 0.5f
+                    scrollAccumV = 0f
+                } else {
+                    touchScrollActive = false
+                    touchpadMayTap = true
+                    pressX = event.x
+                    pressY = event.y
+                    lastPadX = event.x
+                    lastPadY = event.y
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount >= 2) {
+                    touchpadMayTap = false
+                    val midY = (event.getY(0) + event.getY(1)) * 0.5f
+                    if (!touchScrollActive) {
+                        touchScrollActive = true
+                        touchScrollLastY = midY
+                    } else {
+                        emitScrollFromDelta(midY - touchScrollLastY)
+                        touchScrollLastY = midY
+                    }
+                } else if (!touchScrollActive) {
+                    if (movedFarFrom(event.x, event.y)) touchpadMayTap = false
+                    val relX = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                    val relY = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                    val dx = if (relX != 0f || relY != 0f) relX else event.x - lastPadX
+                    val dy = if (relX != 0f || relY != 0f) relY else event.y - lastPadY
+                    lastPadX = event.x
+                    lastPadY = event.y
+                    moveCursorBy(dx, dy)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    val tap = touchpadMayTap && event.actionMasked == MotionEvent.ACTION_UP && !movedFarFrom(event.x, event.y)
+                    touchFingerCount = 0
+                    touchScrollActive = false
+                    touchpadMayTap = false
+                    if (tap) clickLeftAtCursor()
+                } else {
+                    touchFingerCount = event.pointerCount - 1
+                    if (touchFingerCount < 2) touchScrollActive = false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun handleTouchscreen(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touchFingerCount = 1
+                touchScrollActive = false
+                val x = toDesktopX(event.x)
+                val y = toDesktopY(event.y)
+                cursorX = x
+                cursorY = y
                 buttonMask = buttonMask or BUTTON_LEFT
-                // Position first with no button: a click that arrives at the same instant
-                // as the move is treated by some toolkits as a click wherever the pointer
-                // was before.
                 submit(InputEvent.Pointer(x, y, 0, coalescable = false))
                 submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
                 scheduleRightClick(x, y, event.x, event.y)
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                touchFingerCount = event.pointerCount
+                if (event.pointerCount >= 2) {
+                    // Second finger: this is a scroll, not a drag. Lift the left button so GTK/Qt
+                    // menus and grab handlers do not see a held click.
+                    cancelRightClick()
+                    if (buttonMask and BUTTON_LEFT != 0) {
+                        buttonMask = buttonMask and BUTTON_LEFT.inv()
+                        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
+                    }
+                    touchScrollActive = true
+                    touchScrollLastY = (event.getY(0) + event.getY(1)) * 0.5f
+                    scrollAccumV = 0f
+                }
+            }
             MotionEvent.ACTION_MOVE -> {
-                if (movedFarFrom(event.x, event.y)) cancelRightClick()
-                submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+                if (touchScrollActive && event.pointerCount >= 2) {
+                    val midY = (event.getY(0) + event.getY(1)) * 0.5f
+                    emitScrollFromDelta(midY - touchScrollLastY)
+                    touchScrollLastY = midY
+                } else if (!touchScrollActive) {
+                    if (movedFarFrom(event.x, event.y)) cancelRightClick()
+                    val x = toDesktopX(event.x)
+                    val y = toDesktopY(event.y)
+                    cursorX = x
+                    cursorY = y
+                    submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                touchFingerCount = event.pointerCount - 1
+                if (touchFingerCount < 2) touchScrollActive = false
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 cancelRightClick()
+                touchFingerCount = 0
+                touchScrollActive = false
                 buttonMask = buttonMask and BUTTON_LEFT.inv()
-                submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
+                submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
             }
         }
         return true
+    }
+
+    private fun moveCursorBy(dx: Float, dy: Float) {
+        if (dx == 0f && dy == 0f) return
+        val scaleX = if (width > 0) client.width.toFloat() / width else 1f
+        val scaleY = if (height > 0) client.height.toFloat() / height else 1f
+        cursorX = (cursorX + dx * scaleX).roundToInt().coerceIn(0, (client.width - 1).coerceAtLeast(0))
+        cursorY = (cursorY + dy * scaleY).roundToInt().coerceIn(0, (client.height - 1).coerceAtLeast(0))
+        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = true))
+    }
+
+    /**
+     * Converts a finger-drag distance in view pixels into RFB wheel clicks.
+     *
+     * Threshold matches the Wine [com.winlator.widget.TouchpadView] path closely enough that the
+     * same physical motion scrolls about as far in either session type.
+     */
+    private fun emitScrollFromDelta(deltaViewY: Float) {
+        scrollAccumV += deltaViewY
+        val step = TOUCH_SCROLL_STEP_PX
+        while (scrollAccumV <= -step) {
+            emitWheel(BUTTON_WHEEL_DOWN)
+            scrollAccumV += step
+        }
+        while (scrollAccumV >= step) {
+            emitWheel(BUTTON_WHEEL_UP)
+            scrollAccumV -= step
+        }
+    }
+
+    private fun emitWheel(button: Int) {
+        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask or button, coalescable = false))
+        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
+    }
+
+    private fun clickLeftAtCursor() {
+        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask or BUTTON_LEFT, coalescable = false))
+        submit(InputEvent.Pointer(cursorX, cursorY, buttonMask, coalescable = false))
+        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
     }
 
     // A long press as a right-click ------------------------------------------------------
@@ -298,6 +488,9 @@ class RfbView(
 
     private var pressX = 0f
     private var pressY = 0f
+    private var lastPadX = 0f
+    private var lastPadY = 0f
+    private var touchpadMayTap = false
     private var rightClickPending: Runnable? = null
 
     private fun scheduleRightClick(desktopX: Int, desktopY: Int, viewX: Float, viewY: Float) {
@@ -334,27 +527,64 @@ class RfbView(
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (!client.isConnected) return false
-        val x = toDesktopX(event.x)
-        val y = toDesktopY(event.y)
 
         when (event.actionMasked) {
-            MotionEvent.ACTION_HOVER_MOVE -> submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+            MotionEvent.ACTION_HOVER_MOVE -> {
+                val x = toDesktopX(event.x)
+                val y = toDesktopY(event.y)
+                cursorX = x
+                cursorY = y
+                submit(InputEvent.Pointer(x, y, buttonMask, coalescable = true))
+            }
             MotionEvent.ACTION_SCROLL -> {
-                val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
-                if (vertical != 0f) {
-                    // Wheels are buttons in X, pressed and released once per notch.
-                    val button = if (vertical > 0) BUTTON_WHEEL_UP else BUTTON_WHEEL_DOWN
-                    submit(InputEvent.Pointer(x, y, buttonMask or button, coalescable = false))
-                    submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
+                // Keep the pointer where the system cursor is so wheel events hit the right widget.
+                if (event.x != 0f || event.y != 0f || width > 0) {
+                    cursorX = toDesktopX(event.x)
+                    cursorY = toDesktopY(event.y)
                 }
+                emitAxisScroll(event.getAxisValue(MotionEvent.AXIS_VSCROLL), vertical = true)
+                emitAxisScroll(event.getAxisValue(MotionEvent.AXIS_HSCROLL), vertical = false)
             }
             MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE -> {
+                val x = toDesktopX(event.x)
+                val y = toDesktopY(event.y)
+                cursorX = x
+                cursorY = y
                 buttonMask = mouseButtons(event)
                 submit(InputEvent.Pointer(x, y, buttonMask, coalescable = false))
             }
             else -> return super.onGenericMotionEvent(event)
         }
         return true
+    }
+
+    /**
+     * Android touchpads often deliver fractional AXIS_*SCROLL values. Accumulate until a full
+     * notch so smooth gestures become discrete X wheel clicks without losing small steps.
+     */
+    private fun emitAxisScroll(amount: Float, vertical: Boolean) {
+        if (amount == 0f) return
+        if (vertical) {
+            scrollAccumV += amount
+            while (scrollAccumV >= 1f) {
+                emitWheel(BUTTON_WHEEL_UP)
+                scrollAccumV -= 1f
+            }
+            while (scrollAccumV <= -1f) {
+                emitWheel(BUTTON_WHEEL_DOWN)
+                scrollAccumV += 1f
+            }
+        } else {
+            scrollAccumH += amount
+            while (scrollAccumH >= 1f) {
+                emitWheel(BUTTON_WHEEL_RIGHT)
+                scrollAccumH -= 1f
+            }
+            while (scrollAccumH <= -1f) {
+                emitWheel(BUTTON_WHEEL_LEFT)
+                scrollAccumH += 1f
+            }
+        }
     }
 
     private fun mouseButtons(event: MotionEvent): Int {
@@ -388,10 +618,15 @@ class RfbView(
         /** Deep enough to absorb a burst of motion, shallow enough not to lag behind it. */
         private const val INPUT_QUEUE_DEPTH = 128
 
+        /** View pixels of two-finger travel per X wheel notch. */
+        private const val TOUCH_SCROLL_STEP_PX = 48f
+
         private const val BUTTON_LEFT = 1
         private const val BUTTON_MIDDLE = 1 shl 1
         private const val BUTTON_RIGHT = 1 shl 2
         private const val BUTTON_WHEEL_UP = 1 shl 3
         private const val BUTTON_WHEEL_DOWN = 1 shl 4
+        private const val BUTTON_WHEEL_LEFT = 1 shl 5
+        private const val BUTTON_WHEEL_RIGHT = 1 shl 6
     }
 }
