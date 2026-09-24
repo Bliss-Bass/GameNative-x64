@@ -1968,7 +1968,11 @@ fun PluviaMain(
                                 )
                             }.onFailure { Timber.w(it, "[PluviaMain]: no session window for %s", app.name) }
 
-                            if (opened.isFailure) {
+                            if (opened.isSuccess) {
+                                // Hide the Linux Apps / Main freeform window so only the session
+                                // document is visible; Main stays in recents for reopen.
+                                (context as? android.app.Activity)?.moveTaskToBack(true)
+                            } else {
                                 navController.navigate(PluviaScreen.LinuxDesktop.route(app.launchArgv))
                             }
                         },

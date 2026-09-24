@@ -1,8 +1,9 @@
 package app.gamenative.ui
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
@@ -14,7 +15,6 @@ import androidx.core.net.toUri
 import android.graphics.Color.TRANSPARENT
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
-import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.rfb.RfbView
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.theme.PluviaTheme
@@ -28,12 +28,12 @@ import timber.log.Timber
  * Separate from MainActivity so that Android, not us, decides how each application is sized:
  * with a task per application, a freeform window keeps its own bounds, a drawer launch reopens
  * the window it had rather than the last one anything used, and two Linux apps can sit side by
- * side. The session behind it is [LinuxSessions]', so closing this window does not necessarily
- * end the application -- that is what the lifetime mode decides.
+ * side. The session behind it is [app.gamenative.linux.LinuxSessions]', so closing this window
+ * does not necessarily end the application -- that is what the lifetime mode decides.
  *
- * `documentLaunchMode="intoExisting"` in the manifest, plus a per-application [Uri] as the
- * intent's data, is what makes the task-per-application split happen: Android treats distinct
- * data as distinct documents, and relaunching the same one brings its window forward.
+ * `documentLaunchMode="intoExisting"` in the manifest, plus a per-application [android.net.Uri]
+ * as the intent's data, is what makes the task-per-application split happen: Android treats
+ * distinct data as distinct documents, and relaunching the same one brings its window forward.
  */
 class LinuxSessionActivity : ComponentActivity() {
 
@@ -59,6 +59,7 @@ class LinuxSessionActivity : ComponentActivity() {
         }
 
         Timber.i("[LinuxSessionActivity]: opening %s (%s)", label ?: entryId ?: "linux app", argv)
+        applySessionCaption(label, entryId)
 
         AppUiScale.syncFromPrefs()
         setContent {
@@ -84,6 +85,33 @@ class LinuxSessionActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applySessionCaption(
+            intent.getStringExtra(EXTRA_LABEL),
+            intent.data?.lastPathSegment,
+        )
+    }
+
+    /**
+     * Freeform / SmartDock caption uses the task description label (and [title]), not only the
+     * static manifest label — so each Linux document shows the app name instead of GameNativeX64.
+     */
+    private fun applySessionCaption(label: String?, entryId: String?) {
+        val caption = label?.takeIf { it.isNotBlank() }
+            ?: entryId?.takeIf { it.isNotBlank() && !it.startsWith("argv-") }
+            ?: getString(app.gamenative.R.string.linux_session_notification_title)
+        title = caption
+        val description = if (Build.VERSION.SDK_INT >= 33) {
+            ActivityManager.TaskDescription.Builder().setLabel(caption).build()
+        } else {
+            @Suppress("DEPRECATION")
+            ActivityManager.TaskDescription(caption)
+        }
+        setTaskDescription(description)
     }
 
     /**

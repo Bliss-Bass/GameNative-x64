@@ -467,7 +467,12 @@ class MainActivity : ComponentActivity() {
                     startActivity(LinuxSessionActivity.intent(this, argv, entryId, label))
                 }.onFailure { Timber.w(it, "[IntentLaunch]: no session window, falling back in-app") }
 
-                if (opened.isSuccess) return
+                if (opened.isSuccess) {
+                    // Keep Main alive for drawer / Steam / FGS, but do not leave a second freeform
+                    // window titled GameNativeX64 sitting beside the Linux session.
+                    moveTaskToBack(true)
+                    return
+                }
             }
 
             // Always recorded, and the event only says one is waiting. The alternative --
