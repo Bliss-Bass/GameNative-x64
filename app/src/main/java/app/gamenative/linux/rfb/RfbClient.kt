@@ -6,6 +6,8 @@ import java.io.EOFException
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import timber.log.Timber
 
 /**
@@ -57,6 +59,22 @@ class RfbClient(
 
     /** Scratch for decoding a rectangle, grown as needed rather than per update. */
     private var rowBuffer = ByteArray(0)
+
+    /** Reused LE view of [rowBuffer] for bulk Raw→ARGB conversion. */
+    private var rowInts: java.nio.IntBuffer? = null
+
+    /** Bytes of Raw payload decoded since the last metrics reset (for FPS HUD). */
+    var rawBytesSinceReset = 0L
+        private set
+
+    /** Wall-ns spent in Raw decode since the last metrics reset. */
+    var rawDecodeNsSinceReset = 0L
+        private set
+
+    fun resetRawMetrics() {
+        rawBytesSinceReset = 0L
+        rawDecodeNsSinceReset = 0L
+    }
 
     fun connect(observer: Observer) {
         this.observer = observer
@@ -229,23 +247,39 @@ class RfbClient(
     private fun readRaw(x: Int, y: Int, w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
         val stride = w * 4
-        if (rowBuffer.size < stride) rowBuffer = ByteArray(stride)
+        val total = stride * h
+        if (rowBuffer.size < total) {
+            rowBuffer = ByteArray(total)
+            rowInts = null
+        }
+        val started = System.nanoTime()
+        input.readFully(rowBuffer, 0, total)
 
-        for (row in 0 until h) {
-            input.readFully(rowBuffer, 0, stride)
-            var dst = (y + row) * width + x
-            var src = 0
-            for (column in 0 until w) {
-                // Little-endian BGRX from the wire; the alpha byte the server sends is
-                // undefined, so opacity is forced rather than copied.
-                pixels[dst] = 0xFF shl 24 or
-                    ((rowBuffer[src + 2].toInt() and 0xFF) shl 16) or
-                    ((rowBuffer[src + 1].toInt() and 0xFF) shl 8) or
-                    (rowBuffer[src].toInt() and 0xFF)
-                dst++
-                src += 4
+        // Wire format is LE BGRX with R/G/B shifts 16/8/0 → int 0x00RRGGBB; force opaque alpha.
+        val ints = rowInts ?: ByteBuffer.wrap(rowBuffer).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().also {
+            rowInts = it
+        }
+        ints.rewind()
+        ints.limit(w * h)
+        val opaque = 0xFF000000.toInt()
+        if (x == 0 && w == width) {
+            // Contiguous strip: one tight loop instead of per-row indexing.
+            var dst = y * width
+            val end = dst + w * h
+            while (dst < end) {
+                pixels[dst++] = ints.get() or opaque
+            }
+        } else {
+            for (row in 0 until h) {
+                var dst = (y + row) * width + x
+                val rowEnd = dst + w
+                while (dst < rowEnd) {
+                    pixels[dst++] = ints.get() or opaque
+                }
             }
         }
+        rawBytesSinceReset += total.toLong()
+        rawDecodeNsSinceReset += System.nanoTime() - started
         observer?.onFramebufferUpdate(x, y, w, h)
     }
 

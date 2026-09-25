@@ -3,7 +3,9 @@ package app.gamenative.linux.rfb
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.view.HapticFeedbackConstants
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -14,6 +16,8 @@ import android.view.ViewConfiguration
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import timber.log.Timber
 
@@ -47,6 +51,18 @@ class RfbView(
     /** Union of the rectangles changed since the last frame was drawn. */
     private val dirty = Rect()
     private val dirtyLock = Any()
+
+    /** Destination of the dirty region in view pixels (reused). */
+    private val viewDirty = Rect()
+    private val srcRect = Rect()
+    private val dstRectF = RectF()
+    private val blitPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    private val metricsEnabled = systemProperty("debug.gamenative.rfb_fps") == "1"
+    private var metricsWindowStartNs = 0L
+    private var metricsFrames = 0
+    private var metricsDamagePx = 0L
+    private var metricsPresentNs = 0L
 
     /** Set when the desktop size changed and the whole screen must be re-fetched. */
     @Volatile
@@ -152,12 +168,23 @@ class RfbView(
             }
             resizeBuffers(client.width, client.height)
             client.requestUpdate(false)
+            var nextRequestAtNs = 0L
 
             while (running) {
                 if (client.pumpUpdate()) {
                     present()
                     val full = needsFullUpdate
                     needsFullUpdate = false
+                    // Cap how often we ask for another framebuffer: uncapped requests turn
+                    // video damage into a Raw+present backlog (~13 fps measured at 1951x1152).
+                    val now = System.nanoTime()
+                    val waitNs = nextRequestAtNs - now
+                    if (waitNs > 1_000_000L) {
+                        val ms = waitNs / 1_000_000L
+                        val ns = (waitNs % 1_000_000L).toInt()
+                        runCatching { Thread.sleep(ms, ns) }
+                    }
+                    nextRequestAtNs = System.nanoTime() + MIN_FRAME_INTERVAL_NS
                     client.requestUpdate(incremental = !full)
                 }
                 applyPendingResize()
@@ -214,6 +241,8 @@ class RfbView(
         region.intersect(0, 0, bitmap.width, bitmap.height)
         if (region.isEmpty) return
 
+        val presentStarted = if (metricsEnabled) System.nanoTime() else 0L
+
         bitmap.setPixels(
             client.pixels,
             region.top * client.width + region.left,
@@ -224,30 +253,113 @@ class RfbView(
             region.height(),
         )
 
-        val canvas = holder.lockCanvas()
-        if (canvas == null) {
-            Timber.w("[RfbView]: no canvas; surface not ready")
-            return
-        }
-        try {
-            canvas.drawBitmap(bitmap, null, Rect(0, 0, width, height), null)
-        } catch (e: Throwable) {
-            Timber.e(e, "[RfbView]: draw failed")
-        } finally {
+        val canvas: android.graphics.Canvas?
+        if (width == bitmap.width && height == bitmap.height) {
+            // Common freeform case (metrics: 1951x1152 view == desktop): identity blit, no filter.
+            viewDirty.set(region)
+            canvas = holder.lockCanvas(viewDirty) ?: holder.lockCanvas()
+            if (canvas == null) {
+                Timber.w("[RfbView]: no canvas; surface not ready")
+                return
+            }
             try {
-                holder.unlockCanvasAndPost(canvas)
+                srcRect.set(region)
+                canvas.drawBitmap(bitmap, srcRect, region, null)
             } catch (e: Throwable) {
-                Timber.e(e, "[RfbView]: post failed")
+                Timber.e(e, "[RfbView]: draw failed")
+            } finally {
+                try {
+                    holder.unlockCanvasAndPost(canvas)
+                } catch (e: Throwable) {
+                    Timber.e(e, "[RfbView]: post failed")
+                }
+            }
+        } else {
+            // Map desktop damage into view space; pad for scale rounding so we do not leave seams.
+            val scaleX = width.toFloat() / bitmap.width
+            val scaleY = height.toFloat() / bitmap.height
+            srcRect.set(region)
+            dstRectF.set(
+                floor(region.left * scaleX),
+                floor(region.top * scaleY),
+                ceil(region.right * scaleX),
+                ceil(region.bottom * scaleY),
+            )
+            viewDirty.set(
+                dstRectF.left.toInt().coerceAtLeast(0),
+                dstRectF.top.toInt().coerceAtLeast(0),
+                dstRectF.right.toInt().coerceAtMost(width),
+                dstRectF.bottom.toInt().coerceAtMost(height),
+            )
+            if (viewDirty.isEmpty) return
+
+            canvas = holder.lockCanvas(viewDirty) ?: holder.lockCanvas()
+            if (canvas == null) {
+                Timber.w("[RfbView]: no canvas; surface not ready")
+                return
+            }
+            try {
+                canvas.drawBitmap(bitmap, srcRect, dstRectF, blitPaint)
+            } catch (e: Throwable) {
+                Timber.e(e, "[RfbView]: draw failed")
+            } finally {
+                try {
+                    holder.unlockCanvasAndPost(canvas)
+                } catch (e: Throwable) {
+                    Timber.e(e, "[RfbView]: post failed")
+                }
             }
         }
 
         framesPresented++
-        if (framesPresented == 1L || framesPresented % 600 == 0L) {
+        if (metricsEnabled) {
+            metricsFrames++
+            metricsDamagePx += region.width().toLong() * region.height()
+            metricsPresentNs += System.nanoTime() - presentStarted
+            maybeLogMetrics()
+        } else if (framesPresented == 1L || framesPresented % 600 == 0L) {
             Timber.i(
                 "[RfbView]: frame %d, %dx%d of %dx%d desktop into %dx%d view",
                 framesPresented, region.width(), region.height(),
                 client.width, client.height, width, height,
             )
+        }
+    }
+
+    private fun maybeLogMetrics() {
+        val now = System.nanoTime()
+        if (metricsWindowStartNs == 0L) {
+            metricsWindowStartNs = now
+            client.resetRawMetrics()
+            return
+        }
+        val elapsedNs = now - metricsWindowStartNs
+        if (elapsedNs < METRICS_WINDOW_NS) return
+        val secs = elapsedNs / 1_000_000_000.0
+        val fps = metricsFrames / secs
+        val avgDamage = if (metricsFrames > 0) metricsDamagePx / metricsFrames else 0L
+        val presentMs = metricsPresentNs / 1_000_000.0
+        val decodeMs = client.rawDecodeNsSinceReset / 1_000_000.0
+        val rawMib = client.rawBytesSinceReset / (1024.0 * 1024.0)
+        Timber.i(
+            "[RfbView]: rfb_fps=%.1f presents=%d avgDamagePx=%d presentMs=%.1f decodeMs=%.1f rawMiB=%.1f desktop=%dx%d view=%dx%d",
+            fps, metricsFrames, avgDamage, presentMs, decodeMs, rawMib,
+            client.width, client.height, width, height,
+        )
+        metricsWindowStartNs = now
+        metricsFrames = 0
+        metricsDamagePx = 0L
+        metricsPresentNs = 0L
+        client.resetRawMetrics()
+    }
+
+    private fun systemProperty(key: String): String {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            clazz.getMethod("get", String::class.java, String::class.java)
+                .invoke(null, key, "") as? String ?: ""
+        } catch (_: Throwable) {
+            ""
         }
     }
 
@@ -840,6 +952,12 @@ class RfbView(
 
         /** View pixels of two-finger travel per X wheel notch. */
         private const val TOUCH_SCROLL_STEP_PX = 48f
+
+        /** How often [maybeLogMetrics] emits when debug.gamenative.rfb_fps=1. */
+        private const val METRICS_WINDOW_NS = 2_000_000_000L
+
+        /** Target present/request cadence — matches TigerVNC -FrameRate 30. */
+        private const val MIN_FRAME_INTERVAL_NS = 1_000_000_000L / 30
 
         private const val BUTTON_LEFT = 1
         private const val BUTTON_MIDDLE = 1 shl 1

@@ -175,6 +175,9 @@ class LinuxDisplaySession private constructor(
                     " -SecurityTypes None" +
                     " -localhost" +
                     " -AlwaysShared" +
+                    // Skip unchanged tiles (helps UI chrome); FrameRate caps encode storms on video.
+                    " -CompareFB 1" +
+                    " -FrameRate 30" +
                     " -desktop gamenative",
                 tag = "Xtigervnc",
             ) ?: throw IOException("Could not start the X server")
