@@ -162,6 +162,8 @@ data class TouchGestureConfig(
         const val PAN_INVERTED_MIDDLE_MOUSE = "inverted_middle_mouse_pan"
         const val PAN_LEFT_CLICK_DRAG = "left_click_drag"
         const val PAN_RIGHT_CLICK_DRAG = "right_click_drag"
+        /** Two-finger drag emits X11 scroll-wheel clicks (Linux freeform / content scroll). */
+        const val PAN_SCROLL_WHEEL = "pan_scroll_wheel"
 
         // ── Action identifiers: pinch (zoom) ─────────────────────────────
         const val ZOOM_SCROLL_WHEEL = "scroll_wheel"
@@ -311,6 +313,7 @@ data class TouchGestureConfig(
             PAN_INVERTED_MIDDLE_MOUSE,
             PAN_LEFT_CLICK_DRAG,
             PAN_RIGHT_CLICK_DRAG,
+            PAN_SCROLL_WHEEL,
         )
 
         val MOUSE_DRAG_MOVEMENT_MODES = listOf(

@@ -182,20 +182,36 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             winHandler.mouseEvent(MouseEventFlags.getFlagFor(button, false), 0, 0, 0);
         }
         else {
-            Bitmask eventMask = createPointerEventMask();
             Window grabWindow = xServer.grabManager.getWindow();
-            Window window = grabWindow == null || xServer.grabManager.isOwnerEvents() ? pointWindow.getAncestorWithEventMask(eventMask) : null;
+            Window eventWindow = grabWindow != null
+                    ? grabWindow
+                    : pointWindow.getAncestorWithEventId(Event.BUTTON_RELEASE);
+            if (eventWindow == null) {
+                eventWindow = pointWindow.getAncestorWithEventId(Event.BUTTON_PRESS);
+            }
 
-            if (grabWindow != null || window != null) {
-                Window eventWindow = window != null ? window : grabWindow;
-
+            if (eventWindow != null && eventWindow.attributes.isEnabled()) {
+                Bitmask eventMask = createPointerEventMask();
                 short x = xServer.pointer.getX();
                 short y = xServer.pointer.getY();
                 short[] localPoint = eventWindow.rootPointToLocal(x, y);
-
                 Window child = eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
-                ButtonRelease buttonRelease = new ButtonRelease(button.code(), xServer.windowManager.rootWindow, eventWindow, child, x, y, localPoint[0], localPoint[1], eventMask);
-                sendEvent(window, eventMask, buttonRelease);
+                // Mirror ButtonPress: deliver by event id. The old sendEvent(window, mask)
+                // path dropped releases while an implicit grab was active (window was null and
+                // the grab mask often lacked BUTTON_RELEASE), so xterm kept Button1 down and
+                // ignored KeyPress after every click.
+                eventWindow.sendEvent(
+                        Event.BUTTON_RELEASE,
+                        new ButtonRelease(
+                                button.code(),
+                                xServer.windowManager.rootWindow,
+                                eventWindow,
+                                child,
+                                x,
+                                y,
+                                localPoint[0],
+                                localPoint[1],
+                                eventMask));
             }
 
             if (xServer.pointer.getButtonMask().isEmpty() && xServer.grabManager.isReleaseWithButtons()) {
@@ -228,13 +244,27 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
 
         Window eventWindow = null;
         Window child = null;
-        if (focusedWindow.isAncestorOf(pointWindow)) {
+        if (focusedWindow == pointWindow) {
+            // isAncestorOf(self) is false by design; same-window focus still delivers keys.
+            if (focusedWindow.hasEventListenerFor(Event.KEY_PRESS)) {
+                eventWindow = focusedWindow;
+            } else {
+                eventWindow = findDescendantWithEventId(focusedWindow, Event.KEY_PRESS);
+            }
+        } else if (focusedWindow.isAncestorOf(pointWindow)) {
             eventWindow = pointWindow.getAncestorWithEventId(Event.KEY_PRESS, focusedWindow);
-            child = eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
+            child = eventWindow != null && eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
         }
         if (eventWindow == null) {
-            if (!focusedWindow.hasEventListenerFor(Event.KEY_PRESS)) return;
-            eventWindow = focusedWindow;
+            if (focusedWindow.hasEventListenerFor(Event.KEY_PRESS)) {
+                eventWindow = focusedWindow;
+            } else {
+                // Linux clients often focus a shell window while KeyPress is on a child VT.
+                eventWindow = findDescendantWithEventId(focusedWindow, Event.KEY_PRESS);
+            }
+        }
+        if (eventWindow == null) {
+            return;
         }
 
         if (!eventWindow.attributes.isEnabled()) return;
@@ -269,14 +299,24 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
 
         Window eventWindow = null;
         Window child = null;
-        if (focusedWindow.isAncestorOf(pointWindow)) {
+        if (focusedWindow == pointWindow) {
+            if (focusedWindow.hasEventListenerFor(Event.KEY_RELEASE)) {
+                eventWindow = focusedWindow;
+            } else {
+                eventWindow = findDescendantWithEventId(focusedWindow, Event.KEY_RELEASE);
+            }
+        } else if (focusedWindow.isAncestorOf(pointWindow)) {
             eventWindow = pointWindow.getAncestorWithEventId(Event.KEY_RELEASE, focusedWindow);
-            child = eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
+            child = eventWindow != null && eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
         }
         if (eventWindow == null) {
-            if (!focusedWindow.hasEventListenerFor(Event.KEY_RELEASE)) return;
-            eventWindow = focusedWindow;
+            if (focusedWindow.hasEventListenerFor(Event.KEY_RELEASE)) {
+                eventWindow = focusedWindow;
+            } else {
+                eventWindow = findDescendantWithEventId(focusedWindow, Event.KEY_RELEASE);
+            }
         }
+        if (eventWindow == null) return;
 
         if (!eventWindow.attributes.isEnabled()) return;
 
@@ -286,6 +326,18 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
         short[] localPoint = eventWindow.rootPointToLocal(x, y);
 
         eventWindow.sendEvent(Event.KEY_RELEASE, new KeyRelease(keycode, xServer.windowManager.rootWindow, eventWindow, child, x, y, localPoint[0], localPoint[1], keyButMask));
+    }
+
+    /** Depth-first search for a mapped descendant that selected [eventId] (e.g. xterm VT). */
+    private static Window findDescendantWithEventId(Window root, int eventId) {
+        if (root == null) return null;
+        for (Window child : root.getChildren()) {
+            if (!child.attributes.isMapped()) continue;
+            if (child.hasEventListenerFor(eventId)) return child;
+            Window nested = findDescendantWithEventId(child, eventId);
+            if (nested != null) return nested;
+        }
+        return null;
     }
 
     private Bitmask createPointerEventMask() {

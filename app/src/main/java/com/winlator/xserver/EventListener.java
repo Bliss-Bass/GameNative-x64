@@ -24,13 +24,13 @@ public class EventListener {
     public void sendEvent(Event event) {
         try {
             if (XClient.TRACE_EVENTS) {
-                android.util.Log.d("XEvent", "-> " + event.getClass().getSimpleName()
+                android.util.Log.i("XEvent", "-> " + event.getClass().getSimpleName()
                         + " seq=" + client.getSequenceNumber());
             }
             event.send(client.getSequenceNumber(), client.getOutputStream());
         }
         catch (IOException e) {
-            e.printStackTrace();
+            android.util.Log.e("XEvent", "send failed " + event.getClass().getSimpleName(), e);
         }
     }
 }

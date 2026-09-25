@@ -124,8 +124,13 @@ public class Keyboard {
             return false;
 
         if (action == KeyEvent.ACTION_DOWN) {
-            xServer.injectKeyPress(xKeycode);
+            boolean shiftPressed = event.isShiftPressed() || keyCode == KeyEvent.KEYCODE_AT
+                    || keyCode == KeyEvent.KEYCODE_STAR || keyCode == KeyEvent.KEYCODE_POUND
+                    || keyCode == KeyEvent.KEYCODE_PLUS;
+            if (shiftPressed) xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
+            xServer.injectKeyPress(xKeycode, xKeycode != XKeycode.KEY_ENTER ? event.getUnicodeChar() : 0);
         } else if (action == KeyEvent.ACTION_UP) {
+            xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
             xServer.injectKeyRelease(xKeycode);
         }
 
@@ -136,6 +141,7 @@ public class Keyboard {
         XKeycode[] keycodeMap = new XKeycode[(KeyEvent.getMaxKeyCode() + 1)];
         keycodeMap[KeyEvent.KEYCODE_ESCAPE] = XKeycode.KEY_ESC;
         keycodeMap[KeyEvent.KEYCODE_ENTER] = XKeycode.KEY_ENTER;
+        keycodeMap[KeyEvent.KEYCODE_NUMPAD_ENTER] = XKeycode.KEY_ENTER;
         keycodeMap[KeyEvent.KEYCODE_DPAD_LEFT] = XKeycode.KEY_LEFT;
         keycodeMap[KeyEvent.KEYCODE_DPAD_RIGHT] = XKeycode.KEY_RIGHT;
         keycodeMap[KeyEvent.KEYCODE_DPAD_UP] = XKeycode.KEY_UP;

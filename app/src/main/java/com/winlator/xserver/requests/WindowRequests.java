@@ -387,22 +387,25 @@ public abstract class WindowRequests {
     }
 
     public static void setInputFocus(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
-        WindowManager.FocusRevertTo focusRevertTo = WindowManager.FocusRevertTo.values()[client.getRequestData()];
-        int windowId = inputStream.readInt();
-        inputStream.skip(4);
+        // X11: data byte = revert-to; then focus WINDOW (0=None, 1=PointerRoot, else id); then time.
+        // The old switch treated revert-to as the focus target, so RevertToPointerRoot stole
+        // keyboard focus to the root and every Linux client lost KeyPress.
+        byte revertByte = client.getRequestData();
+        if (revertByte < 0 || revertByte >= WindowManager.FocusRevertTo.values().length) {
+            throw new BadValue(revertByte);
+        }
+        WindowManager.FocusRevertTo focusRevertTo = WindowManager.FocusRevertTo.values()[revertByte];
+        int focusId = inputStream.readInt();
+        inputStream.skip(4); // time (CurrentTime / unused)
 
-        switch (focusRevertTo) {
-            case NONE:
-                client.xServer.windowManager.setFocus(null, focusRevertTo);
-                break;
-            case POINTER_ROOT:
-                client.xServer.windowManager.setFocus(client.xServer.windowManager.rootWindow, focusRevertTo);
-                break;
-            case PARENT:
-                Window window = client.xServer.windowManager.getWindow(windowId);
-                if (window == null) throw new BadWindow(windowId);
-                client.xServer.windowManager.setFocus(window, focusRevertTo);
-                break;
+        if (focusId == 0) {
+            client.xServer.windowManager.setFocus(null, focusRevertTo);
+        } else if (focusId == 1) {
+            client.xServer.windowManager.setFocus(client.xServer.windowManager.rootWindow, focusRevertTo);
+        } else {
+            Window window = client.xServer.windowManager.getWindow(focusId);
+            if (window == null) throw new BadWindow(focusId);
+            client.xServer.windowManager.setFocus(window, focusRevertTo);
         }
     }
 

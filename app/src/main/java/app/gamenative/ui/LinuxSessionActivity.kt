@@ -3,8 +3,12 @@ package app.gamenative.ui
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +18,8 @@ import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
 import app.gamenative.linux.LinuxXServerView
+import app.gamenative.stubs.StubIcons
+import app.gamenative.stubs.Stubs
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.AppUiScale
@@ -93,20 +99,42 @@ class LinuxSessionActivity : ComponentActivity() {
     }
 
     /**
-     * Freeform / SmartDock caption uses the task description label (and [title]), not only the
-     * static manifest label — so each Linux document shows the app name instead of GameNativeX64.
+     * Freeform / SmartDock caption uses the task description label + icon (and [title]), not only
+     * the static manifest label — so each Linux document shows XTerm / UXTerm (and their stub
+     * letter tiles) instead of GameNativeX64.
      */
     private fun applySessionCaption(label: String?, entryId: String?) {
+        val stubPkg = entryId
+            ?.takeIf { it.isNotBlank() && !it.startsWith("argv-") }
+            ?.let { Stubs.packageNameFor(it) }
+        val stubInfo = stubPkg?.let { pkg ->
+            runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
+        }
         val caption = label?.takeIf { it.isNotBlank() }
+            ?: stubInfo?.let { packageManager.getApplicationLabel(it).toString() }?.takeIf { it.isNotBlank() }
             ?: entryId?.takeIf { it.isNotBlank() && !it.startsWith("argv-") }
             ?: getString(app.gamenative.R.string.linux_session_notification_title)
+        val icon = stubInfo?.let { info ->
+            runCatching { drawableToBitmap(packageManager.getApplicationIcon(info)) }.getOrNull()
+        } ?: StubIcons.lettered(this, caption)
+
         title = caption
         window.setTitle(caption)
-        setTaskDescription(
-            ActivityManager.TaskDescription.Builder()
-                .setLabel(caption)
-                .build(),
-        )
+        // Builder.setIcon takes a resource id on current SDK stubs; the label+bitmap
+        // constructor is what freeform captions need for stub letter tiles.
+        @Suppress("DEPRECATION")
+        setTaskDescription(ActivityManager.TaskDescription(caption, icon))
+    }
+
+    private fun drawableToBitmap(drawable: Drawable): Bitmap {
+        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
+        val width = drawable.intrinsicWidth.coerceAtLeast(1)
+        val height = drawable.intrinsicHeight.coerceAtLeast(1)
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+        }
     }
 
     override fun onResume() {
@@ -116,6 +144,28 @@ class LinuxSessionActivity : ComponentActivity() {
             intent.getStringExtra(EXTRA_LABEL),
             intent.data?.lastPathSegment,
         )
+    }
+
+    /**
+     * Compose can hold activity focus away from [LinuxXServerView]; forward keys the same way
+     * we forward scroll so the guest gets keyboard input.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val focus = currentFocus
+        if (focus is LinuxXServerView && focus.dispatchKeyEvent(event)) return true
+        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
+        if (content != null && dispatchKeyToLinuxView(content, event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun dispatchKeyToLinuxView(view: android.view.View, event: KeyEvent): Boolean {
+        if (view is LinuxXServerView) return view.dispatchKeyEvent(event)
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (dispatchKeyToLinuxView(view.getChildAt(i), event)) return true
+            }
+        }
+        return false
     }
 
     /**

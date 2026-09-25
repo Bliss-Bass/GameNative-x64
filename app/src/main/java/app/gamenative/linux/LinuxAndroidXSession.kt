@@ -229,10 +229,9 @@ class LinuxAndroidXSession private constructor(
         if (!window.attributes.isMapped) return
         // Skip override-redirect chrome (menus, tooltips).
         if (window.attributes.isOverrideRedirect) return
-        // Skip tiny dialogs (xmessage) and moderate terminal-sized windows — stretching
-        // them recreates a blank drawable and leaves chrome/text stranded. Only snap
-        // near-fullscreen clients (Firefox, etc.) to the freeform task.
-        if (window.width < (w * 3 / 4) || window.height < (h * 3 / 4)) return
+        // Skip tiny dialogs (xmessage ~90×60). Everything else in APP mode fills the
+        // freeform client area so xterm/Firefox match the Android window frame.
+        if (window.width < 200 || window.height < 150) return
         // Skip already-full windows (avoids drawable churn on the delayed re-fit).
         if (window.width == w && window.height == h && window.x.toInt() == 0 && window.y.toInt() == 0) return
         try {

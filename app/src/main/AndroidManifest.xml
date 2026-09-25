@@ -147,7 +147,7 @@
             android:documentLaunchMode="intoExisting"
             android:label="@string/linux_session_notification_title"
             android:resizeableActivity="true"
-            android:windowSoftInputMode="adjustResize"
+            android:windowSoftInputMode="adjustNothing|stateHidden"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode"
             android:theme="@style/Theme.Pluvia" />
 

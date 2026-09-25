@@ -134,6 +134,9 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     private int twoFingerGestureMode = TWO_FINGER_GESTURE_NONE;
     // Accumulated deltas for deciding which two-finger gesture to lock into
     private float accumulatedPinchDelta, accumulatedPanDelta;
+    /** Sub-pixel wheel accumulation for [TouchGestureConfig.PAN_SCROLL_WHEEL] and precision pads. */
+    private float scrollWheelAccumV, scrollWheelAccumH;
+    private static final float SCROLL_WHEEL_STEP_PX = 48f;
 
     // Settle window: ignore movement for first N ms after second finger lands (#1)
     // Also serves as a grace period for a third finger to arrive before 2F locks in
@@ -1273,6 +1276,8 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         twoFingerDragging = false;
         twoFingerTapPossible = false;
         twoFingerGestureMode = TWO_FINGER_GESTURE_NONE;
+        scrollWheelAccumV = 0f;
+        scrollWheelAccumH = 0f;
         accumulatedPinchDelta = 0;
         accumulatedPanDelta = 0;
         reclassifyPinchDelta = 0;
@@ -1440,6 +1445,8 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         twoFingerDragging = false;
         twoFingerTapPossible = false;
         twoFingerGestureMode = TWO_FINGER_GESTURE_NONE;
+        scrollWheelAccumV = 0f;
+        scrollWheelAccumH = 0f;
 
         threeFingerTapPossible = true;
         threeFingerDragging = false;
@@ -1906,6 +1913,36 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
             case TouchGestureConfig.PAN_RIGHT_CLICK_DRAG:
                 performClickDrag(dx, dy, Pointer.Button.BUTTON_RIGHT);
                 break;
+            case TouchGestureConfig.PAN_SCROLL_WHEEL:
+                // Finger-down → wheel up (natural content scroll), matching Linux RFB.
+                emitScrollWheelFromDelta(dy, dx);
+                break;
+        }
+    }
+
+    /**
+     * Convert view-pixel drag into X11 scroll-button clicks. Positive [deltaViewY]
+     * (finger moved down) scrolls content up.
+     */
+    private void emitScrollWheelFromDelta(float deltaViewY, float deltaViewX) {
+        scrollWheelAccumV += deltaViewY;
+        scrollWheelAccumH += deltaViewX;
+        while (scrollWheelAccumV <= -SCROLL_WHEEL_STEP_PX) {
+            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_DOWN);
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_DOWN);
+            scrollWheelAccumV += SCROLL_WHEEL_STEP_PX;
+        }
+        while (scrollWheelAccumV >= SCROLL_WHEEL_STEP_PX) {
+            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_UP);
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_UP);
+            scrollWheelAccumV -= SCROLL_WHEEL_STEP_PX;
+        }
+        while (scrollWheelAccumH <= -SCROLL_WHEEL_STEP_PX) {
+            // No horizontal wheel buttons in core X — skip or map later.
+            scrollWheelAccumH += SCROLL_WHEEL_STEP_PX;
+        }
+        while (scrollWheelAccumH >= SCROLL_WHEEL_STEP_PX) {
+            scrollWheelAccumH -= SCROLL_WHEEL_STEP_PX;
         }
     }
 
@@ -2354,21 +2391,19 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
                     handled = true;
                     break;
                 case MotionEvent.ACTION_SCROLL:
+                    // Precision touchpads send fractional AXIS_VSCROLL samples; accumulate
+                    // to whole notches instead of requiring |scrollY| >= 1 per event.
                     float scrollY = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-                    if (scrollY <= -1.0f) {
-                        if (xServer.isRelativeMouseMovement())
-                            xServer.getWinHandler().mouseEvent(MouseEventFlags.WHEEL, 0, 0, (int)scrollY);
-                        else {
-                            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_DOWN);
-                            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_DOWN);
+                    float scrollX = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+                    if (xServer.isRelativeMouseMovement() && xServer.getWinHandler() != null) {
+                        if (scrollY != 0f) {
+                            xServer.getWinHandler().mouseEvent(MouseEventFlags.WHEEL, 0, 0, (int) Math.signum(scrollY) *
+                                    Math.max(1, Math.round(Math.abs(scrollY))));
                         }
-                    } else if (scrollY >= 1.0f) {
-                        if (xServer.isRelativeMouseMovement())
-                            xServer.getWinHandler().mouseEvent(MouseEventFlags.WHEEL, 0, 0,(int)scrollY);
-                        else {
-                            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_UP);
-                            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_UP);
-                        }
+                    } else if (scrollY != 0f || scrollX != 0f) {
+                        // AXIS_VSCROLL positive = wheel up; emitScrollWheelFromDelta uses
+                        // finger-down positive → wheel up, so pass scrollY directly.
+                        emitScrollWheelFromDelta(scrollY * SCROLL_WHEEL_STEP_PX, scrollX * SCROLL_WHEEL_STEP_PX);
                     }
                     handled = true;
                     break;

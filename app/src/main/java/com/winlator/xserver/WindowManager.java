@@ -12,6 +12,9 @@ import com.winlator.xserver.events.ConfigureRequest;
 import com.winlator.xserver.events.DestroyNotify;
 import com.winlator.xserver.events.Event;
 import com.winlator.xserver.events.Expose;
+import com.winlator.xserver.events.FocusChange;
+import com.winlator.xserver.events.FocusIn;
+import com.winlator.xserver.events.FocusOut;
 import com.winlator.xserver.events.MapNotify;
 import com.winlator.xserver.events.MapRequest;
 import com.winlator.xserver.events.ResizeRequest;
@@ -153,8 +156,64 @@ public class WindowManager extends XResourceManager {
     }
 
     public void setFocus(Window focusedWindow, FocusRevertTo focusRevertTo) {
+        Window previous = this.focusedWindow;
         this.focusedWindow = focusedWindow;
         this.focusRevertTo = focusRevertTo;
+        // Native Linux clients (xterm/Xt) ignore KeyPress until they see FocusIn on a
+        // window that selected FocusChangeMask — often the shell parent, not the VT child.
+        if (previous == focusedWindow) return;
+        if (previous != null) {
+            sendFocusOutChain(previous);
+        }
+        if (focusedWindow != null) {
+            sendFocusInChain(focusedWindow);
+        }
+    }
+
+    /** Re-emit FocusIn for the current focus (e.g. after a parent map). */
+    public void reannounceFocus() {
+        if (focusedWindow != null) {
+            sendFocusInChain(focusedWindow);
+        }
+    }
+
+    /**
+     * X11 focus-chain notifications: the focus window gets NONLINEAR, then each ancestor
+     * that selected FocusChangeMask gets NONLINEAR_VIRTUAL. Without the parent FocusIn,
+     * Xt never assigns keyboard focus and discards KeyPress even when the VT selected it.
+     */
+    private void sendFocusInChain(Window target) {
+        if (target.hasEventListenerFor(Event.FOCUS_CHANGE)) {
+            target.sendEvent(
+                    Event.FOCUS_CHANGE,
+                    new FocusIn(target, FocusChange.Detail.NONLINEAR, FocusChange.Mode.NORMAL));
+        }
+        Window ancestor = target.getParent();
+        while (ancestor != null && ancestor != rootWindow) {
+            if (ancestor.hasEventListenerFor(Event.FOCUS_CHANGE)) {
+                ancestor.sendEvent(
+                        Event.FOCUS_CHANGE,
+                        new FocusIn(ancestor, FocusChange.Detail.NONLINEAR_VIRTUAL, FocusChange.Mode.NORMAL));
+            }
+            ancestor = ancestor.getParent();
+        }
+    }
+
+    private void sendFocusOutChain(Window target) {
+        if (target.hasEventListenerFor(Event.FOCUS_CHANGE)) {
+            target.sendEvent(
+                    Event.FOCUS_CHANGE,
+                    new FocusOut(target, FocusChange.Detail.NONLINEAR, FocusChange.Mode.NORMAL));
+        }
+        Window ancestor = target.getParent();
+        while (ancestor != null && ancestor != rootWindow) {
+            if (ancestor.hasEventListenerFor(Event.FOCUS_CHANGE)) {
+                ancestor.sendEvent(
+                        Event.FOCUS_CHANGE,
+                        new FocusOut(ancestor, FocusChange.Detail.NONLINEAR_VIRTUAL, FocusChange.Mode.NORMAL));
+            }
+            ancestor = ancestor.getParent();
+        }
     }
 
     public FocusRevertTo getFocusRevertTo() {
