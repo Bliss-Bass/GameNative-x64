@@ -1454,9 +1454,9 @@ object PrefManager {
         }
 
     /**
-     * How large the Linux session draws, as a percentage of Android's own UI scale. 100 means a
-     * Linux app is the size an Android app would be on this panel; see [LinuxDisplayScale], which
-     * owns the conversion between Android's 160dpi baseline and X's 96dpi one.
+     * How large the Linux session draws, as a percentage of the Android-comparable size.
+     * 100 aims to match Android touch chrome on this panel (baseline conversion plus a
+     * desktop-toolkit visual lift); see [LinuxDisplayScale].
      */
     private val LINUX_UI_SCALE_PERCENT = intPreferencesKey("linux_ui_scale_percent")
     var linuxUiScalePercent: Int
