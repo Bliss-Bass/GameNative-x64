@@ -13,14 +13,12 @@ import app.gamenative.PrefManager
  * them Android's 219 therefore asks for 219/96 = 2.28x, which is why Linux apps came out roughly
  * 1.7x larger than Android's own UI on the same screen rather than matching it.
  *
- * The fix is to convert between the baselines instead of passing the number through: a density
- * that means 1.37x to Android has to be expressed as 131 for it to mean 1.37x to X. Every
- * consumer -- the X server's -dpi, Xft/DPI in XSETTINGS, the panel's height -- goes through here,
- * because they only agree with each other if they share the arithmetic.
+ * Step one converts between the baselines so the *scale factor* matches (219 → 131). That alone
+ * is still short of Android chrome size: Adwaita/Qt widgets are designed for mice (~34px at
+ * 96dpi) while Material uses ~48dp touch targets, so equal factors still look about 0.65–0.75×
+ * Android. Step two applies [DESKTOP_TO_ANDROID_VISUAL] so 100% lands near Android control size.
  *
- * On top of that sits a user multiplier, since matching Android is a sensible default rather than
- * a universally right answer: a desktop app's controls are designed for a mouse, and someone
- * driving this by touch may well want them larger than Android's own.
+ * On top of that sits a user multiplier for comfort (touch vs mouse, preference).
  */
 object LinuxDisplayScale {
 
@@ -29,6 +27,12 @@ object LinuxDisplayScale {
 
     /** [DisplayMetrics.DENSITY_DEFAULT] -- the density at which one dp is one pixel. */
     private const val ANDROID_BASELINE_DPI = 160
+
+    /**
+     * Lifts matched X dpi so desktop-toolkit chrome approaches Material touch size.
+     * Tuned from Calculator vs Android dock/caption sizing on 219dpi tablets (~0.67× before).
+     */
+    private const val DESKTOP_TO_ANDROID_VISUAL = 1.5f
 
     const val DEFAULT_SCALE_PERCENT = 100
 
@@ -43,12 +47,13 @@ object LinuxDisplayScale {
     /**
      * The DPI to give X for an Android [densityDpi], with [scalePercent] applied.
      *
-     * Pure so it can be reasoned about (and tested) without a Context: the two baselines and the
-     * multiplier are the whole of the calculation.
+     * Pure so it can be reasoned about (and tested) without a Context: the two baselines, the
+     * desktop-to-Android visual lift, and the multiplier are the whole of the calculation.
      */
     fun xdpi(densityDpi: Int, scalePercent: Int): Int {
         val matched = densityDpi.toFloat() * X_BASELINE_DPI / ANDROID_BASELINE_DPI
-        val scaled = matched * scalePercent / 100f
+        val visual = matched * DESKTOP_TO_ANDROID_VISUAL
+        val scaled = visual * scalePercent / 100f
         return scaled.toInt().coerceIn(MIN_DPI, MAX_DPI)
     }
 
