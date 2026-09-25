@@ -190,7 +190,29 @@ public class Drawable extends XResource {
                 this.texture = new Texture();
                 this.data = ByteBuffer.allocateDirect(newWidth * newHeight * 4).order(ByteOrder.LITTLE_ENDIAN);
             }
+            // Opaque white — zeroed buffers show as a black strip beside GTK content that
+            // has not yet painted the full ConfigureNotify size (common after freeform resize).
+            fillOpaqueWhite();
         }
+    }
+
+    private void fillOpaqueWhite() {
+        if (data == null) return;
+        // X11 raster path stores BGRA; opaque white is FF FF FF FF either way.
+        byte[] row = new byte[Math.min(data.capacity(), width * 4)];
+        for (int i = 0; i + 3 < row.length; i += 4) {
+            row[i] = (byte) 0xFF;
+            row[i + 1] = (byte) 0xFF;
+            row[i + 2] = (byte) 0xFF;
+            row[i + 3] = (byte) 0xFF;
+        }
+        data.clear();
+        while (data.hasRemaining()) {
+            int n = Math.min(row.length, data.remaining());
+            data.put(row, 0, n);
+        }
+        data.rewind();
+        forceUpdate();
     }
 
     private short getStride() {

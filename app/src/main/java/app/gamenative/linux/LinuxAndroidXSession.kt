@@ -331,7 +331,11 @@ class LinuxAndroidXSession private constructor(
 
         val screenMatches = server.screenInfo.width == w && server.screenInfo.height == h
         val guestsFill = topLevelsFillScreen(server, w, h)
-        if (screenMatches && guestsFill) {
+        val vr = server.renderer as? com.winlator.renderer.VulkanRenderer
+        val surfaceMatches = vr == null ||
+            (vr.surfaceWidth == fw && vr.surfaceHeight == fh) ||
+            (vr.surfaceWidth <= 0 || vr.surfaceHeight <= 0)
+        if (screenMatches && guestsFill && surfaceMatches) {
             Timber.i(
                 "[LinuxAndroidXSession]: reconcile round %d ok %dx%d",
                 round, w.toInt(), h.toInt(),
@@ -341,12 +345,14 @@ class LinuxAndroidXSession private constructor(
         }
 
         Timber.i(
-            "[LinuxAndroidXSession]: reconcile round %d screen=%dx%d frame=%dx%d guestsFill=%s",
+            "[LinuxAndroidXSession]: reconcile round %d screen=%dx%d frame=%dx%d surface=%dx%d guestsFill=%s",
             round,
             server.screenInfo.width.toInt(),
             server.screenInfo.height.toInt(),
             w.toInt(),
             h.toInt(),
+            vr?.surfaceWidth ?: -1,
+            vr?.surfaceHeight ?: -1,
             guestsFill,
         )
         // Past grace for this round so fit is allowed if GTK shrank the top-level.

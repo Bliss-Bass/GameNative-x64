@@ -63,6 +63,13 @@ class LinuxXServerView(
 
     init {
         xServer.renderer = xServerView.renderer
+        // Freeform must fill the Android client area. SCALE_FIT letterboxes when the
+        // Vulkan surface and X screen briefly disagree after a resize → black strips.
+        (xServerView.renderer as? VulkanRenderer)?.setEffect(
+            VulkanRenderer.EFFECT_NONE,
+            0f,
+            VulkanRenderer.SCALE_STRETCH,
+        )
         touchpadView = TouchpadView(context, xServer, /* capturePointerOnExternalMouse = */ true).apply {
             setTouchscreenMode(true)
             setMoveCursorToTouchpoint(true)
@@ -107,6 +114,7 @@ class LinuxXServerView(
         // Freeform resizes change the Vulkan surface and Compose client area on slightly
         // different clocks; refresh present + pointer maps whenever the view settles.
         if (w > 0 && h > 0) {
+            syncSurfaceToFrame(w, h)
             touchpadView.refreshScreenXform()
             (xServerView.renderer as? VulkanRenderer)?.onScreenInfoChanged()
             pendingFrameNotify?.let { frameHandler.removeCallbacks(it) }
@@ -119,6 +127,22 @@ class LinuxXServerView(
             // still runs multi-round checks after each settled size.
             frameHandler.postDelayed(notify, FRAME_NOTIFY_DEBOUNCE_MS)
         }
+    }
+
+    /**
+     * Lock the SurfaceView buffer to the freeform client pixels so surfaceChanged
+     * fires with the same size as [XServer.screenInfo] (avoids SCALE_FIT letterboxing).
+     */
+    fun syncSurfaceToFrame(frameW: Int = width, frameH: Int = height) {
+        if (frameW < 64 || frameH < 64) return
+        val holder = xServerView.holder
+        // Already matched — avoid thrashing the producer.
+        if (holder.surfaceFrame.width() == frameW && holder.surfaceFrame.height() == frameH) {
+            return
+        }
+        Timber.i("[LinuxXServerView]: setFixedSize %dx%d (was %dx%d)",
+            frameW, frameH, holder.surfaceFrame.width(), holder.surfaceFrame.height())
+        holder.setFixedSize(frameW, frameH)
     }
 
     override fun onCheckIsTextEditor(): Boolean = imeWanted
@@ -322,12 +346,15 @@ class LinuxXServerView(
 
     /** After the X screen is resized to match the Android window, refresh present + input maps. */
     fun onXScreenResized() {
+        syncSurfaceToFrame()
         touchpadView.refreshScreenXform()
         (xServerView.renderer as? VulkanRenderer)?.onScreenInfoChanged()
         Timber.i(
-            "[LinuxXServerView]: screen now %dx%d",
+            "[LinuxXServerView]: screen now %dx%d surface=%dx%d",
             xServer.screenInfo.width.toInt(),
             xServer.screenInfo.height.toInt(),
+            (xServerView.renderer as? VulkanRenderer)?.surfaceWidth ?: -1,
+            (xServerView.renderer as? VulkanRenderer)?.surfaceHeight ?: -1,
         )
     }
 
