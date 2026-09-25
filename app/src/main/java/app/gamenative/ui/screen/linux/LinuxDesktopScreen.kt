@@ -36,7 +36,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
-private const val RESIZE_DEBOUNCE_MS = 350L
+private const val RESIZE_DEBOUNCE_MS = 200L
+/** Below this we still resize X to the view — never leave a stale larger screen. */
+private const val MIN_SESSION_PX = 64
+/** Initial open waits for a usable freeform client area. */
+private const val MIN_OPEN_PX = 320
 
 /**
  * A window onto a Linux session.
@@ -70,19 +74,28 @@ fun LinuxDesktopScreen(
     var contentSize by remember { mutableStateOf(IntSize.Zero) }
 
     LaunchedEffect(key, contentSize) {
-        if (contentSize.width < 320 || contentSize.height < 240) return@LaunchedEffect
+        if (contentSize.width < MIN_SESSION_PX || contentSize.height < MIN_SESSION_PX) {
+            return@LaunchedEffect
+        }
 
         val active = session
         if (active != null) {
-            // Debounce freeform drag jitter (matches RFB desktop-size debounce).
+            // Debounce freeform drag jitter. Always apply the latest size — skipping when
+            // under 320px left the X screen larger than the Android frame.
             delay(RESIZE_DEBOUNCE_MS)
-            if (contentSize.width < 320 || contentSize.height < 240) return@LaunchedEffect
+            if (contentSize.width < MIN_SESSION_PX || contentSize.height < MIN_SESSION_PX) {
+                return@LaunchedEffect
+            }
             Timber.i(
                 "[LinuxDesktopScreen]: resizing session to content %dx%d",
                 contentSize.width,
                 contentSize.height,
             )
             active.resize(contentSize.width, contentSize.height)
+            return@LaunchedEffect
+        }
+
+        if (contentSize.width < MIN_OPEN_PX || contentSize.height < MIN_OPEN_PX) {
             return@LaunchedEffect
         }
 

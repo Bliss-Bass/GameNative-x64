@@ -94,6 +94,16 @@ class LinuxXServerView(
         )
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // Freeform resizes change the Vulkan surface and Compose client area on slightly
+        // different clocks; refresh present + pointer maps whenever the view settles.
+        if (w > 0 && h > 0) {
+            touchpadView.refreshScreenXform()
+            (xServerView.renderer as? VulkanRenderer)?.onScreenInfoChanged()
+        }
+    }
+
     override fun onCheckIsTextEditor(): Boolean = imeWanted
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {

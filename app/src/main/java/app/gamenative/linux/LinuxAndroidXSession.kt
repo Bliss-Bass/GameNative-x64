@@ -51,10 +51,11 @@ class LinuxAndroidXSession private constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
     /** Runnable tokens for delayed map re-fits so a freeform resize can cancel them. */
     private val pendingMapRefits = mutableListOf<Runnable>()
+    private var pendingFillRefit: Runnable? = null
     /**
      * While uptime is below this, ignore geometry snap-backs. Freeform resize reallocates a
-     * blank drawable; GTK then Presents once; an immediate snap/delayed re-fit would blank
-     * the buffer again and leave a white window until the next resize.
+     * blank drawable; GTK then Presents once; an immediate snap would blank the buffer again.
+     * A single fill-refit is scheduled for after this grace so the guest still fills the frame.
      */
     @Volatile
     private var suppressGeometryFitUntilMs: Long = 0L
@@ -71,8 +72,11 @@ class LinuxAndroidXSession private constructor(
         private const val FIRST_DISPLAY = 10
         private const val DISPLAY_COUNT = 16
         private const val READY_TIMEOUT_MS = 15_000L
-        /** Grace after freeform resize before map/geometry snap-backs may re-fit. */
-        private const val RESIZE_FIT_GRACE_MS = 2_500L
+        /** Grace after freeform resize before geometry snap-backs may re-fit. */
+        private const val RESIZE_FIT_GRACE_MS = 600L
+        /** One fill-refit after grace so GTK's preferred size does not leave letterboxing. */
+        private const val RESIZE_FILL_REFIT_MS = 700L
+        private const val MIN_RESIZE_PX = 64
 
         private val claimed = mutableSetOf<Int>()
 
@@ -254,6 +258,25 @@ class LinuxAndroidXSession private constructor(
             for (r in pendingMapRefits) mainHandler.removeCallbacks(r)
             pendingMapRefits.clear()
         }
+        pendingFillRefit?.let { mainHandler.removeCallbacks(it) }
+        pendingFillRefit = null
+    }
+
+    private fun scheduleFillRefit(server: XServer, w: Short, h: Short) {
+        pendingFillRefit?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable {
+            pendingFillRefit = null
+            if (!isRunning || xServer !== server) return@Runnable
+            // Past grace: snap top-levels that GTK shrank so content fills the frame again.
+            for (child in server.windowManager.rootWindow.children.toList()) {
+                fitTopLevel(server, child, w, h)
+            }
+            (server.renderer as? com.winlator.renderer.VulkanRenderer)
+                ?.runCatching { onScreenInfoChanged() }
+            attachedView?.onXScreenResized()
+        }
+        pendingFillRefit = r
+        mainHandler.postDelayed(r, RESIZE_FILL_REFIT_MS)
     }
 
     private fun fitTopLevel(
@@ -419,9 +442,17 @@ class LinuxAndroidXSession private constructor(
     override fun resize(width: Int, height: Int) {
         val server = xServer ?: return
         if (!isRunning) return
-        val w = width.coerceAtLeast(320).toShort()
-        val h = height.coerceAtLeast(240).toShort()
-        if (server.screenInfo.width == w && server.screenInfo.height == h) return
+        // Match the Android client area exactly. Inflating to 320x240 when the freeform
+        // window was smaller left the X desktop larger than the frame.
+        val w = width.coerceAtLeast(MIN_RESIZE_PX).toShort()
+        val h = height.coerceAtLeast(MIN_RESIZE_PX).toShort()
+        if (server.screenInfo.width == w && server.screenInfo.height == h) {
+            // Still refresh present/input maps — surface may have caught up after screen.
+            (server.renderer as? com.winlator.renderer.VulkanRenderer)
+                ?.runCatching { onScreenInfoChanged() }
+            attachedView?.onXScreenResized()
+            return
+        }
 
         Timber.i(
             "[LinuxAndroidXSession]: resizing X screen %dx%d -> %dx%d",
@@ -430,9 +461,6 @@ class LinuxAndroidXSession private constructor(
             w.toInt(),
             h.toInt(),
         )
-        // Cancel map-time delayed fits and suppress geometry snap-backs: forceGeometry
-        // reallocates a blank buffer; presenting it (or fitting again before GTK paints)
-        // is what left Calculator white after a brief correct frame.
         cancelPendingMapRefits()
         suppressGeometryFitUntilMs = android.os.SystemClock.uptimeMillis() + RESIZE_FIT_GRACE_MS
         try {
@@ -448,12 +476,14 @@ class LinuxAndroidXSession private constructor(
                     }
                 }
             }
-            // Update present transform only — do not push the blank reallocated buffers.
-            // GTK's next Present fills the drawable; poking here made the white flash stick.
+            // Transform only — do not present blank reallocated buffers.
             (server.renderer as? com.winlator.renderer.VulkanRenderer)
                 ?.runCatching { onScreenInfoChanged() }
                 ?.onFailure { Timber.w(it, "[LinuxAndroidXSession]: onScreenInfoChanged failed") }
             attachedView?.onXScreenResized()
+            if (mode == LinuxDesktopConfig.Mode.APP) {
+                scheduleFillRefit(server, w, h)
+            }
         } catch (t: Throwable) {
             Timber.w(t, "[LinuxAndroidXSession]: resize to %dx%d failed", w.toInt(), h.toInt())
         }
