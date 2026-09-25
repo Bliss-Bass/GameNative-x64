@@ -4,11 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,15 +19,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxSession
 import app.gamenative.linux.LinuxSessions
+import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -61,10 +61,15 @@ fun LinuxDesktopScreen(
     var session by remember { mutableStateOf<LinuxSession?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
+    // Android X has no RandR: size the X screen to this composable once layout settles.
+    // safeDrawing clears freeform captionBar + status/nav/cutout so onSizeChanged is the
+    // true client area (not the region under the Android window frame).
+    var contentSize by remember { mutableStateOf(IntSize.Zero) }
 
-    LaunchedEffect(key) {
-        // Covers a userland installed before a package was added to the session, which is
-        // an apt run rather than a reinstall, and can take long enough to need a message.
+    LaunchedEffect(key, contentSize) {
+        if (contentSize.width < 320 || contentSize.height < 240) return@LaunchedEffect
+        if (session != null) return@LaunchedEffect
+
         LinuxRootfs.ensureDisplaySession(context) { status = it.message }
             .onFailure {
                 Timber.e(it, "[LinuxDesktopScreen]: could not complete the session install")
@@ -73,13 +78,18 @@ fun LinuxDesktopScreen(
             }
         status = null
 
+        Timber.i(
+            "[LinuxDesktopScreen]: opening session at content %dx%d",
+            contentSize.width,
+            contentSize.height,
+        )
         LinuxSessions.open(
             context = context,
             key = key,
             label = label ?: context.getString(R.string.linux_session_notification_title),
             argv = argv,
-            width = metrics.widthPixels,
-            height = metrics.heightPixels,
+            width = contentSize.width,
+            height = contentSize.height,
             densityDpi = metrics.densityDpi,
         )
             .onSuccess { opened ->
@@ -90,19 +100,16 @@ fun LinuxDesktopScreen(
             .onFailure { error = it.message }
     }
 
-    // Keyed on the session key rather than on the session, since assigning the session is itself
-    // a key change and would tear down what had just been attached.
     DisposableEffect(key) {
         onDispose { LinuxSessions.detach(context, key) }
     }
 
     Box(
-        // Without this the desktop is drawn under the window caption and the status bar,
-        // which hides the top rows -- where a terminal puts its first line.
         modifier = Modifier
             .fillMaxSize()
+            .pluviaSafeDrawingPadding()
             .background(Color.Black)
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            .onSizeChanged { contentSize = it },
         contentAlignment = Alignment.Center,
     ) {
         val active = session
@@ -117,9 +124,6 @@ fun LinuxDesktopScreen(
                             error = failure.message
                             return@createView
                         }
-                        // The application in the session exited, which no lifetime mode is a
-                        // reason to keep an empty X server for: "keep it running" is about
-                        // closing the window, not about the program ending.
                         LinuxSessions.stop(context, key)
                         onExit()
                     }.apply { requestFocus() }

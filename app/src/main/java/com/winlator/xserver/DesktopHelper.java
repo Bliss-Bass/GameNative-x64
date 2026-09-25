@@ -40,7 +40,10 @@ public abstract class DesktopHelper {
         if (window.isApplicationWindow()) {
             boolean parentIsRoot = window.getParent() == xServer.windowManager.rootWindow;
             xServer.windowManager.setFocus(window, parentIsRoot ? WindowManager.FocusRevertTo.POINTER_ROOT : WindowManager.FocusRevertTo.PARENT);
-            xServer.getWinHandler().bringToFront(window.getClassName(), window.getHandle());
+            // Null when Linux apps use Android X without a Wine WinHandler.
+            if (xServer.getWinHandler() != null) {
+                xServer.getWinHandler().bringToFront(window.getClassName(), window.getHandle());
+            }
         }
     }
 

@@ -25,11 +25,29 @@ public class SyncExtension implements Extension {
     private byte firstErrorId = 0;
 
     private static abstract class ClientOpcodes {
+        private static final byte INITIALIZE = 0;
         private static final byte CREATE_FENCE = 14;
         private static final byte TRIGGER_FENCE = 15;
         private static final byte RESET_FENCE = 16;
         private static final byte DESTROY_FENCE = 17;
         private static final byte AWAIT_FENCE = 19;
+    }
+
+    private static final int SERVER_MAJOR = 3;
+    private static final int SERVER_MINOR = 1;
+
+    private void initialize(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        // client-major, client-minor (CARD8 each) then pad
+        inputStream.skip(Math.min(4, client.getRemainingRequestLength()));
+        try (com.winlator.xconnector.XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte) 0);
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt(0);
+            outputStream.writeByte((byte) SERVER_MAJOR);
+            outputStream.writeByte((byte) SERVER_MINOR);
+            outputStream.writePad(22);
+        }
     }
 
     @Override
@@ -218,6 +236,9 @@ public class SyncExtension implements Extension {
     public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int opcode = client.getRequestData();
         switch (opcode) {
+            case ClientOpcodes.INITIALIZE:
+                initialize(client, inputStream, outputStream);
+                break;
             case ClientOpcodes.CREATE_FENCE :
                 createFence(client, inputStream, outputStream);
                 break;
@@ -234,7 +255,11 @@ public class SyncExtension implements Extension {
                 awaitFence(client, inputStream, outputStream);
                 break;
             default:
-                throw new BadImplementation();
+                // Ignore other SYNC requests (counters, alarms) — skip body and succeed
+                // so Linux clients that probe the full extension stay alive.
+                int remaining = client.getRemainingRequestLength();
+                if (remaining > 0) inputStream.skip(remaining);
+                break;
         }
     }
 }

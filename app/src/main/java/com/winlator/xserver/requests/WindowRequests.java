@@ -159,6 +159,36 @@ public abstract class WindowRequests {
         client.xServer.windowManager.unmapWindow(window);
     }
 
+    /**
+     * Fill a window rectangle with its background (we use opaque black) and optionally
+     * generate Expose so Athena/xterm redraw. width/height 0 means extend to the edge.
+     */
+    public static void clearArea(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        boolean exposures = client.getRequestData() == 1;
+        int windowId = inputStream.readInt();
+        short x = inputStream.readShort();
+        short y = inputStream.readShort();
+        int width = inputStream.readShort() & 0xffff;
+        int height = inputStream.readShort() & 0xffff;
+
+        Window window = client.xServer.windowManager.getWindow(windowId);
+        if (window == null) throw new BadWindow(windowId);
+        if (!window.isInputOutput()) return;
+
+        Drawable content = window.getContent();
+        if (content == null) return;
+
+        int w = width == 0 ? Math.max(0, content.width - x) : width;
+        int h = height == 0 ? Math.max(0, content.height - y) : height;
+        if (w > 0 && h > 0) {
+            // WindowAttributes stores background by painting the content; default is black.
+            content.fillRect(x, y, w, h, 0xff000000);
+        }
+        if (exposures || w == 0 || h == 0) {
+            window.sendEvent(Event.EXPOSURE, new com.winlator.xserver.events.Expose(window));
+        }
+    }
+
     private static void mapSubWindows(XClient client, int windowId) throws XRequestError {
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) {

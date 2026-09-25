@@ -49,11 +49,8 @@ object LinuxRootfs {
      * What the graphical session is built from. All of it comes from apt, which is the
      * point of running a glibc userland: none of it has to be cross-compiled for bionic.
      *
-     * - Xtigervnc is the X server and the RFB server in one process, so damage arrives as
-     *   the server generates it rather than through a polling screen-scraper, and the
-     *   screen can be resized at runtime -- neither of which Xvfb plus x11vnc can do.
-     * - openbox is what makes a resize reach the application: X clients do not resize
-     *   because the screen did, they resize when a window manager configures them.
+     * - openbox remains available for a future shared desktop mode; APP sessions on Android X
+     *   maximize guest windows from the host side instead of a guest WM.
      * - xsettingsd carries DPI changes into running GTK and Qt apps, which otherwise read
      *   it once at startup.
      * - xterm is what openbox's root menu means by a terminal, and without it the desktop
@@ -62,8 +59,7 @@ object LinuxRootfs {
      *   menu alone means a long press for everything on a screen with no right button.
      * - x11-xserver-utils is here for xsetroot, which paints the root window: the X server's
      *   own default is a black-and-white weave from the 1980s.
-     * - wmctrl and x11-utils (for xprop) are what make an application fill its Android window
-     *   even when openbox's own rule cannot. See [LinuxDesktopConfig.FIT_WINDOWS].
+     * - wmctrl and x11-utils (for xprop) remain useful for desktop tooling and diagnostics.
      * - The font packages are not optional here: Recommends are off, so nothing else pulls
      *   them in, and both a bitmap font for xterm and a scalable one for everything that
      *   draws through Xft have to be present or clients fail to start on a missing font.
@@ -85,7 +81,6 @@ object LinuxRootfs {
         "libpulse0",
         "ffmpeg",
         "librsvg2-common",
-        "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
         "xterm",
@@ -114,7 +109,6 @@ object LinuxRootfs {
 
     /** Proof the packages above landed, checked instead of parsing apt's output. */
     private val DISPLAY_BINARIES = listOf(
-        "usr/bin/Xtigervnc",
         "usr/bin/openbox",
         "usr/bin/xsettingsd",
         "usr/bin/xterm",
@@ -533,20 +527,24 @@ object LinuxRootfs {
      * Read from here without running xrdb: Xt falls back to ~/.Xdefaults when the root
      * window carries no resource manager property, and nothing in this session sets one.
      *
-     * xterm defaults to a bitmap font, which ignores DPI entirely and so stays pixel-tiny
-     * on a dense panel however the server is configured. Naming a scalable font moves it
-     * onto Xft, where the server's DPI decides the size, and a point size is then
-     * meaningful rather than a guess.
+     * Android X has no RENDER extension, so an Xft faceName leaves xterm unable to draw
+     * glyphs. Core fonts (server-side ImageText/PolyText) are what work; Xft.dpi is still
+     * written so GTK/Qt clients that read this file agree with xsettingsd.
      */
     private fun writeXdefaults(rootfs: File) {
+        // Placeholder until a session rewrites this with the real matched DPI on launch.
+        val dpi = LinuxDisplayScale.xdpi(160, LinuxDisplayScale.DEFAULT_SCALE_PERCENT)
         File(rootfs, "root/.Xdefaults").writeText(
             """
-            XTerm*faceName: DejaVu Sans Mono
-            XTerm*faceSize: 11
+            Xft.dpi: $dpi
+            XTerm*font: fixed
             XTerm*background: black
             XTerm*foreground: white
             XTerm*scrollBar: false
             XTerm*saveLines: 4096
+            UXTerm*font: fixed
+            UXTerm*background: black
+            UXTerm*foreground: white
             """.trimIndent() + "\n",
         )
     }

@@ -49,6 +49,21 @@ public abstract class CursorRequests {
         client.registerAsOwnerOfResource(cursor);
     }
 
+    /**
+     * CreateGlyphCursor from a font glyph. We have no glyph bitmaps; allocate an invisible
+     * cursor so the resource id is valid (skipping left xterm with a dangling cursor id).
+     */
+    public static void createGlyphCursor(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        int cursorId = inputStream.readInt();
+        inputStream.skip(8); // source-font, mask-font
+        inputStream.skip(4); // source-char, mask-char
+        inputStream.skip(12); // fore/back RGB
+        if (!client.isValidResourceId(cursorId)) throw new BadIdChoice(cursorId);
+        Cursor cursor = client.xServer.cursorManager.createEmptyCursor(cursorId);
+        if (cursor == null) throw new BadIdChoice(cursorId);
+        client.registerAsOwnerOfResource(cursor);
+    }
+
     public static void freeCursor(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
         client.xServer.cursorManager.freeCursor(inputStream.readInt());
     }

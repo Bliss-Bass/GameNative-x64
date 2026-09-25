@@ -293,6 +293,102 @@ public class Drawable extends XResource {
         forceUpdate();
     }
 
+    /**
+     * Core-font ImageText / PolyText: rasterise with Android's monospace onto this drawable.
+     * {@code x,y} is the X11 baseline origin. When {@code opaque}, the character cells are
+     * filled with {@code background} first (ImageText8); otherwise only the glyphs are drawn.
+     */
+    public void drawText(int x, int y, String text, int foreground, int background, boolean opaque, Font font) {
+        if (this.data == null || text == null || text.isEmpty() || font == null) return;
+
+        android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setTypeface(android.graphics.Typeface.MONOSPACE);
+        paint.setTextSize(font.pixelSize);
+        paint.setColor(0xff000000 | (foreground & 0xffffff));
+
+        int textWidth = Math.max(1, Math.round(paint.measureText(text)));
+        int cellHeight = Math.max(1, font.ascent + font.descent);
+        android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                textWidth, cellHeight, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+        if (opaque) {
+            canvas.drawColor(0xff000000 | (background & 0xffffff));
+        } else {
+            canvas.drawColor(android.graphics.Color.TRANSPARENT);
+        }
+        canvas.drawText(text, 0, font.ascent, paint);
+
+        int dstX = x;
+        int dstY = y - font.ascent;
+        int[] pixels = new int[textWidth * cellHeight];
+        bitmap.getPixels(pixels, 0, textWidth, 0, 0, textWidth, cellHeight);
+        bitmap.recycle();
+
+        ByteBuffer src = ByteBuffer.allocateDirect(textWidth * cellHeight * 4).order(ByteOrder.LITTLE_ENDIAN);
+            for (int pixel : pixels) {
+            int a = (pixel >>> 24) & 0xff;
+            if (!opaque && a == 0) {
+                src.putInt(0);
+                continue;
+            }
+            // Android ARGB → X11 BGRA bytes.
+            int r = (pixel >>> 16) & 0xff;
+            int g = (pixel >>> 8) & 0xff;
+            int b = pixel & 0xff;
+            src.put((byte) b);
+            src.put((byte) g);
+            src.put((byte) r);
+            src.put((byte) (opaque ? 0xff : a));
+        }
+        src.rewind();
+        if (!opaque) {
+            // Copy only non-transparent glyphs over existing pixels.
+            blitGlyphs(dstX, dstY, textWidth, cellHeight, src);
+        } else {
+            drawImage((short) 0, (short) 0, (short) dstX, (short) dstY,
+                    (short) textWidth, (short) cellHeight, (byte) 32, src,
+                    (short) textWidth, (short) cellHeight);
+        }
+    }
+
+    private void blitGlyphs(int dstX, int dstY, int srcW, int srcH, ByteBuffer src) {
+        dstX = (short)Mathf.clamp(dstX, 0, this.width - 1);
+        dstY = (short)Mathf.clamp(dstY, 0, this.height - 1);
+        int copyW = srcW;
+        int copyH = srcH;
+        if ((dstX + copyW) > this.width) copyW = this.width - dstX;
+        if ((dstY + copyH) > this.height) copyH = this.height - dstY;
+        if (copyW <= 0 || copyH <= 0) return;
+
+        ByteBuffer dst = this.data;
+        int dstStride = this.getStride();
+        boolean rgba = isRgbaBacked();
+        for (int row = 0; row < copyH; row++) {
+            for (int col = 0; col < copyW; col++) {
+                int srcIndex = (row * srcW + col) * 4;
+                int a = src.get(srcIndex + 3) & 0xff;
+                if (a == 0) continue;
+                int b = src.get(srcIndex) & 0xff;
+                int g = src.get(srcIndex + 1) & 0xff;
+                int r = src.get(srcIndex + 2) & 0xff;
+                int dstIndex = ((dstY + row) * dstStride + (dstX + col)) * 4;
+                if (rgba) {
+                    dst.put(dstIndex, (byte) r);
+                    dst.put(dstIndex + 1, (byte) g);
+                    dst.put(dstIndex + 2, (byte) b);
+                    dst.put(dstIndex + 3, (byte) 0xff);
+                } else {
+                    dst.put(dstIndex, (byte) b);
+                    dst.put(dstIndex + 1, (byte) g);
+                    dst.put(dstIndex + 2, (byte) r);
+                    dst.put(dstIndex + 3, (byte) 0xff);
+                }
+            }
+        }
+        dst.rewind();
+        forceUpdate();
+    }
+
     public void drawAlphaMaskedBitmap(byte foreRed, byte foreGreen, byte foreBlue, byte backRed, byte backGreen, byte backBlue, Drawable srcDrawable, Drawable maskDrawable) {
         ByteBuffer byteBuffer;
         ByteBuffer byteBuffer2 = this.data;

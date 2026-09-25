@@ -28,6 +28,16 @@ public class WindowManager extends XResourceManager {
     private Window focusedWindow;
     private FocusRevertTo focusRevertTo = FocusRevertTo.NONE;
     private final ArrayList<OnWindowModificationListener> onWindowModificationListeners = new ArrayList<>();
+    /**
+     * When true, Map/Configure complete locally even if a client selected
+     * SubstructureRedirect on the parent. Linux APP sessions have no WM answering
+     * MapRequest, so without this xterm never appears on screen.
+     */
+    private boolean automanageTopLevel = false;
+
+    public void setAutomanageTopLevel(boolean automanageTopLevel) {
+        this.automanageTopLevel = automanageTopLevel;
+    }
 
     public interface OnWindowModificationListener {
         default void onMapWindow(Window window) {}
@@ -93,7 +103,9 @@ public class WindowManager extends XResourceManager {
     public void mapWindow(Window window) {
         if (!window.attributes.isMapped()) {
             Window parent = window.getParent();
-            if (!parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT) || window.attributes.isOverrideRedirect()) {
+            if (automanageTopLevel
+                    || !parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT)
+                    || window.attributes.isOverrideRedirect()) {
                 window.attributes.setMapped(true);
                 window.sendEvent(Event.STRUCTURE_NOTIFY, new MapNotify(window, window));
                 parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new MapNotify(parent, window));
@@ -187,6 +199,24 @@ public class WindowManager extends XResourceManager {
         parent.addChild(window);
         triggerOnCreateResourceListener(window);
         return window;
+    }
+
+    /**
+     * Resize/move a window as a WM would, without SubstructureRedirect.
+     * Used by Linux app sessions that run without openbox on Android X.
+     */
+    public void forceGeometry(Window window, short x, short y, short width, short height) {
+        if (window == null || window == rootWindow) return;
+        if (width <= 0 || height <= 0) return;
+        changeWindowGeometry(window, x, y, width, height);
+        window.setBorderWidth((short) 0);
+        Window previousSibling = window.previousSibling();
+        boolean overrideRedirect = window.attributes.isOverrideRedirect();
+        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        Window parent = window.getParent();
+        if (parent != null) {
+            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        }
     }
 
     private void changeWindowGeometry(Window window, short x, short y, short width, short height) {
@@ -285,7 +315,9 @@ public class WindowManager extends XResourceManager {
 
         Window parent = window.getParent();
         boolean overrideRedirect = window.attributes.isOverrideRedirect();
-        if (!parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT) || overrideRedirect) {
+        if (automanageTopLevel
+                || !parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT)
+                || overrideRedirect) {
             changeWindowGeometry(window, x, y, width, height);
 
             window.setBorderWidth(borderWidth);

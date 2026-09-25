@@ -8,7 +8,6 @@ import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.XClient;
-import com.winlator.xserver.errors.BadImplementation;
 import com.winlator.xserver.errors.BadValue;
 import com.winlator.xserver.errors.XRequestError;
 
@@ -52,6 +51,10 @@ public class XFixesExtension implements Extension {
 
     private static abstract class ClientOpcodes {
         private static final int QUERY_VERSION = 0;
+        private static final int CHANGE_SAVE_SET = 1;
+        private static final int SELECT_SELECTION_INPUT = 2;
+        private static final int SELECT_CURSOR_INPUT = 3;
+        private static final int GET_CURSOR_IMAGE = 4;
         private static final int CREATE_REGION = 5;
         private static final int DESTROY_REGION = 10;
         private static final int SET_REGION = 11;
@@ -110,6 +113,29 @@ public class XFixesExtension implements Extension {
             case ClientOpcodes.QUERY_VERSION:
                 queryVersion(client, inputStream, outputStream);
                 break;
+            case ClientOpcodes.CHANGE_SAVE_SET:
+            case ClientOpcodes.SELECT_SELECTION_INPUT:
+            case ClientOpcodes.SELECT_CURSOR_INPUT:
+                // Linux toolkits (Firefox/GTK) probe these; no-op is enough for presentation.
+                inputStream.skip(client.getRemainingRequestLength());
+                break;
+            case ClientOpcodes.GET_CURSOR_IMAGE: {
+                inputStream.skip(client.getRemainingRequestLength());
+                try (XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte) 0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeShort((short) 0); // x
+                    outputStream.writeShort((short) 0); // y
+                    outputStream.writeShort((short) 0); // width
+                    outputStream.writeShort((short) 0); // height
+                    outputStream.writeShort((short) 0); // xhot
+                    outputStream.writeShort((short) 0); // yhot
+                    outputStream.writePad(8);
+                }
+                break;
+            }
             case ClientOpcodes.CREATE_REGION: {
                 int region = inputStream.readInt();
                 short[] created = readRectangles(client, inputStream);
@@ -138,9 +164,11 @@ public class XFixesExtension implements Extension {
                 break;
             }
             default:
+                // Later XFIXES ops (SetCursorName=23, …) show up from xterm/GTK even when
+                // we negotiated v2. Ignoring them is enough; BadImplementation kills clients.
                 inputStream.skip(client.getRemainingRequestLength());
-                android.util.Log.w("XFIXES", "unimplemented opcode=" + opcode + "; reporting BadImplementation");
-                throw new BadImplementation();
+                android.util.Log.d("XFIXES", "ignoring unimplemented opcode=" + opcode);
+                break;
         }
     }
 }

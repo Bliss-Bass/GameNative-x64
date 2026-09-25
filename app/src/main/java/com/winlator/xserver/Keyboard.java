@@ -15,7 +15,7 @@ public class Keyboard {
     public static final short KEYS_COUNT = 248;
     public static final short MAX_KEYCODE = 255;
     public static final short MIN_KEYCODE = 8;
-    public final int[] keysyms = new int[KEYS_COUNT];
+    public final int[] keysyms = new int[KEYS_COUNT * KEYSYMS_PER_KEYCODE];
     private final Bitmask modifiersMask = new Bitmask();
     private final XKeycode[] keycodeMap = createKeycodeMap();
     private final ArraySet<Byte> pressedKeys = new ArraySet<>();

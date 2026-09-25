@@ -25,6 +25,18 @@ public class CursorManager extends XResourceManager {
         return cursor;
     }
 
+    /** Glyph cursors from fonts we don't render — register an invisible 1×1 stand-in. */
+    public Cursor createEmptyCursor(int id) {
+        if (cursors.indexOfKey(id) >= 0) return null;
+        Visual visual = drawableManager.getVisual();
+        Drawable drawable = drawableManager.createDrawable(0, (short) 1, (short) 1, visual);
+        Cursor cursor = new Cursor(id, 0, 0, drawable, drawable, null);
+        cursor.setVisible(false);
+        cursors.put(id, cursor);
+        triggerOnCreateResourceListener(cursor);
+        return cursor;
+    }
+
     public void freeCursor(int id) {
         triggerOnFreeResourceListener(cursors.get(id));
         cursors.remove(id);

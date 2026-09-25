@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -66,6 +68,9 @@ object LinuxSessions {
     /** For stops and restarts asked for from the UI, which must not block it. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Serialises open so a content-size LaunchedEffect race cannot start two X servers. */
+    private val openMutex = Mutex()
+
     /**
      * The key a session is filed under.
      *
@@ -99,11 +104,11 @@ object LinuxSessions {
         width: Int,
         height: Int,
         densityDpi: Int,
-    ): Result<LinuxSession> {
+    ): Result<LinuxSession> = openMutex.withLock {
         synchronized(held) {
             held[key]?.takeIf { it.session.isRunning }?.let {
                 Timber.i("[LinuxSessions]: reusing display :%d for %s", it.session.display, key)
-                return Result.success(it.session)
+                return@withLock Result.success(it.session)
             }
             // A session that is present but no longer running is a failed teardown or a crashed
             // server; drop it rather than hand it back.
@@ -111,7 +116,7 @@ object LinuxSessions {
         }
 
         val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
-        return LinuxDisplaySession.start(context, width, height, densityDpi, mode)
+        return@withLock LinuxAndroidXSession.start(context, width, height, densityDpi, mode)
             .onSuccess { session ->
                 synchronized(held) {
                     held[key] = Held(key, label, argv, session, width, height, densityDpi)

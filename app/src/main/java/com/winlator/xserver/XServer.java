@@ -36,6 +36,7 @@ public class XServer {
     public final DrawableManager drawableManager;
     public final WindowManager windowManager;
     public final CursorManager cursorManager;
+    public final FontManager fontManager;
     public final Keyboard keyboard = Keyboard.createKeyboard(this);
     public final Pointer pointer = new Pointer(this);
     public final InputDeviceManager inputDeviceManager;
@@ -69,6 +70,7 @@ public class XServer {
 
         pixmapManager = new PixmapManager();
         drawableManager = new DrawableManager(this);
+        fontManager = new FontManager(screenInfo);
         cursorManager = new CursorManager(drawableManager);
         windowManager = new WindowManager(screenInfo, drawableManager);
         selectionManager = new SelectionManager(windowManager);

@@ -8,14 +8,12 @@ import android.os.Bundle
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.net.toUri
-import android.graphics.Color.TRANSPARENT
+import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
-import app.gamenative.linux.rfb.RfbView
+import app.gamenative.linux.LinuxXServerView
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.AppUiScale
@@ -38,12 +36,10 @@ import timber.log.Timber
 class LinuxSessionActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
-        // Match MainActivity: edge-to-edge so freeform captionBar / SmartDock navigationBars
-        // reach Compose (LinuxDesktopScreen pads with WindowInsets.safeDrawing).
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(TRANSPARENT),
-        )
+        // Edge-to-edge: freeform captionBar / status / nav are applied in Compose via
+        // [pluviaSafeDrawingPadding] so the X surface sizes to the true client area.
+        // (decorFits alone does not clear SmartDock-DFC's captionBar overlay.)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(state)
 
         val argv = intent.getStringExtra(EXTRA_ARGV)
@@ -105,34 +101,41 @@ class LinuxSessionActivity : ComponentActivity() {
             ?: entryId?.takeIf { it.isNotBlank() && !it.startsWith("argv-") }
             ?: getString(app.gamenative.R.string.linux_session_notification_title)
         title = caption
-        val description = if (Build.VERSION.SDK_INT >= 33) {
-            ActivityManager.TaskDescription.Builder().setLabel(caption).build()
-        } else {
-            @Suppress("DEPRECATION")
-            ActivityManager.TaskDescription(caption)
-        }
-        setTaskDescription(description)
+        window.setTitle(caption)
+        setTaskDescription(
+            ActivityManager.TaskDescription.Builder()
+                .setLabel(caption)
+                .build(),
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Desktop mode sometimes reapplies the application label after first layout; refresh.
+        applySessionCaption(
+            intent.getStringExtra(EXTRA_LABEL),
+            intent.data?.lastPathSegment,
+        )
     }
 
     /**
      * Compose's hierarchy does not always deliver mouse-wheel / touchpad ACTION_SCROLL to a
-     * nested [app.gamenative.linux.rfb.RfbView]. Forwarding from the activity keeps Android's
-     * scroll gestures reaching the RFB session the same way they reach the Wine touchpad view.
+     * nested [LinuxXServerView]. Forwarding from the activity keeps Android's scroll gestures
+     * reaching the session the same way they reach the Wine touchpad view.
      */
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         val focus = currentFocus
-        if (focus is RfbView && focus.onGenericMotionEvent(event)) return true
-        // Walk children: SurfaceView focus can be flaky under Compose AndroidView.
+        if (focus is LinuxXServerView && focus.onGenericMotionEvent(event)) return true
         val content = findViewById<android.view.ViewGroup>(android.R.id.content)
-        if (content != null && dispatchGenericMotionToRfb(content, event)) return true
+        if (content != null && dispatchGenericMotionToLinuxView(content, event)) return true
         return super.dispatchGenericMotionEvent(event)
     }
 
-    private fun dispatchGenericMotionToRfb(view: android.view.View, event: MotionEvent): Boolean {
-        if (view is RfbView) return view.onGenericMotionEvent(event)
+    private fun dispatchGenericMotionToLinuxView(view: android.view.View, event: MotionEvent): Boolean {
+        if (view is LinuxXServerView) return view.onGenericMotionEvent(event)
         if (view is android.view.ViewGroup) {
             for (i in 0 until view.childCount) {
-                if (dispatchGenericMotionToRfb(view.getChildAt(i), event)) return true
+                if (dispatchGenericMotionToLinuxView(view.getChildAt(i), event)) return true
             }
         }
         return false

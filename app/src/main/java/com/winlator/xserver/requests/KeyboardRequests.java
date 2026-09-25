@@ -22,12 +22,18 @@ public abstract class KeyboardRequests {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
             outputStream.writeByte(KEYSYMS_PER_KEYCODE);
             outputStream.writeShort(client.getSequenceNumber());
-            outputStream.writeInt(count);
+            // Length is in CARD32s: one group of keysyms-per-keycode per keycode.
+            outputStream.writeInt(count * KEYSYMS_PER_KEYCODE);
             outputStream.writePad(24);
 
-            int i = firstKeycode - Keyboard.MIN_KEYCODE;
+            int i = (firstKeycode & 0xff) - Keyboard.MIN_KEYCODE;
+            int[] keysyms = client.xServer.keyboard.keysyms;
             while (count != 0) {
-                outputStream.writeInt(client.xServer.keyboard.keysyms[i]);
+                int base = Math.max(0, i) * KEYSYMS_PER_KEYCODE;
+                for (int j = 0; j < KEYSYMS_PER_KEYCODE; j++) {
+                    int idx = base + j;
+                    outputStream.writeInt(idx >= 0 && idx < keysyms.length ? keysyms[idx] : 0);
+                }
                 count--;
                 i++;
             }

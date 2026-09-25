@@ -4,9 +4,7 @@ import android.util.SparseArray;
 
 import com.winlator.core.Callback;
 import com.winlator.renderer.Texture;
-import com.winlator.xenvironment.components.VortekRendererComponent;
-
-import java.util.Objects;
+import com.winlator.renderer.XServerRenderer;
 
 public class DrawableManager extends XResourceManager implements XResourceManager.OnResourceLifecycleListener {
     private final XServer xServer;
@@ -43,14 +41,19 @@ public class DrawableManager extends XResourceManager implements XResourceManage
 
     public void removeDrawable(int id) {
         Drawable drawable = drawables.get(id);
+        if (drawable == null) return;
 
         final Texture texture = drawable.getTexture();
-//        if (texture != null) {
-//            XServerView xServerView = this.xServer.getRenderer().xServerView;
-//            Objects.requireNonNull(texture);
-//            xServerView.queueEvent(() -> VortekRendererComponent.destroyTexture(texture));
-//        }
-        if (texture != null) xServer.getRenderer().getRendererView().queueEvent(texture::destroy);
+        if (texture != null) {
+            // Linux Android-X sessions free cursor/icon pixmaps before the renderer view
+            // is attached; destroying the texture then NPE'd and became BadImplementation.
+            XServerRenderer renderer = xServer.getRenderer();
+            if (renderer != null && renderer.getRendererView() != null) {
+                renderer.getRendererView().queueEvent(texture::destroy);
+            } else {
+                texture.destroy();
+            }
+        }
 
         Callback<Drawable> onDestroyListener = drawable.getOnDestroyListener();
         if (onDestroyListener != null) onDestroyListener.call(drawable);

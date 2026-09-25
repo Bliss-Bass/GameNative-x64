@@ -78,4 +78,26 @@ public abstract class GrabRequests {
         inputStream.skip(4);
         client.xServer.grabManager.deactivatePointerGrab();
     }
+
+    /**
+     * Passive button grab. xterm installs these for paste/selection; we don't track
+     * passive grabs yet, but rejecting with BadRequest kills the client. Accept and
+     * ignore — pointer events still reach the mapped window without a passive grab.
+     */
+    public static void grabButton(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        inputStream.readInt(); // grab-window
+        inputStream.skip(2); // event-mask
+        inputStream.skip(2); // pointer-mode, keyboard-mode
+        inputStream.skip(4); // confine-to
+        inputStream.skip(4); // cursor
+        inputStream.skip(2); // button + pad
+        inputStream.skip(2); // modifiers
+        // No reply.
+    }
+
+    public static void ungrabButton(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        inputStream.readInt(); // grab-window
+        inputStream.skip(2); // button + pad
+        inputStream.skip(2); // modifiers
+    }
 }

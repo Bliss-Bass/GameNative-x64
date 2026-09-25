@@ -33,7 +33,9 @@ public class PixmapManager extends XResourceManager {
     }
 
     public void freePixmap(int id) {
-        triggerOnFreeResourceListener(pixmaps.get(id));
+        Pixmap pixmap = pixmaps.get(id);
+        if (pixmap == null) return;
+        triggerOnFreeResourceListener(pixmap);
         pixmaps.remove(id);
     }
 

@@ -287,6 +287,16 @@ public class XClientRequestHandler implements RequestHandler {
                         GrabRequests.ungrabPointer(client, inputStream, outputStream);
                     }
                     break;
+                case ClientOpcodes.GRAB_BUTTON:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.grabButton(client, inputStream, outputStream);
+                    }
+                    break;
+                case ClientOpcodes.UNGRAB_BUTTON:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.ungrabButton(client, inputStream, outputStream);
+                    }
+                    break;
                 case ClientOpcodes.QUERY_POINTER:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
                         WindowRequests.queryPointer(client, inputStream, outputStream);
@@ -324,8 +334,20 @@ public class XClientRequestHandler implements RequestHandler {
                 case ClientOpcodes.OPEN_FONT:
                     FontRequests.openFont(client, inputStream, outputStream);
                     break;
+                case ClientOpcodes.CLOSE_FONT:
+                    FontRequests.closeFont(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.QUERY_FONT:
+                    FontRequests.queryFont(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.QUERY_TEXT_EXTENTS:
+                    FontRequests.queryTextExtents(client, inputStream, outputStream);
+                    break;
                 case ClientOpcodes.LIST_FONTS:
                     FontRequests.listFonts(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.LIST_FONTS_WITH_INFO:
+                    FontRequests.listFontsWithInfo(client, inputStream, outputStream);
                     break;
                 case ClientOpcodes.CREATE_PIXMAP:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
@@ -360,6 +382,11 @@ public class XClientRequestHandler implements RequestHandler {
                         GraphicsContextRequests.freeGC(client, inputStream, outputStream);
                     }
                     break;
+                case ClientOpcodes.CLEAR_AREA:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
+                        WindowRequests.clearArea(client, inputStream, outputStream);
+                    }
+                    break;
                 case ClientOpcodes.COPY_AREA:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
                         DrawRequests.copyArea(client, inputStream, outputStream);
@@ -381,6 +408,16 @@ public class XClientRequestHandler implements RequestHandler {
                         DrawRequests.polyFillRectangle(client, inputStream, outputStream);
                     }
                     break;
+                case ClientOpcodes.POLY_TEXT8:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.polyText8(client, inputStream, outputStream);
+                    }
+                    break;
+                case ClientOpcodes.POLY_TEXT16:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.polyText16(client, inputStream, outputStream);
+                    }
+                    break;
                 case ClientOpcodes.PUT_IMAGE:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
                         DrawRequests.putImage(client, inputStream, outputStream);
@@ -391,11 +428,36 @@ public class XClientRequestHandler implements RequestHandler {
                         DrawRequests.getImage(client, inputStream, outputStream);
                     }
                     break;
+                case ClientOpcodes.IMAGE_TEXT8:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.imageText8(client, inputStream, outputStream);
+                    }
+                    break;
+                case ClientOpcodes.IMAGE_TEXT16:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.imageText16(client, inputStream, outputStream);
+                    }
+                    break;
                 case ClientOpcodes.CREATE_COLORMAP:
                     client.skipRequest();
                     break;
                 case ClientOpcodes.FREE_COLORMAP:
                     client.skipRequest();
+                    break;
+                case ClientOpcodes.ALLOC_COLOR:
+                    DrawRequests.allocColor(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.ALLOC_NAMED_COLOR:
+                    DrawRequests.allocNamedColor(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.FREE_COLORS:
+                    client.skipRequest();
+                    break;
+                case ClientOpcodes.QUERY_COLORS:
+                    DrawRequests.queryColors(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.LOOKUP_COLOR:
+                    DrawRequests.lookupColor(client, inputStream, outputStream);
                     break;
                 case ClientOpcodes.CREATE_CURSOR:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.CURSOR_MANAGER)) {
@@ -403,12 +465,18 @@ public class XClientRequestHandler implements RequestHandler {
                     }
                     break;
                 case ClientOpcodes.CREATE_GLYPH_CURSOR:
-                    client.skipRequest();
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.CURSOR_MANAGER)) {
+                        CursorRequests.createGlyphCursor(client, inputStream, outputStream);
+                    }
                     break;
                 case ClientOpcodes.FREE_CURSOR:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.CURSOR_MANAGER)) {
                         CursorRequests.freeCursor(client, inputStream, outputStream);
                     }
+                    break;
+                case ClientOpcodes.RECOLOR_CURSOR:
+                    // xterm recolors the text cursor; ignoring is fine (we don't draw it).
+                    client.skipRequest();
                     break;
                 case ClientOpcodes.QUERY_EXTENSION:
                     ExtensionRequests.queryExtension(client, inputStream, outputStream);

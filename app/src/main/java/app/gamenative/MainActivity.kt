@@ -28,7 +28,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import app.gamenative.linux.rfb.RfbView
+import app.gamenative.linux.LinuxXServerView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -842,11 +842,11 @@ class MainActivity : ComponentActivity() {
     override fun dispatchGenericMotionEvent(ev: MotionEvent?): Boolean {
         // Log.d("MainActivity$index", "dispatchGenericMotionEvent(${ev?.deviceId}:${ev?.device?.name}):\n$ev")
 
-        // Linux RFB sessions need ACTION_SCROLL / HOVER_MOVE the same way Wine's TouchpadView
-        // does; Compose AndroidView focus is unreliable for SurfaceView.
+        // Linux Android-X sessions need ACTION_SCROLL / HOVER_MOVE the same way Wine's
+        // TouchpadView does; Compose AndroidView focus is unreliable for SurfaceView.
         if (ev != null) {
             val content = findViewById<ViewGroup>(android.R.id.content)
-            if (content != null && dispatchGenericMotionToRfb(content, ev)) return true
+            if (content != null && dispatchGenericMotionToLinuxView(content, ev)) return true
         }
 
         val eventDispatched = PluviaApp.events.emit(AndroidEvent.MotionEvent(ev)) { event ->
@@ -856,11 +856,11 @@ class MainActivity : ComponentActivity() {
         return if (!eventDispatched) super.dispatchGenericMotionEvent(ev) else true
     }
 
-    private fun dispatchGenericMotionToRfb(view: View, event: MotionEvent): Boolean {
-        if (view is RfbView) return view.onGenericMotionEvent(event)
+    private fun dispatchGenericMotionToLinuxView(view: View, event: MotionEvent): Boolean {
+        if (view is LinuxXServerView) return view.onGenericMotionEvent(event)
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
-                if (dispatchGenericMotionToRfb(view.getChildAt(i), event)) return true
+                if (dispatchGenericMotionToLinuxView(view.getChildAt(i), event)) return true
             }
         }
         return false

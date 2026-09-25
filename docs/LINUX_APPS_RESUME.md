@@ -8,18 +8,14 @@ list.
 Tagged `linux-apps-phase4-app-entries` in both this repo and `vendor_ax86-lite`.
 
 Committed: PRoot for x86_64, the Ubuntu rootfs installer, the Termux-based terminal
-screen, the graphical session packages (Xtigervnc + openbox + xsettingsd from apt), the
-session manager, the RFB client and presenter, the Linux session screen with both an app
-and a minimal-desktop profile, `.desktop` scanning with a Linux Apps screen, shared-storage
-binding into the guest, and app-drawer entries for both Linux apps and installed games.
+screen, graphical session packages (openbox + xsettingsd from apt; X server is now the
+in-process Android/Winlator X with DRI3/Present), the Linux session screen with both an
+app and a minimal-desktop profile, `.desktop` scanning with a Linux Apps screen,
+shared-storage binding into the guest, and app-drawer entries for both Linux apps and
+installed games.
 
-Verified end to end on the tablet: a session comes up on its own display and loopback
-port, the presenter shows it, touch and mouse reach the guest, keystrokes reach it
-(`whoami` typed from Android returned `root` in xterm), and resizing the app's freeform
-window resizes the X screen, with openbox relayouting the client to match. A guest process
-can write to `/mnt/storage/internal/Download` and the file appears in `/sdcard/Download`.
-Galculator and Half-Life 2 both have drawer entries that launch them, and **HL2 reaches its
-main menu and keeps rendering** when started from its entry.
+Verified: freeform Firefox on Android X fills the task, touchscreen mode maps taps, and
+Wine games keep their own ImageFs `:0` untouched.
 
 Remaining, in rough order: presentation latency (see
 `X86_64_VULKAN_PROVISIONING.md` — the missing x86_64 SysV interposer is the near-term

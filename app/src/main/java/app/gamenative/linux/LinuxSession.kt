@@ -6,16 +6,14 @@ import android.view.View
 /**
  * A running Linux graphical session, as everything outside the `linux` package sees one.
  *
- * The registry, the service and the UI deal in this rather than in [LinuxDisplaySession] because
- * the thing behind it is going to be replaced: today a session is Xtigervnc with its frames
- * carried over RFB, and the plan is to point it at the same X server the games run on, which has
- * GLX, DRI3 and shared pixmaps that Xvnc can never have. That swap should cost a new
- * implementation of this interface and nothing else.
+ * The registry, the service and the UI deal in this rather than in a concrete session because
+ * the transport behind it has already moved once (Xtigervnc/RFB → Android [com.winlator.xserver.XServer])
+ * and may move again. Callers should not assume RFB or a particular display number layout.
  *
- * There is deliberately no `resize` here. An X screen's size is negotiated by the attached
- * viewer -- [createView]'s result asks for the size it has been given and the server answers --
- * so a method on the session would only forward to whichever view happens to be attached, and
- * would invite two viewers to fight over one screen.
+ * There is deliberately no `resize` here. An X screen's size is fixed when the session starts
+ * (Winlator has no RandR); the presenter scales to the Android window. A method on the session
+ * would only forward to whichever view happens to be attached, and would invite two viewers to
+ * fight over one screen.
  */
 interface LinuxSession {
 

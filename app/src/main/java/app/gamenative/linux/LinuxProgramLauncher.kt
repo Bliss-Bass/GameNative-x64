@@ -102,7 +102,10 @@ object LinuxProgramLauncher {
             put("TZ", TimeZone.getDefault().id)
             // Toolkits refuse to start without a runtime dir and otherwise warn on every launch.
             put("XDG_RUNTIME_DIR", "/tmp")
-            if (hasDisplay) put("DISPLAY", ":0")
+            if (hasDisplay) {
+                put("DISPLAY", ":0")
+                putAll(mesaEnv())
+            }
             // Firefox (and Chromium-family browsers) spawn content processes behind a Linux
             // user-namespace / seccomp sandbox. Under PRoot those helpers SIGSEGV immediately,
             // so tabs open but never load. The sandbox cannot work here; disable it for the
@@ -161,9 +164,10 @@ object LinuxProgramLauncher {
         cwd: String = GUEST_HOME,
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
+        extraBinds: List<String> = emptyList(),
         onTerminated: ((Int) -> Unit)? = null,
     ): Int {
-        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir)
+        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir, extraBinds)
         Timber.i("[LinuxProgramLauncher]: exec %s", argv)
         return ProcessHelper.exec(
             command,
@@ -187,8 +191,9 @@ object LinuxProgramLauncher {
         cwd: String = GUEST_HOME,
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
+        extraBinds: List<String> = emptyList(),
     ): Process? {
-        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir)
+        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir, extraBinds)
         Timber.i("[LinuxProgramLauncher]: start %s", argv)
 
         val process = ProcessHelper.startProcess(
@@ -201,6 +206,24 @@ object LinuxProgramLauncher {
         drain(process.errorStream, tag)
         return process
     }
+
+    /**
+     * Host paths bound into the guest for Android-X graphical clients (DRI3 / GBM).
+     */
+    fun graphicalBinds(): List<String> = buildList {
+        val dri = File("/dev/dri")
+        if (dri.isDirectory) add("${dri.absolutePath}:/dev/dri")
+    }
+
+    /**
+     * Mesa / libGL hints so guest clients prefer DRI3 against the Android X server.
+     */
+    fun mesaEnv(): Map<String, String> = mapOf(
+        "LIBGL_DRI3_ENABLE" to "1",
+        // Avoid accidental EGL/Wayland attempts under PRoot.
+        "GDK_BACKEND" to "x11",
+        "QT_QPA_PLATFORM" to "xcb",
+    )
 
     /**
      * The pid behind a [Process]. Android's Process.pid() needs API 33 with desugaring, so
