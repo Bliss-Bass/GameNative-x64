@@ -81,9 +81,10 @@ class LinuxAndroidXSession private constructor(
         private const val MIN_RESIZE_PX = 64
         /**
          * Re-check frame vs X screen after settle. Freeform + SurfaceView + GTK land on
-         * different clocks; a few spaced rounds catch missed applies after repeated resizes.
+         * different clocks; late rounds past the ~3rd resize catch undersized Present buffers.
          */
-        private val RECONCILE_DELAYS_MS = longArrayOf(120L, 350L, 700L, 1_200L, 2_000L)
+        private val RECONCILE_DELAYS_MS =
+            longArrayOf(80L, 200L, 400L, 700L, 1_100L, 1_600L, 2_400L, 3_500L)
 
         private val claimed = mutableSetOf<Int>()
 
@@ -337,9 +338,13 @@ class LinuxAndroidXSession private constructor(
             (vr.surfaceWidth <= 0 || vr.surfaceHeight <= 0)
         if (screenMatches && guestsFill && surfaceMatches) {
             Timber.i(
-                "[LinuxAndroidXSession]: reconcile round %d ok %dx%d",
+                "[LinuxAndroidXSession]: reconcile round %d ok %dx%d (reannounce)",
                 round, w.toInt(), h.toInt(),
             )
+            // X geometry already matches, but Present may still be the pre-resize size.
+            // ConfigureNotify+Expose only — do not nudge/reallocate (that whites out GTK).
+            suppressGeometryFitUntilMs = 0L
+            reannounceTopLevels(server)
             refreshPresentMaps(server)
             return
         }
@@ -359,6 +364,27 @@ class LinuxAndroidXSession private constructor(
         suppressGeometryFitUntilMs = 0L
         applyFrameSize(server, w, h, fitGuests = true)
         refreshPresentMaps(server)
+    }
+
+    /** Re-send ConfigureNotify/Expose without changing geometry or reallocating drawables. */
+    private fun reannounceTopLevels(server: XServer) {
+        if (mode != LinuxDesktopConfig.Mode.APP) return
+        server.lock(
+            XServer.Lockable.WINDOW_MANAGER,
+            XServer.Lockable.DRAWABLE_MANAGER,
+        ).use {
+            for (child in server.windowManager.rootWindow.children.toList()) {
+                if (child.parent != server.windowManager.rootWindow) continue
+                if (!child.isInputOutput || !child.attributes.isMapped) continue
+                if (child.attributes.isOverrideRedirect) continue
+                if (child.width < 200 || child.height < 150) continue
+                try {
+                    server.windowManager.reannounceGeometry(child)
+                } catch (t: Throwable) {
+                    Timber.w(t, "[LinuxAndroidXSession]: reannounce %#x failed", child.id)
+                }
+            }
+        }
     }
 
     private fun refreshPresentMaps(server: XServer) {

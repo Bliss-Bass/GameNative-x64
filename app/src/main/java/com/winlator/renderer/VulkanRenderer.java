@@ -166,6 +166,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         int width, int height, int strideBytes, int drmFormat, long modifier, int x, int y);
     private native boolean nativeSupportsDmaBufImport(long handle);
     private native void nativeSetTransform(long handle, float ox, float oy, float sx, float sy);
+    private native void nativeSetClearColor(long handle, float r, float g, float b, float a);
     private native void nativeSetPointerPos(long handle, short x, short y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
@@ -241,6 +242,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
+                    nativeSetClearColor(nativeHandle, pendingClearR, pendingClearG, pendingClearB, pendingClearA);
                     nativeSetEffect(nativeHandle, pendingEffectId, pendingSharpness,
                         pendingEffectMask, pendingBrightness, pendingContrast, pendingGamma);
                     updateTransform();
@@ -876,6 +878,20 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
+    /**
+     * Framebuffer clear color behind window textures. Linux freeform uses opaque white so
+     * undersized GTK Present buffers letterbox as white gutters instead of black strips.
+     */
+    public void setClearColor(float r, float g, float b, float a) {
+        pendingClearR = r;
+        pendingClearG = g;
+        pendingClearB = b;
+        pendingClearA = a;
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSetClearColor(nativeHandle, r, g, b, a);
+        }
+    }
+
     public void setEffect(int effectId, float sharpness) {
         setEffect(effectId, sharpness, SCALE_FIT);
     }
@@ -978,6 +994,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
+    private float   pendingClearR         = 0f;
+    private float   pendingClearG         = 0f;
+    private float   pendingClearB         = 0f;
+    private float   pendingClearA         = 1f;
     private int     pendingEffectId       = EFFECT_NONE;
     private float   pendingSharpness      = 1.0f;
     private int     pendingEffectMask     = 0;

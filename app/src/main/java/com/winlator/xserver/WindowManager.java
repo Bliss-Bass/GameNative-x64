@@ -281,6 +281,28 @@ public class WindowManager extends XResourceManager {
     }
 
     /**
+     * Re-send ConfigureNotify+Expose at the window's current size without reallocating.
+     * Used after freeform resize when X geometry already matches but GTK/Mesa still
+     * Present undersized buffers — a size nudge would wipe the drawable to white.
+     */
+    public void reannounceGeometry(Window window) {
+        if (window == null || window == rootWindow) return;
+        if (!window.isInputOutput() || !window.attributes.isMapped()) return;
+        short x = window.getX();
+        short y = window.getY();
+        short width = window.getWidth();
+        short height = window.getHeight();
+        Window previousSibling = window.previousSibling();
+        boolean overrideRedirect = window.attributes.isOverrideRedirect();
+        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        Window parent = window.getParent();
+        if (parent != null) {
+            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        }
+        window.sendEvent(new Expose(window));
+    }
+
+    /**
      * Grows or shrinks the root window drawable to a new screen size.
      * {@link #forceGeometry} refuses the root; Linux freeform resize needs this explicitly.
      */

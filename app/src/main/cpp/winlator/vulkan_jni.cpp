@@ -160,6 +160,12 @@ Java_com_winlator_renderer_VulkanRenderer_nativeSetTransform(
     auto* r=reinterpret_cast<VulkanRendererContext*>(handle); if (r) r->setTransform(ox,oy,sx,sy);
 }
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeSetClearColor(
+    JNIEnv*, jobject, jlong handle, jfloat r, jfloat g, jfloat b, jfloat a)
+{
+    auto* ctx=reinterpret_cast<VulkanRendererContext*>(handle); if (ctx) ctx->setClearColor(r,g,b,a);
+}
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeSetPointerPos(JNIEnv*, jobject, jlong handle, jshort x, jshort y) {
     auto* r=reinterpret_cast<VulkanRendererContext*>(handle); if (r) r->updatePointerPosition(x,y);
 }

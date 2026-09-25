@@ -139,6 +139,7 @@ public:
     /** X screen size for NDC (may change on Linux freeform resize). */
     void setContainerSize(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
+    void setClearColor(float r, float g, float b, float a);
     void updatePointerPosition(short x, short y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y, bool forceOpaqueAlpha);
@@ -290,6 +291,7 @@ private:
 
     std::atomic<int>  pointerX{0}, pointerY{0};
     float sceneOffsetX=0.f, sceneOffsetY=0.f, sceneScaleX=1.f, sceneScaleY=1.f;
+    float clearR=0.f, clearG=0.f, clearB=0.f, clearA=1.f;
 
     std::atomic<bool> cursorVisible{false};
     short  cursorHotX=0, cursorHotY=0, cursorTexW=0, cursorTexH=0;

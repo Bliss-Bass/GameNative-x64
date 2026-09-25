@@ -65,11 +65,12 @@ class LinuxXServerView(
         xServer.renderer = xServerView.renderer
         // Freeform must fill the Android client area. SCALE_FIT letterboxes when the
         // Vulkan surface and X screen briefly disagree after a resize → black strips.
-        (xServerView.renderer as? VulkanRenderer)?.setEffect(
-            VulkanRenderer.EFFECT_NONE,
-            0f,
-            VulkanRenderer.SCALE_STRETCH,
-        )
+        (xServerView.renderer as? VulkanRenderer)?.apply {
+            setEffect(VulkanRenderer.EFFECT_NONE, 0f, VulkanRenderer.SCALE_STRETCH)
+            // Undersized GTK Present buffers draw at pixmap size; white clear matches
+            // Drawable.reallocate fill so gutters are not opaque black letterbox strips.
+            setClearColor(1f, 1f, 1f, 1f)
+        }
         touchpadView = TouchpadView(context, xServer, /* capturePointerOnExternalMouse = */ true).apply {
             setTouchscreenMode(true)
             setMoveCursorToTouchpoint(true)

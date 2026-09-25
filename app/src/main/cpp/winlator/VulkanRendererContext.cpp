@@ -1018,7 +1018,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     rpi.renderPass = toXr ? xrRp : renderPass;
     rpi.framebuffer = toXr ? xrFb : swapchainFBs[imgIdx];
     rpi.renderArea={{0,0},tgtExt};
-    VkClearValue clr={{{0.f,0.f,0.f,1.f}}}; rpi.clearValueCount=1; rpi.pClearValues=&clr;
+    VkClearValue clr={{{clearR,clearG,clearB,clearA}}}; rpi.clearValueCount=1; rpi.pClearValues=&clr;
 
     vk_.CmdBeginRenderPass(cb, &rpi, VK_SUBPASS_CONTENTS_INLINE);
     // The immersive quad flips vertically to suit the per-window game buffers, so the scene
@@ -1474,6 +1474,11 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
 
 void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy) {
     { std::lock_guard<std::mutex> lk(renderMutex); sceneOffsetX=ox;sceneOffsetY=oy;sceneScaleX=sx;sceneScaleY=sy; }
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setClearColor(float r, float g, float b, float a) {
+    { std::lock_guard<std::mutex> lk(renderMutex); clearR=r; clearG=g; clearB=b; clearA=a; }
     needsRender.store(true); dirtyCV.notify_one();
 }
 
