@@ -36,11 +36,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
-private const val RESIZE_DEBOUNCE_MS = 200L
+private const val RESIZE_DEBOUNCE_MS = 150L
 /** Below this we still resize X to the view — never leave a stale larger screen. */
 private const val MIN_SESSION_PX = 64
 /** Initial open waits for a usable freeform client area. */
 private const val MIN_OPEN_PX = 320
+/**
+ * After the debounced resize, re-read [contentSize] a few times and re-apply if the
+ * frame moved again (freeform often emits a trailing size after the drag ends).
+ */
+private val FRAME_VERIFY_DELAYS_MS = longArrayOf(200L, 500L, 1_000L)
 
 /**
  * A window onto a Linux session.
@@ -92,6 +97,21 @@ fun LinuxDesktopScreen(
                 contentSize.height,
             )
             active.resize(contentSize.width, contentSize.height)
+            // Trailing verifies: freeform often posts another size after the drag ends;
+            // session also reconciles against the live view, but this catches Compose-only
+            // updates when the SurfaceView size lagged.
+            for (verifyDelay in FRAME_VERIFY_DELAYS_MS) {
+                delay(verifyDelay)
+                if (contentSize.width < MIN_SESSION_PX || contentSize.height < MIN_SESSION_PX) {
+                    return@LaunchedEffect
+                }
+                Timber.d(
+                    "[LinuxDesktopScreen]: verify frame still %dx%d",
+                    contentSize.width,
+                    contentSize.height,
+                )
+                active.resize(contentSize.width, contentSize.height)
+            }
             return@LaunchedEffect
         }
 

@@ -51,11 +51,15 @@ class LinuxAndroidXSession private constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
     /** Runnable tokens for delayed map re-fits so a freeform resize can cancel them. */
     private val pendingMapRefits = mutableListOf<Runnable>()
-    private var pendingFillRefit: Runnable? = null
+    private val pendingReconcileRuns = mutableListOf<Runnable>()
+    /** Bumps whenever [resize] is called so in-flight reconcile rounds abort. */
+    private var reconcileGeneration = 0
+    @Volatile private var targetFrameW = 0
+    @Volatile private var targetFrameH = 0
     /**
      * While uptime is below this, ignore geometry snap-backs. Freeform resize reallocates a
      * blank drawable; GTK then Presents once; an immediate snap would blank the buffer again.
-     * A single fill-refit is scheduled for after this grace so the guest still fills the frame.
+     * Reconcile rounds after this grace re-fit so the guest still fills the frame.
      */
     @Volatile
     private var suppressGeometryFitUntilMs: Long = 0L
@@ -73,10 +77,13 @@ class LinuxAndroidXSession private constructor(
         private const val DISPLAY_COUNT = 16
         private const val READY_TIMEOUT_MS = 15_000L
         /** Grace after freeform resize before geometry snap-backs may re-fit. */
-        private const val RESIZE_FIT_GRACE_MS = 600L
-        /** One fill-refit after grace so GTK's preferred size does not leave letterboxing. */
-        private const val RESIZE_FILL_REFIT_MS = 700L
+        private const val RESIZE_FIT_GRACE_MS = 450L
         private const val MIN_RESIZE_PX = 64
+        /**
+         * Re-check frame vs X screen after settle. Freeform + SurfaceView + GTK land on
+         * different clocks; a few spaced rounds catch missed applies after repeated resizes.
+         */
+        private val RECONCILE_DELAYS_MS = longArrayOf(120L, 350L, 700L, 1_200L, 2_000L)
 
         private val claimed = mutableSetOf<Int>()
 
@@ -258,25 +265,118 @@ class LinuxAndroidXSession private constructor(
             for (r in pendingMapRefits) mainHandler.removeCallbacks(r)
             pendingMapRefits.clear()
         }
-        pendingFillRefit?.let { mainHandler.removeCallbacks(it) }
-        pendingFillRefit = null
+        cancelReconcileRounds()
     }
 
-    private fun scheduleFillRefit(server: XServer, w: Short, h: Short) {
-        pendingFillRefit?.let { mainHandler.removeCallbacks(it) }
-        val r = Runnable {
-            pendingFillRefit = null
-            if (!isRunning || xServer !== server) return@Runnable
-            // Past grace: snap top-levels that GTK shrank so content fills the frame again.
-            for (child in server.windowManager.rootWindow.children.toList()) {
-                fitTopLevel(server, child, w, h)
-            }
-            (server.renderer as? com.winlator.renderer.VulkanRenderer)
-                ?.runCatching { onScreenInfoChanged() }
-            attachedView?.onXScreenResized()
+    private fun cancelReconcileRounds() {
+        synchronized(pendingReconcileRuns) {
+            for (r in pendingReconcileRuns) mainHandler.removeCallbacks(r)
+            pendingReconcileRuns.clear()
         }
-        pendingFillRefit = r
-        mainHandler.postDelayed(r, RESIZE_FILL_REFIT_MS)
+    }
+
+    /**
+     * Schedule spaced re-checks that read the live [LinuxXServerView] size (window frame)
+     * and re-apply X screen + top-level fit until they match, or rounds are exhausted.
+     */
+    private fun scheduleReconcileRounds() {
+        cancelReconcileRounds()
+        val gen = reconcileGeneration
+        for ((index, delayMs) in RECONCILE_DELAYS_MS.withIndex()) {
+            val round = index + 1
+            lateinit var r: Runnable
+            r = Runnable {
+                synchronized(pendingReconcileRuns) { pendingReconcileRuns.remove(r) }
+                if (gen != reconcileGeneration || !isRunning) return@Runnable
+                reconcileFrame(round)
+            }
+            synchronized(pendingReconcileRuns) { pendingReconcileRuns += r }
+            mainHandler.postDelayed(r, delayMs)
+        }
+    }
+
+    private fun liveFrameSize(): Pair<Int, Int> {
+        val view = attachedView
+        if (view != null && view.width >= MIN_RESIZE_PX && view.height >= MIN_RESIZE_PX) {
+            return view.width to view.height
+        }
+        return targetFrameW to targetFrameH
+    }
+
+    private fun topLevelsFillScreen(server: XServer, w: Short, h: Short): Boolean {
+        if (mode != LinuxDesktopConfig.Mode.APP) return true
+        var sawApp = false
+        for (child in server.windowManager.rootWindow.children) {
+            if (!child.isInputOutput || !child.attributes.isMapped) continue
+            if (child.attributes.isOverrideRedirect) continue
+            if (child.width < 200 || child.height < 150) continue
+            sawApp = true
+            if (child.width != w || child.height != h ||
+                child.x.toInt() != 0 || child.y.toInt() != 0
+            ) {
+                return false
+            }
+        }
+        return sawApp
+    }
+
+    private fun reconcileFrame(round: Int) {
+        val server = xServer ?: return
+        val (fw, fh) = liveFrameSize()
+        if (fw < MIN_RESIZE_PX || fh < MIN_RESIZE_PX) return
+        val w = fw.toShort()
+        val h = fh.toShort()
+        targetFrameW = fw
+        targetFrameH = fh
+
+        val screenMatches = server.screenInfo.width == w && server.screenInfo.height == h
+        val guestsFill = topLevelsFillScreen(server, w, h)
+        if (screenMatches && guestsFill) {
+            Timber.i(
+                "[LinuxAndroidXSession]: reconcile round %d ok %dx%d",
+                round, w.toInt(), h.toInt(),
+            )
+            refreshPresentMaps(server)
+            return
+        }
+
+        Timber.i(
+            "[LinuxAndroidXSession]: reconcile round %d screen=%dx%d frame=%dx%d guestsFill=%s",
+            round,
+            server.screenInfo.width.toInt(),
+            server.screenInfo.height.toInt(),
+            w.toInt(),
+            h.toInt(),
+            guestsFill,
+        )
+        // Past grace for this round so fit is allowed if GTK shrank the top-level.
+        suppressGeometryFitUntilMs = 0L
+        applyFrameSize(server, w, h, fitGuests = true)
+        refreshPresentMaps(server)
+    }
+
+    private fun refreshPresentMaps(server: XServer) {
+        (server.renderer as? com.winlator.renderer.VulkanRenderer)
+            ?.runCatching { onScreenInfoChanged() }
+            ?.onFailure { Timber.w(it, "[LinuxAndroidXSession]: onScreenInfoChanged failed") }
+        attachedView?.onXScreenResized()
+    }
+
+    private fun applyFrameSize(server: XServer, w: Short, h: Short, fitGuests: Boolean) {
+        server.lock(
+            XServer.Lockable.WINDOW_MANAGER,
+            XServer.Lockable.DRAWABLE_MANAGER,
+        ).use {
+            if (server.screenInfo.width != w || server.screenInfo.height != h) {
+                server.screenInfo.setSize(w.toInt(), h.toInt())
+                server.windowManager.resizeRootWindow(w, h)
+            }
+            if (fitGuests && mode == LinuxDesktopConfig.Mode.APP) {
+                for (child in server.windowManager.rootWindow.children.toList()) {
+                    fitTopLevel(server, child, w, h)
+                }
+            }
+        }
     }
 
     private fun fitTopLevel(
@@ -416,11 +516,19 @@ class LinuxAndroidXSession private constructor(
     override fun createView(context: Context, onClosed: (Throwable?) -> Unit): View {
         val server = xServer ?: throw IllegalStateException("X server not started")
         viewCallback = onClosed
-        return LinuxXServerView(context, server).also { attachedView = it }
+        return LinuxXServerView(context, server).also { view ->
+            attachedView = view
+            // Watch the real window-frame view size; Compose and SurfaceView can disagree
+            // briefly, and reconcile rounds prefer this as ground truth.
+            view.onFrameSizeChanged = { w, h -> resize(w, h) }
+        }
     }
 
     override fun releaseView(view: View) {
-        (view as? LinuxXServerView)?.release()
+        (view as? LinuxXServerView)?.let {
+            it.onFrameSizeChanged = null
+            it.release()
+        }
         if (attachedView === view) attachedView = null
         viewCallback = null
     }
@@ -442,15 +550,24 @@ class LinuxAndroidXSession private constructor(
     override fun resize(width: Int, height: Int) {
         val server = xServer ?: return
         if (!isRunning) return
-        // Match the Android client area exactly. Inflating to 320x240 when the freeform
-        // window was smaller left the X desktop larger than the frame.
-        val w = width.coerceAtLeast(MIN_RESIZE_PX).toShort()
-        val h = height.coerceAtLeast(MIN_RESIZE_PX).toShort()
-        if (server.screenInfo.width == w && server.screenInfo.height == h) {
-            // Still refresh present/input maps — surface may have caught up after screen.
-            (server.renderer as? com.winlator.renderer.VulkanRenderer)
-                ?.runCatching { onScreenInfoChanged() }
-            attachedView?.onXScreenResized()
+        val w = width.coerceAtLeast(MIN_RESIZE_PX)
+        val h = height.coerceAtLeast(MIN_RESIZE_PX)
+        targetFrameW = w
+        targetFrameH = h
+        val ws = w.toShort()
+        val hs = h.toShort()
+
+        val already =
+            server.screenInfo.width == ws &&
+                server.screenInfo.height == hs &&
+                topLevelsFillScreen(server, ws, hs)
+        if (already) {
+            refreshPresentMaps(server)
+            // Still run a couple of late checks — a subsequent GTK configure can undo the fill.
+            reconcileGeneration += 1
+            cancelPendingMapRefits()
+            suppressGeometryFitUntilMs = android.os.SystemClock.uptimeMillis() + RESIZE_FIT_GRACE_MS
+            scheduleReconcileRounds()
             return
         }
 
@@ -458,34 +575,18 @@ class LinuxAndroidXSession private constructor(
             "[LinuxAndroidXSession]: resizing X screen %dx%d -> %dx%d",
             server.screenInfo.width.toInt(),
             server.screenInfo.height.toInt(),
-            w.toInt(),
-            h.toInt(),
+            w,
+            h,
         )
+        reconcileGeneration += 1
         cancelPendingMapRefits()
         suppressGeometryFitUntilMs = android.os.SystemClock.uptimeMillis() + RESIZE_FIT_GRACE_MS
         try {
-            server.lock(
-                XServer.Lockable.WINDOW_MANAGER,
-                XServer.Lockable.DRAWABLE_MANAGER,
-            ).use {
-                server.screenInfo.setSize(w.toInt(), h.toInt())
-                server.windowManager.resizeRootWindow(w, h)
-                if (mode == LinuxDesktopConfig.Mode.APP) {
-                    for (child in server.windowManager.rootWindow.children.toList()) {
-                        fitTopLevel(server, child, w, h)
-                    }
-                }
-            }
-            // Transform only — do not present blank reallocated buffers.
-            (server.renderer as? com.winlator.renderer.VulkanRenderer)
-                ?.runCatching { onScreenInfoChanged() }
-                ?.onFailure { Timber.w(it, "[LinuxAndroidXSession]: onScreenInfoChanged failed") }
-            attachedView?.onXScreenResized()
-            if (mode == LinuxDesktopConfig.Mode.APP) {
-                scheduleFillRefit(server, w, h)
-            }
+            applyFrameSize(server, ws, hs, fitGuests = true)
+            refreshPresentMaps(server)
+            scheduleReconcileRounds()
         } catch (t: Throwable) {
-            Timber.w(t, "[LinuxAndroidXSession]: resize to %dx%d failed", w.toInt(), h.toInt())
+            Timber.w(t, "[LinuxAndroidXSession]: resize to %dx%d failed", w, h)
         }
     }
 

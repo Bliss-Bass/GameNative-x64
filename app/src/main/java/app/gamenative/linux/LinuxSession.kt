@@ -30,6 +30,10 @@ interface LinuxSession {
     /**
      * Matches the X screen (and APP-mode top-levels) to the Android freeform client area so
      * guests reflow instead of being scaled/squashed by the presenter.
+     *
+     * Implementations should treat this as "make it so": apply now and re-check a few times
+     * against the live frame size, because freeform + SurfaceView + GTK settle on different
+     * clocks and a single apply is often missed after several resizes.
      */
     fun resize(width: Int, height: Int)
 

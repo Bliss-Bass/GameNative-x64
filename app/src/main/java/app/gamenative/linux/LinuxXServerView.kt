@@ -44,6 +44,14 @@ class LinuxXServerView(
 
     private val xServerView = XServerView(context, xServer, "vulkan")
     private val touchpadView: TouchpadView
+    private val frameHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingFrameNotify: Runnable? = null
+
+    /**
+     * Fired (debounced) when this view's pixel size changes — the freeform client area.
+     * Session uses this as ground truth for X screen reconcile rounds.
+     */
+    var onFrameSizeChanged: ((width: Int, height: Int) -> Unit)? = null
 
     private var scrollAccumV = 0f
     private var scrollAccumH = 0f
@@ -101,6 +109,15 @@ class LinuxXServerView(
         if (w > 0 && h > 0) {
             touchpadView.refreshScreenXform()
             (xServerView.renderer as? VulkanRenderer)?.onScreenInfoChanged()
+            pendingFrameNotify?.let { frameHandler.removeCallbacks(it) }
+            val notify = Runnable {
+                pendingFrameNotify = null
+                onFrameSizeChanged?.invoke(w, h)
+            }
+            pendingFrameNotify = notify
+            // Short debounce so drag jitter does not start a reconcile storm; session
+            // still runs multi-round checks after each settled size.
+            frameHandler.postDelayed(notify, FRAME_NOTIFY_DEBOUNCE_MS)
         }
     }
 
@@ -296,6 +313,9 @@ class LinuxXServerView(
     }
 
     fun release() {
+        pendingFrameNotify?.let { frameHandler.removeCallbacks(it) }
+        pendingFrameNotify = null
+        onFrameSizeChanged = null
         runCatching { hideIme() }
         runCatching { xServerView.onPause() }
     }
@@ -463,6 +483,7 @@ class LinuxXServerView(
     }
 
     companion object {
+        private const val FRAME_NOTIFY_DEBOUNCE_MS = 100L
         private const val SCROLL_STEP_PX = 48f
         /** X11 XK_Return */
         private const val XK_RETURN = 65293
