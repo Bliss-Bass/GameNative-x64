@@ -60,6 +60,7 @@ import android.content.Context
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.gamenative.PrefManager
 import app.gamenative.R
+import app.gamenative.enums.LinuxDisplayBackend
 import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.linux.LinuxAppIcon
 import app.gamenative.linux.LinuxAppReconciler
@@ -189,6 +190,7 @@ fun LinuxAppsScreen(
 
         if (installed) {
             ScaleRow()
+            SessionBackendRow()
             SessionModeRow()
         }
 
@@ -384,6 +386,61 @@ private fun StorageBanner(onGrant: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = PluviaTheme.colors.textMuted,
             )
+        }
+    }
+}
+
+/**
+ * Which X transport hosts freeform Linux apps.
+ *
+ * Beside the session-lifetime control: switching backends mid-flight would leave Android-X and
+ * VNC sessions mixed in the registry, so a change stops everything and the next open uses the
+ * new path.
+ */
+@Composable
+private fun SessionBackendRow() {
+    val context = LocalContext.current
+    var backend by rememberSaveable { mutableStateOf(PrefManager.linuxDisplayBackend) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.linux_display_backend_title),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = stringResource(backend.summaryRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = PluviaTheme.colors.textMuted,
+            )
+        }
+
+        Box {
+            Button(onClick = { expanded = true }) {
+                Text(stringResource(backend.titleRes))
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                LinuxDisplayBackend.entries.forEach { choice ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(choice.titleRes)) },
+                        onClick = {
+                            if (choice != backend) {
+                                backend = choice
+                                PrefManager.linuxDisplayBackend = choice
+                                LinuxSessions.stopAll(context)
+                            }
+                            expanded = false
+                        },
+                    )
+                }
+            }
         }
     }
 }

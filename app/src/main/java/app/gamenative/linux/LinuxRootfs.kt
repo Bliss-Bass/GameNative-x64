@@ -49,8 +49,10 @@ object LinuxRootfs {
      * What the graphical session is built from. All of it comes from apt, which is the
      * point of running a glibc userland: none of it has to be cross-compiled for bionic.
      *
-     * - openbox remains available for a future shared desktop mode; APP sessions on Android X
-     *   maximize guest windows from the host side instead of a guest WM.
+     * - The default freeform path is Android/Winlator X (DRI3). Xtigervnc remains installed
+     *   as the Settings opt-in RFB compatibility backend ([LinuxDisplaySession]).
+     * - openbox remains available for the VNC path and a future shared desktop mode; APP
+     *   sessions on Android X maximize guest windows from the host side instead of a guest WM.
      * - xsettingsd carries DPI changes into running GTK and Qt apps, which otherwise read
      *   it once at startup.
      * - xterm is what openbox's root menu means by a terminal, and without it the desktop
@@ -81,6 +83,7 @@ object LinuxRootfs {
         "libpulse0",
         "ffmpeg",
         "librsvg2-common",
+        "tigervnc-standalone-server",
         "openbox",
         "xsettingsd",
         "xterm",
@@ -109,6 +112,7 @@ object LinuxRootfs {
 
     /** Proof the packages above landed, checked instead of parsing apt's output. */
     private val DISPLAY_BINARIES = listOf(
+        "usr/bin/Xtigervnc",
         "usr/bin/openbox",
         "usr/bin/xsettingsd",
         "usr/bin/xterm",

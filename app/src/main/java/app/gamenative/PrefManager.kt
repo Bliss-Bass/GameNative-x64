@@ -17,6 +17,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.autotuning.DeviceGate
 import app.gamenative.enums.AppTheme
+import app.gamenative.enums.LinuxDisplayBackend
 import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.enums.PresentationPath
 import app.gamenative.linux.LinuxDisplayScale
@@ -1485,6 +1486,19 @@ object PrefManager {
         get() = LinuxSessionMode.fromKey(getPref(LINUX_SESSION_MODE, LinuxSessionMode.DEFAULT.key))
         set(value) {
             setPref(LINUX_SESSION_MODE, value.key)
+        }
+
+    /**
+     * Which X transport hosts freeform Linux apps. See [LinuxDisplayBackend]; stored by key so
+     * an unknown value from another build degrades to Android X.
+     */
+    private val LINUX_DISPLAY_BACKEND = stringPreferencesKey("linux_display_backend")
+    var linuxDisplayBackend: LinuxDisplayBackend
+        get() = LinuxDisplayBackend.fromKey(
+            getPref(LINUX_DISPLAY_BACKEND, LinuxDisplayBackend.DEFAULT.key),
+        )
+        set(value) {
+            setPref(LINUX_DISPLAY_BACKEND, value.key)
         }
 
     private val EXTERNAL_STORAGE_PATH = stringPreferencesKey("external_storage_path")

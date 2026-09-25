@@ -2508,6 +2508,11 @@
     <string name="linux_session_mode_close_summary">Shuts the app down with its window. Uses nothing while closed.</string>
     <string name="linux_session_mode_keep">Keep it running</string>
     <string name="linux_session_mode_keep_summary">Leaves the app running so reopening it is instant. Stop it from here or the notification.</string>
+    <string name="linux_display_backend_title">Linux display backend</string>
+    <string name="linux_display_backend_android_x">Android X (recommended)</string>
+    <string name="linux_display_backend_android_x_summary">Native Winlator X with DRI3. Lower latency; default for freeform Linux apps.</string>
+    <string name="linux_display_backend_xtigervnc">Xtigervnc (compatibility)</string>
+    <string name="linux_display_backend_xtigervnc_summary">RFB fallback if Android X misbehaves. Works well, but is not built for performance.</string>
     <string name="linux_session_notification_title">Linux apps</string>
     <string name="linux_session_none">No sessions running</string>
     <string name="linux_session_count">%1$d running</string>

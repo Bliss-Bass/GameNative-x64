@@ -2,6 +2,7 @@ package app.gamenative.linux
 
 import android.content.Context
 import app.gamenative.PrefManager
+import app.gamenative.enums.LinuxDisplayBackend
 import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.service.LinuxSessionService
 import kotlinx.coroutines.CoroutineScope
@@ -116,7 +117,14 @@ object LinuxSessions {
         }
 
         val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
-        return@withLock LinuxAndroidXSession.start(context, width, height, densityDpi, mode)
+        val backend = PrefManager.linuxDisplayBackend
+        Timber.i("[LinuxSessions]: opening %s with backend %s", key, backend.key)
+        return@withLock when (backend) {
+            LinuxDisplayBackend.ANDROID_X ->
+                LinuxAndroidXSession.start(context, width, height, densityDpi, mode)
+            LinuxDisplayBackend.XTIGERVNC ->
+                LinuxDisplaySession.start(context, width, height, densityDpi, mode)
+        }
             .onSuccess { session ->
                 synchronized(held) {
                     held[key] = Held(key, label, argv, session, width, height, densityDpi)

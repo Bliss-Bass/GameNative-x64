@@ -8,14 +8,17 @@ list.
 Tagged `linux-apps-phase4-app-entries` in both this repo and `vendor_ax86-lite`.
 
 Committed: PRoot for x86_64, the Ubuntu rootfs installer, the Termux-based terminal
-screen, graphical session packages (openbox + xsettingsd from apt; X server is now the
-in-process Android/Winlator X with DRI3/Present), the Linux session screen with both an
-app and a minimal-desktop profile, `.desktop` scanning with a Linux Apps screen,
-shared-storage binding into the guest, and app-drawer entries for both Linux apps and
-installed games.
+screen, graphical session packages (openbox + xsettingsd from apt; default X server is
+the in-process Android/Winlator X with DRI3/Present, with Xtigervnc+RFB kept as a
+Settings opt-in compatibility backend on Linux Apps), the Linux session screen with
+both an app and a minimal-desktop profile, `.desktop` scanning with a Linux Apps
+screen, shared-storage binding into the guest, and app-drawer entries for both Linux
+apps and installed games.
 
 Verified: freeform Firefox on Android X fills the task, touchscreen mode maps taps, and
-Wine games keep their own ImageFs `:0` untouched.
+Wine games keep their own ImageFs `:0` untouched. Switch **Linux display backend** on
+Linux Apps to **Xtigervnc (compatibility)** if Android X has input or graphics issues;
+sessions stop on change so the next launch uses the selected transport.
 
 Remaining, in rough order: presentation latency (see
 `X86_64_VULKAN_PROVISIONING.md` — the missing x86_64 SysV interposer is the near-term
