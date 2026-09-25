@@ -130,7 +130,15 @@ class LinuxAndroidXSession private constructor(
         LinuxPulse.acquire(context)
         try {
             sessionDpi = dpi
-            val server = XServer(ScreenInfo(width, height, dpi), /* useGlibcContainer = */ true)
+            // GTK4/GDK aborts without XInput2 ("XInput2 support not found"). Wine's glibc
+            // path passes true to keep XI2 off (#1389); Linux guests need the Bionic policy
+            // (XI2 on). mouseDragCompatibility also registers XGE, which libXi requires to
+            // initialize XI2 event delivery.
+            val server = XServer(
+                ScreenInfo(width, height, dpi),
+                /* useGlibcContainer = */ false,
+                /* mouseDragCompatibilityEnabled = */ true,
+            )
             // No guest WM answers MapRequest; map/configure top-levels ourselves.
             server.windowManager.setAutomanageTopLevel(true)
             xServer = server
