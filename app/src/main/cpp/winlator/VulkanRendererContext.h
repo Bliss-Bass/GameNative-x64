@@ -136,6 +136,8 @@ public:
     ~VulkanRendererContext();
 
     void onSurfaceResized(int width, int height);
+    /** X screen size for NDC (may change on Linux freeform resize). */
+    void setContainerSize(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
     void updatePointerPosition(short x, short y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);

@@ -1,8 +1,12 @@
 package com.winlator.xserver;
 
 public class ScreenInfo {
-    public final short width;
-    public final short height;
+    /**
+     * Mutable so Linux freeform sessions can grow/shrink the X screen to match the
+     * Android window (reflow) instead of only scaling the presenter.
+     */
+    public short width;
+    public short height;
     /**
      * Dots-per-inch advertised to X clients via the Setup millimeters fields.
      * Zero keeps the historical {@code width/10} mm formula (~254dpi) that Wine
@@ -25,6 +29,12 @@ public class ScreenInfo {
         this.width = (short)width;
         this.height = (short)height;
         this.dpi = Math.max(0, dpi);
+    }
+
+    /** Updates pixel dimensions; millimeters follow via {@link #getWidthInMillimeters()}. */
+    public void setSize(int width, int height) {
+        this.width = (short)width;
+        this.height = (short)height;
     }
 
     public short getWidthInMillimeters() {

@@ -10,10 +10,9 @@ import android.view.View
  * the transport behind it has already moved once (Xtigervnc/RFB → Android [com.winlator.xserver.XServer])
  * and may move again. Callers should not assume RFB or a particular display number layout.
  *
- * There is deliberately no `resize` here. An X screen's size is fixed when the session starts
- * (Winlator has no RandR); the presenter scales to the Android window. A method on the session
- * would only forward to whichever view happens to be attached, and would invite two viewers to
- * fight over one screen.
+ * Freeform Android windows call [resize] so the X screen matches the client area and GTK/Qt
+ * reflow. Android X updates [com.winlator.xserver.ScreenInfo] and top-level geometry; the RFB
+ * path already had desktop-size encoding (and may no-op here if the view drives resize).
  */
 interface LinuxSession {
 
@@ -27,6 +26,12 @@ interface LinuxSession {
 
     /** Retells the session Android's density, so running clients resize their text. */
     fun setDpi(densityDpi: Int)
+
+    /**
+     * Matches the X screen (and APP-mode top-levels) to the Android freeform client area so
+     * guests reflow instead of being scaled/squashed by the presenter.
+     */
+    fun resize(width: Int, height: Int)
 
     /**
      * A view showing this session, which the caller must hand back to [releaseView].

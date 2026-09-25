@@ -15,7 +15,7 @@ import java.nio.ByteOrder;
 public class Drawable extends XResource {
     private static boolean DRAWABLE_FOR_ASR = false;
     private ByteBuffer data;
-    public final short height;
+    public short height;
     private boolean offscreenStorage;
     private Callback<Drawable> onDestroyListener;
     private Runnable onDrawListener;
@@ -23,7 +23,7 @@ public class Drawable extends XResource {
     private Texture texture;
     private boolean useSharedData;
     public final Visual visual;
-    public final short width;
+    public short width;
 
     private static native void copyArea(short s, short s2, short s3, short s4, short s5, short s6, short s7, short s8, ByteBuffer byteBuffer, ByteBuffer byteBuffer2, boolean needsSwapRB);
 
@@ -166,6 +166,31 @@ public class Drawable extends XResource {
 
     public void setData(ByteBuffer data) {
         this.data = data;
+    }
+
+    /**
+     * Grow/shrink the local pixel store without changing the X id or Java identity.
+     * Used by Linux freeform resize so Vulkan keeps the same drawable key and the
+     * client is not left talking to a replaced backing store.
+     */
+    public void reallocate(int newWidth, int newHeight) {
+        if (newWidth <= 0 || newHeight <= 0) return;
+        if (newWidth == width && newHeight == height) return;
+        synchronized (renderLock) {
+            if (useSharedData) {
+                throw new IllegalStateException("cannot reallocate a shared-memory drawable");
+            }
+            width = (short) newWidth;
+            height = (short) newHeight;
+            if (Drawable.DRAWABLE_FOR_ASR) {
+                AHBImage g = new AHBImage((short) newWidth, (short) newHeight);
+                this.texture = g;
+                this.data = g.getVirtualData();
+            } else {
+                this.texture = new Texture();
+                this.data = ByteBuffer.allocateDirect(newWidth * newHeight * 4).order(ByteOrder.LITTLE_ENDIAN);
+            }
+        }
     }
 
     private short getStride() {

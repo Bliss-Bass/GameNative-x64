@@ -32,8 +32,11 @@ import app.gamenative.linux.LinuxSession
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+
+private const val RESIZE_DEBOUNCE_MS = 350L
 
 /**
  * A window onto a Linux session.
@@ -61,14 +64,27 @@ fun LinuxDesktopScreen(
     var session by remember { mutableStateOf<LinuxSession?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
-    // Android X has no RandR: size the X screen to this composable once layout settles.
-    // safeDrawing clears freeform captionBar + status/nav/cutout so onSizeChanged is the
-    // true client area (not the region under the Android window frame).
+    // Size the X screen to this composable's client area. safeDrawing clears freeform
+    // captionBar + status/nav/cutout so onSizeChanged is the true client area.
+    // Open once; later size changes call session.resize so GTK reflows (not presenter-scale).
     var contentSize by remember { mutableStateOf(IntSize.Zero) }
 
     LaunchedEffect(key, contentSize) {
         if (contentSize.width < 320 || contentSize.height < 240) return@LaunchedEffect
-        if (session != null) return@LaunchedEffect
+
+        val active = session
+        if (active != null) {
+            // Debounce freeform drag jitter (matches RFB desktop-size debounce).
+            delay(RESIZE_DEBOUNCE_MS)
+            if (contentSize.width < 320 || contentSize.height < 240) return@LaunchedEffect
+            Timber.i(
+                "[LinuxDesktopScreen]: resizing session to content %dx%d",
+                contentSize.width,
+                contentSize.height,
+            )
+            active.resize(contentSize.width, contentSize.height)
+            return@LaunchedEffect
+        }
 
         LinuxRootfs.ensureDisplaySession(context) { status = it.message }
             .onFailure {

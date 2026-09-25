@@ -90,6 +90,10 @@ Java_com_winlator_renderer_VulkanRenderer_nativeResize(JNIEnv*, jobject, jlong h
     auto* r=reinterpret_cast<VulkanRendererContext*>(h); if (r) r->onSurfaceResized(w,ht);
 }
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeSetContainerSize(JNIEnv*, jobject, jlong h, jint w, jint ht) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(h); if (r) r->setContainerSize(w,ht);
+}
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeDestroy(JNIEnv*, jobject, jlong h) {
     delete reinterpret_cast<VulkanRendererContext*>(h);
 }

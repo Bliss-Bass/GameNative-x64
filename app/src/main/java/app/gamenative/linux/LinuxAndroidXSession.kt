@@ -46,7 +46,18 @@ class LinuxAndroidXSession private constructor(
     private val apps = mutableListOf<Process>()
 
     private var viewCallback: ((Throwable?) -> Unit)? = null
+    private var attachedView: LinuxXServerView? = null
     private var sessionDpi: Int = LinuxDisplayScale.X_BASELINE_DPI
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /** Runnable tokens for delayed map re-fits so a freeform resize can cancel them. */
+    private val pendingMapRefits = mutableListOf<Runnable>()
+    /**
+     * While uptime is below this, ignore geometry snap-backs. Freeform resize reallocates a
+     * blank drawable; GTK then Presents once; an immediate snap/delayed re-fit would blank
+     * the buffer again and leave a white window until the next resize.
+     */
+    @Volatile
+    private var suppressGeometryFitUntilMs: Long = 0L
 
     @Volatile
     override var isRunning = false
@@ -60,6 +71,8 @@ class LinuxAndroidXSession private constructor(
         private const val FIRST_DISPLAY = 10
         private const val DISPLAY_COUNT = 16
         private const val READY_TIMEOUT_MS = 15_000L
+        /** Grace after freeform resize before map/geometry snap-backs may re-fit. */
+        private const val RESIZE_FIT_GRACE_MS = 2_500L
 
         private val claimed = mutableSetOf<Int>()
 
@@ -193,9 +206,6 @@ class LinuxAndroidXSession private constructor(
      */
     private fun installAppWindowFitter(server: XServer) {
         if (mode != LinuxDesktopConfig.Mode.APP) return
-        val w = server.screenInfo.width
-        val h = server.screenInfo.height
-        val mainHandler = Handler(Looper.getMainLooper())
         server.windowManager.addOnWindowModificationListener(
             object : com.winlator.xserver.WindowManager.OnWindowModificationListener {
                 override fun onMapWindow(window: com.winlator.xserver.Window) {
@@ -208,9 +218,12 @@ class LinuxAndroidXSession private constructor(
                         window.attributes.isOverrideRedirect,
                         window.isInputOutput,
                     )
-                    fitTopLevel(server, window, w, h)
-                    mainHandler.postDelayed({ fitTopLevel(server, window, w, h) }, 750L)
-                    mainHandler.postDelayed({ fitTopLevel(server, window, w, h) }, 2000L)
+                    // Live screenInfo — not closed-over shorts from install time — so freeform
+                    // resize keeps fitting to the current X screen.
+                    fitTopLevel(server, window)
+                    // GTK often maps before size hints relax; re-fit shortly after map only.
+                    scheduleMapRefit(server, window, 750L)
+                    scheduleMapRefit(server, window, 2000L)
                 }
 
                 override fun onUpdateWindowGeometry(
@@ -218,18 +231,36 @@ class LinuxAndroidXSession private constructor(
                     resized: Boolean,
                 ) {
                     if (!resized) return
+                    if (android.os.SystemClock.uptimeMillis() < suppressGeometryFitUntilMs) return
                     // Firefox/GTK often Configure themselves smaller right after map; snap back.
-                    fitTopLevel(server, window, w, h)
+                    // Skipped during freeform resize grace so we do not wipe GTK's first Present.
+                    fitTopLevel(server, window)
                 }
             },
         )
     }
 
+    private fun scheduleMapRefit(server: XServer, window: com.winlator.xserver.Window, delayMs: Long) {
+        val r = Runnable { fitTopLevel(server, window) }
+        synchronized(pendingMapRefits) { pendingMapRefits += r }
+        mainHandler.postDelayed({
+            synchronized(pendingMapRefits) { pendingMapRefits.remove(r) }
+            if (isRunning) r.run()
+        }, delayMs)
+    }
+
+    private fun cancelPendingMapRefits() {
+        synchronized(pendingMapRefits) {
+            for (r in pendingMapRefits) mainHandler.removeCallbacks(r)
+            pendingMapRefits.clear()
+        }
+    }
+
     private fun fitTopLevel(
         server: XServer,
         window: com.winlator.xserver.Window,
-        w: Short,
-        h: Short,
+        width: Short = server.screenInfo.width,
+        height: Short = server.screenInfo.height,
     ) {
         if (!isRunning) return
         if (window.parent != server.windowManager.rootWindow) return
@@ -241,19 +272,25 @@ class LinuxAndroidXSession private constructor(
         // freeform client area so xterm/Firefox match the Android window frame.
         if (window.width < 200 || window.height < 150) return
         // Skip already-full windows (avoids drawable churn on the delayed re-fit).
-        if (window.width == w && window.height == h && window.x.toInt() == 0 && window.y.toInt() == 0) return
+        if (window.width == width && window.height == height &&
+            window.x.toInt() == 0 && window.y.toInt() == 0
+        ) {
+            return
+        }
         try {
             server.lock(
                 XServer.Lockable.WINDOW_MANAGER,
                 XServer.Lockable.DRAWABLE_MANAGER,
             ).use {
-                server.windowManager.forceGeometry(window, 0, 0, w, h)
+                server.windowManager.forceGeometry(window, 0, 0, width, height)
             }
             Timber.i(
-                "[LinuxAndroidXSession]: fitted window %#x to %dx%d",
+                "[LinuxAndroidXSession]: fitted window %#x to %dx%d (now %dx%d)",
                 window.id,
-                w.toInt(),
-                h.toInt(),
+                width.toInt(),
+                height.toInt(),
+                window.width.toInt(),
+                window.height.toInt(),
             )
         } catch (t: Throwable) {
             Timber.w(t, "[LinuxAndroidXSession]: could not fit window %#x", window.id)
@@ -356,11 +393,12 @@ class LinuxAndroidXSession private constructor(
     override fun createView(context: Context, onClosed: (Throwable?) -> Unit): View {
         val server = xServer ?: throw IllegalStateException("X server not started")
         viewCallback = onClosed
-        return LinuxXServerView(context, server)
+        return LinuxXServerView(context, server).also { attachedView = it }
     }
 
     override fun releaseView(view: View) {
         (view as? LinuxXServerView)?.release()
+        if (attachedView === view) attachedView = null
         viewCallback = null
     }
 
@@ -378,9 +416,54 @@ class LinuxAndroidXSession private constructor(
         Timber.i("[LinuxAndroidXSession]: dpi set to %d", dpi)
     }
 
+    override fun resize(width: Int, height: Int) {
+        val server = xServer ?: return
+        if (!isRunning) return
+        val w = width.coerceAtLeast(320).toShort()
+        val h = height.coerceAtLeast(240).toShort()
+        if (server.screenInfo.width == w && server.screenInfo.height == h) return
+
+        Timber.i(
+            "[LinuxAndroidXSession]: resizing X screen %dx%d -> %dx%d",
+            server.screenInfo.width.toInt(),
+            server.screenInfo.height.toInt(),
+            w.toInt(),
+            h.toInt(),
+        )
+        // Cancel map-time delayed fits and suppress geometry snap-backs: forceGeometry
+        // reallocates a blank buffer; presenting it (or fitting again before GTK paints)
+        // is what left Calculator white after a brief correct frame.
+        cancelPendingMapRefits()
+        suppressGeometryFitUntilMs = android.os.SystemClock.uptimeMillis() + RESIZE_FIT_GRACE_MS
+        try {
+            server.lock(
+                XServer.Lockable.WINDOW_MANAGER,
+                XServer.Lockable.DRAWABLE_MANAGER,
+            ).use {
+                server.screenInfo.setSize(w.toInt(), h.toInt())
+                server.windowManager.resizeRootWindow(w, h)
+                if (mode == LinuxDesktopConfig.Mode.APP) {
+                    for (child in server.windowManager.rootWindow.children.toList()) {
+                        fitTopLevel(server, child, w, h)
+                    }
+                }
+            }
+            // Update present transform only — do not push the blank reallocated buffers.
+            // GTK's next Present fills the drawable; poking here made the white flash stick.
+            (server.renderer as? com.winlator.renderer.VulkanRenderer)
+                ?.runCatching { onScreenInfoChanged() }
+                ?.onFailure { Timber.w(it, "[LinuxAndroidXSession]: onScreenInfoChanged failed") }
+            attachedView?.onXScreenResized()
+        } catch (t: Throwable) {
+            Timber.w(t, "[LinuxAndroidXSession]: resize to %dx%d failed", w.toInt(), h.toInt())
+        }
+    }
+
     override fun stop() {
         isRunning = false
+        cancelPendingMapRefits()
         viewCallback = null
+        attachedView = null
 
         val held = synchronized(apps) { apps.toList().also { apps.clear() } }
         val labelled = held.map { it to "application" } +

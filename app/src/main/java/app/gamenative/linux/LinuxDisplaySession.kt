@@ -344,6 +344,18 @@ class LinuxDisplaySession private constructor(
     }
 
     /**
+     * RFB [app.gamenative.linux.rfb.RfbView] already requests desktop size from surface
+     * changes; nothing further to do on the session.
+     */
+    override fun resize(width: Int, height: Int) {
+        Timber.d(
+            "[LinuxDisplaySession]: resize(%dx%d) deferred to RFB desktop-size path",
+            width,
+            height,
+        )
+    }
+
+    /**
      * Xft faceName for xterm under TigerVNC. Android X overwrites this with core fonts;
      * rewriting here keeps the two backends from fighting when the user switches.
      */

@@ -154,6 +154,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     private native long nativeInit(Surface surface, int screenWidth, int screenHeight, String driverPath, String libraryName, String nativeLibDir);
     private native void nativeResize(long handle, int width, int height);
+    private native void nativeSetContainerSize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeUpdateWindowContent(long handle, long id, java.nio.ByteBuffer pixels,
         short width, short height, short stride, int x, int y);
@@ -307,6 +308,24 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (xrFrameBridge != null) enableXrTargetLocked();
             }
         }
+    }
+
+    /**
+     * Recomputes present transform after {@link com.winlator.xserver.ScreenInfo} changes
+     * without a surface size change (Linux freeform to X screen resize).
+     */
+    public void onScreenInfoChanged() {
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
+        viewTransformation.update(surfaceWidth, surfaceHeight, xServer.screenInfo.width, xServer.screenInfo.height);
+        synchronized (lock) {
+            if (nativeHandle != 0) {
+                // nativeInit baked screen size into containerWidth/Height for NDC;
+                // freeform resize must update it or windows appear as a side strip.
+                nativeSetContainerSize(nativeHandle, xServer.screenInfo.width, xServer.screenInfo.height);
+                updateTransform();
+            }
+        }
+        queueSceneUpdate();
     }
 
     public void onSurfaceDestroyed() {

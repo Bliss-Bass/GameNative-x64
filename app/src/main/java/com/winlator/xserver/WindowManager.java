@@ -261,13 +261,15 @@ public class WindowManager extends XResourceManager {
     }
 
     /**
-     * Resize/move a window as a WM would, without SubstructureRedirect.
+     * Resize/move a window as a WM would, without SubstructureRedirect or ResizeRedirect.
      * Used by Linux app sessions that run without openbox on Android X.
+     * Must bypass {@link Event#RESIZE_REDIRECT}: otherwise geometry stays put while
+     * ConfigureNotify lies about the new size and the guest stops painting.
      */
     public void forceGeometry(Window window, short x, short y, short width, short height) {
         if (window == null || window == rootWindow) return;
         if (width <= 0 || height <= 0) return;
-        changeWindowGeometry(window, x, y, width, height);
+        applyGeometry(window, x, y, width, height, /* honorResizeRedirect= */ false);
         window.setBorderWidth((short) 0);
         Window previousSibling = window.previousSibling();
         boolean overrideRedirect = window.attributes.isOverrideRedirect();
@@ -278,9 +280,47 @@ public class WindowManager extends XResourceManager {
         }
     }
 
+    /**
+     * Grows or shrinks the root window drawable to a new screen size.
+     * {@link #forceGeometry} refuses the root; Linux freeform resize needs this explicitly.
+     */
+    public void resizeRootWindow(short width, short height) {
+        if (width <= 0 || height <= 0) return;
+        if (rootWindow.getWidth() == width && rootWindow.getHeight() == height) return;
+
+        Drawable content = rootWindow.getContent();
+        if (content != null) {
+            try {
+                content.reallocate(width, height);
+            } catch (IllegalStateException shared) {
+                drawableManager.removeDrawable(content.id);
+                Drawable newContent = drawableManager.createDrawable(
+                    content.id, width, height, content.visual);
+                newContent.setOnDrawListener(() -> triggerOnUpdateWindowContent(rootWindow));
+                rootWindow.setContent(newContent);
+            }
+        }
+        rootWindow.setWidth(width);
+        rootWindow.setHeight(height);
+        triggerOnUpdateWindowGeometry(rootWindow, true);
+        rootWindow.sendEvent(
+            Event.STRUCTURE_NOTIFY,
+            new ConfigureNotify(
+                rootWindow, rootWindow, null,
+                (short) 0, (short) 0, width, height, (short) 0, false));
+        if (rootWindow.attributes.isMapped()) {
+            rootWindow.sendEvent(new Expose(rootWindow));
+        }
+    }
+
     private void changeWindowGeometry(Window window, short x, short y, short width, short height) {
+        applyGeometry(window, x, y, width, height, /* honorResizeRedirect= */ true);
+    }
+
+    private void applyGeometry(
+            Window window, short x, short y, short width, short height, boolean honorResizeRedirect) {
         boolean resized = window.getWidth() != width || window.getHeight() != height;
-        if (resized && window.hasEventListenerFor(Event.RESIZE_REDIRECT)) {
+        if (resized && honorResizeRedirect && window.hasEventListenerFor(Event.RESIZE_REDIRECT)) {
             window.sendEvent(Event.SUBSTRUCTURE_REDIRECT, new ResizeRequest(window, width, height));
             width = window.getWidth();
             height = window.getHeight();
@@ -288,11 +328,18 @@ public class WindowManager extends XResourceManager {
         }
 
         if (resized && window.isInputOutput()) {
-            Drawable oldContent = window.getContent();
-            drawableManager.removeDrawable(oldContent.id);
-            Drawable newContent = drawableManager.createDrawable(oldContent.id, width, height, oldContent.visual);
-            newContent.setOnDrawListener(() -> triggerOnUpdateWindowContent(window));
-            window.setContent(newContent);
+            Drawable content = window.getContent();
+            if (content != null) {
+                try {
+                    content.reallocate(width, height);
+                } catch (IllegalStateException shared) {
+                    drawableManager.removeDrawable(content.id);
+                    Drawable newContent = drawableManager.createDrawable(
+                        content.id, width, height, content.visual);
+                    newContent.setOnDrawListener(() -> triggerOnUpdateWindowContent(window));
+                    window.setContent(newContent);
+                }
+            }
         }
 
         boolean moved = window.getX() != x || window.getY() != y;

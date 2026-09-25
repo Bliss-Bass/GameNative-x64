@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import app.gamenative.data.TouchGestureConfig
+import com.winlator.renderer.VulkanRenderer
 import com.winlator.widget.TouchpadView
 import com.winlator.widget.XServerView
 import com.winlator.xserver.Pointer
@@ -287,6 +288,17 @@ class LinuxXServerView(
     fun release() {
         runCatching { hideIme() }
         runCatching { xServerView.onPause() }
+    }
+
+    /** After the X screen is resized to match the Android window, refresh present + input maps. */
+    fun onXScreenResized() {
+        touchpadView.refreshScreenXform()
+        (xServerView.renderer as? VulkanRenderer)?.onScreenInfoChanged()
+        Timber.i(
+            "[LinuxXServerView]: screen now %dx%d",
+            xServer.screenInfo.width.toInt(),
+            xServer.screenInfo.height.toInt(),
+        )
     }
 
     /**

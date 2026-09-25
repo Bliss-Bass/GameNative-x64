@@ -310,6 +310,15 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         updateXform(w, h, screenInfo.width, screenInfo.height);
     }
 
+    /** Refresh pointer mapping after the X screen size changes (Linux freeform resize). */
+    public void refreshScreenXform() {
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) return;
+        ScreenInfo screenInfo = this.xServer.screenInfo;
+        updateXform(w, h, screenInfo.width, screenInfo.height);
+    }
+
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
         ViewTransformation viewTransformation = new ViewTransformation();
         viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);

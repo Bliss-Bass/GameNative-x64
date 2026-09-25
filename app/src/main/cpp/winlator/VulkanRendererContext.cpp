@@ -1416,6 +1416,14 @@ void VulkanRendererContext::onSurfaceResized(int w, int h) {
     surfaceWidth=w; surfaceHeight=h; fbResized.store(true); dirtyCV.notify_one();
 }
 
+void VulkanRendererContext::setContainerSize(int w, int h) {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (w<=0||h<=0) return;
+    if (containerWidth==w && containerHeight==h) return;
+    containerWidth=w; containerHeight=h;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
 void VulkanRendererContext::detachSurface() {
     surfaceDetached.store(true, std::memory_order_release);
     dirtyCV.notify_all();
