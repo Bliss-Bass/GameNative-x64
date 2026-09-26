@@ -149,7 +149,8 @@ public:
     bool supportsDmaBufImport() const { return dmaBufImportSupported; }
     void updateCursorImage(void* pixels, short w, short h, short hotX, short hotY);
     void setCursorVisible(bool visible);
-    void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
+    void setRenderList(const int64_t* ids, const int* xs, const int* ys,
+                       const int* ws, const int* hs, int count);
     void removeWindow(int64_t id);
     void clearBackbuffer() {}
     void beginBatch() {}
@@ -208,7 +209,7 @@ private:
         AHardwareBuffer*     ahb            = nullptr;
     };
 
-    struct RenderEntry { int64_t id; int x, y; };
+    struct RenderEntry { int64_t id; int x, y, w, h; };
     struct DrawEntry {
         VkImage         img            = VK_NULL_HANDLE;
         VkDescriptorSet ds             = VK_NULL_HANDLE;

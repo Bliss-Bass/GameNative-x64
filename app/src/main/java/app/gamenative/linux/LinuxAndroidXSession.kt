@@ -81,10 +81,9 @@ class LinuxAndroidXSession private constructor(
         private const val MIN_RESIZE_PX = 64
         /**
          * Re-check frame vs X screen after settle. Freeform + SurfaceView + GTK land on
-         * different clocks; late rounds past the ~3rd resize catch undersized Present buffers.
+         * different clocks; a few spaced rounds catch missed applies after repeated resizes.
          */
-        private val RECONCILE_DELAYS_MS =
-            longArrayOf(80L, 200L, 400L, 700L, 1_100L, 1_600L, 2_400L, 3_500L)
+        private val RECONCILE_DELAYS_MS = longArrayOf(100L, 300L, 700L, 1_400L, 2_500L)
 
         private val claimed = mutableSetOf<Int>()
 
@@ -433,19 +432,25 @@ class LinuxAndroidXSession private constructor(
             return
         }
         try {
+            val beforeW = window.width
+            val beforeH = window.height
             server.lock(
                 XServer.Lockable.WINDOW_MANAGER,
                 XServer.Lockable.DRAWABLE_MANAGER,
             ).use {
                 server.windowManager.forceGeometry(window, 0, 0, width, height)
+                // Do not unmap/map: Mesa still presents the launch pixmap after remap, and
+                // the churn leaves stale override-redirect / CSD fragments (ghost headers).
+                // Stretch-present of the cover window fills the freeform frame instead.
             }
             Timber.i(
-                "[LinuxAndroidXSession]: fitted window %#x to %dx%d (now %dx%d)",
+                "[LinuxAndroidXSession]: fitted window %#x to %dx%d (now %dx%d)%s",
                 window.id,
                 width.toInt(),
                 height.toInt(),
                 window.width.toInt(),
                 window.height.toInt(),
+                if (beforeW != width || beforeH != height) " rematerialized" else "",
             )
         } catch (t: Throwable) {
             Timber.w(t, "[LinuxAndroidXSession]: could not fit window %#x", window.id)

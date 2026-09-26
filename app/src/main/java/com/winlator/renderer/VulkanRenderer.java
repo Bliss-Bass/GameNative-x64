@@ -171,7 +171,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetCursorVisible(long handle, boolean visible);
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
         short width, short height, short hotX, short hotY);
-    private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys, int count);
+    private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys,
+        int[] ws, int[] hs, int count);
     private native void nativeRemoveWindow(long handle, long id);
 
     private native void nativeInitScanout(long handle);
@@ -455,7 +456,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     }
                 }
             }
-            if (viewable) list.add(new RenderableWindow(window.getContent(), x, y));
+            if (viewable) {
+                list.add(new RenderableWindow(
+                    window.getContent(), x, y, window.attributes.isOverrideRedirect()));
+            }
         }
         for (Window child : window.getChildren())
             collectWindows(list, child, child.getX() + x, child.getY() + y);
@@ -465,47 +469,80 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         if (nativeHandle == 0) return;
         int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
 
-        int start = 0;
+        // Topmost non-OR window that covers (or nearly covers) the screen. GTK/Mesa
+        // already composite CSD/widgets into that Present. Drawing nested X children or
+        // stale override-redirect chrome on top is what produces ghost headers after
+        // freeform resize — APP sessions draw the cover alone.
+        int cover = -1;
         for (int i = list.size() - 1; i >= 0; i--) {
             RenderableWindow rw = list.get(i);
-            if (rw.content != null && rw.content.width >= screenW && rw.content.height >= screenH) {
-                start = i; break;
+            if (rw.overrideRedirect || rw.content == null) continue;
+            if (rw.content.width >= screenW * 8 / 10 && rw.content.height >= screenH * 8 / 10) {
+                cover = i;
+                break;
+            }
+        }
+
+        ArrayList<RenderableWindow> draw = list;
+        boolean forceScreenFill = false;
+        if (cover >= 0) {
+            draw = new ArrayList<>(1);
+            draw.add(list.get(cover));
+            forceScreenFill = true;
+        } else {
+            int start = 0;
+            for (int i = list.size() - 1; i >= 0; i--) {
+                RenderableWindow rw = list.get(i);
+                if (rw.content != null && rw.content.width >= screenW && rw.content.height >= screenH) {
+                    start = i; break;
+                }
+            }
+            if (start > 0) {
+                draw = new ArrayList<>(list.subList(start, list.size()));
             }
         }
 
         if (nativeMode) {
             ArrayList<RenderableWindow> ns = new ArrayList<>();
-            for (int i = start; i < list.size(); i++) {
-                RenderableWindow rw = list.get(i);
+            for (int i = 0; i < draw.size(); i++) {
+                RenderableWindow rw = draw.get(i);
                 if (rw.content != null && (effectsRequireCompositor || !rw.content.isDirectScanout())) ns.add(rw);
             }
-            int n = ns.size();
-            long[] ids = new long[n]; int[] xs = new int[n]; int[] ys = new int[n];
-            for (int i = 0; i < n; i++) {
-                ids[i] = did(ns.get(i).content); xs[i] = ns.get(i).rootX; ys[i] = ns.get(i).rootY;
-            }
-            nativeSetRenderList(nativeHandle, ids, xs, ys, n);
+            pushNativeRenderList(ns, forceScreenFill ? screenW : 0, forceScreenFill ? screenH : 0);
             return;
         }
-        if (fullscreen) {
-            int n = list.size() - start;
-            if (n <= 0) { nativeSetRenderList(nativeHandle, new long[0], new int[0], new int[0], 0); return; }
-            long[] ids = new long[n]; int[] xs = new int[n]; int[] ys = new int[n];
-            for (int i = 0; i < n; i++) {
-                RenderableWindow rw = list.get(start + i);
-                ids[i] = did(rw.content); xs[i] = rw.rootX; ys[i] = rw.rootY;
-            }
-            nativeSetRenderList(nativeHandle, ids, xs, ys, n);
-            return;
-        }
+        pushNativeRenderList(draw, forceScreenFill ? screenW : 0, forceScreenFill ? screenH : 0);
+    }
 
-        int n = list.size() - start;
-        long[] ids = new long[n]; int[] xs = new int[n]; int[] ys = new int[n];
-        for (int i = 0; i < n; i++) {
-            RenderableWindow rw = list.get(start + i);
-            ids[i] = did(rw.content); xs[i] = rw.rootX; ys[i] = rw.rootY;
+    private void pushNativeRenderList(ArrayList<RenderableWindow> draw, int fillW, int fillH) {
+        int n = draw.size();
+        if (n <= 0) {
+            nativeSetRenderList(nativeHandle, new long[0], new int[0], new int[0], new int[0], new int[0], 0);
+            return;
         }
-        nativeSetRenderList(nativeHandle, ids, xs, ys, n);
+        long[] ids = new long[n];
+        int[] xs = new int[n];
+        int[] ys = new int[n];
+        int[] ws = new int[n];
+        int[] hs = new int[n];
+        for (int i = 0; i < n; i++) {
+            RenderableWindow rw = draw.get(i);
+            ids[i] = did(rw.content);
+            // Single cover window: pin to origin and stretch to the X screen so a
+            // stale Present pixmap (often stuck at launch WxH) fills the freeform frame.
+            if (fillW > 0 && fillH > 0 && n == 1) {
+                xs[i] = 0;
+                ys[i] = 0;
+                ws[i] = fillW;
+                hs[i] = fillH;
+            } else {
+                xs[i] = rw.rootX;
+                ys[i] = rw.rootY;
+                ws[i] = rw.content != null ? rw.content.width : 0;
+                hs[i] = rw.content != null ? rw.content.height : 0;
+            }
+        }
+        nativeSetRenderList(nativeHandle, ids, xs, ys, ws, hs, n);
     }
 
     private void sendCursorToNative(Cursor cursor) {
@@ -1039,6 +1076,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
     private static class RenderableWindow {
         public final Drawable content; public int rootX, rootY;
-        public RenderableWindow(Drawable c, int x, int y) { content=c; rootX=x; rootY=y; }
+        public final boolean overrideRedirect;
+        public RenderableWindow(Drawable c, int x, int y, boolean overrideRedirect) {
+            content = c; rootX = x; rootY = y; this.overrideRedirect = overrideRedirect;
+        }
     }
 }

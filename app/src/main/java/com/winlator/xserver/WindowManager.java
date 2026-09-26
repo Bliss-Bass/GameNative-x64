@@ -443,6 +443,29 @@ public class WindowManager extends XResourceManager {
 
         Window parent = window.getParent();
         boolean overrideRedirect = window.attributes.isOverrideRedirect();
+        // APP sessions have no real WM. Clients (GTK) often ConfigureWindow back to their
+        // preferred size after we force-fill the freeform frame; applying that shrink leaves
+        // X geometry / Present buffers smaller than the Android window → under-fill strips.
+        // Keep sizable top-levels locked to the root (screen) size, matching forceGeometry.
+        if (automanageTopLevel
+                && parent == rootWindow
+                && !overrideRedirect
+                && window.isInputOutput()
+                && width >= 200 && height >= 150) {
+            short fillW = rootWindow.getWidth();
+            short fillH = rootWindow.getHeight();
+            if (width != fillW || height != fillH || x != 0 || y != 0) {
+                android.util.Log.i(
+                    "WindowManager",
+                    "APP fill-lock win=0x" + Integer.toHexString(window.id)
+                        + " client=" + width + "x" + height + "@" + x + "," + y
+                        + " -> " + fillW + "x" + fillH);
+            }
+            x = 0;
+            y = 0;
+            width = fillW;
+            height = fillH;
+        }
         if (automanageTopLevel
                 || !parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT)
                 || overrideRedirect) {

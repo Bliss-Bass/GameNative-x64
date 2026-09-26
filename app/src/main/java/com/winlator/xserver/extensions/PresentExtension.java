@@ -362,22 +362,24 @@ public class PresentExtension implements Extension {
             return;
         }
 
-        // Shared mmap pixmaps must be copied; GPUImage/AHB-backed DRI3 pixmaps can flip
-        // only when they fill the window. Undersized presents (common right after freeform
-        // ConfigureNotify while GTK/Mesa still hold the old swapchain size) must NOT flip
-        // the smaller texture onto the window — that makes Vulkan draw pixmap WxH against
-        // the clear color and leaves letterbox strips. Upload the pixmap at its size via
-        // Direct instead; Linux uses a white clear so gutters match the drawable fill.
+        // Rate-limited Present size vs window — diagnose freeform under-fill.
+        if (pixmap.drawable.width < content.width || pixmap.drawable.height < content.height) {
+            android.util.Log.i("PresentExtension",
+                "undersized present win=0x" + Integer.toHexString(window.id)
+                    + " pixmap=" + pixmap.drawable.width + "x" + pixmap.drawable.height
+                    + " windowContent=" + content.width + "x" + content.height
+                    + " winGeom=" + window.getWidth() + "x" + window.getHeight()
+                    + " off=" + xOff + "," + yOff);
+        }
         final boolean sharedStorage = pixmap.drawable.isUseSharedData();
         final boolean gpuBacked = pixmap.drawable.getTexture() instanceof com.winlator.renderer.GPUImage;
-        final boolean pixmapFillsWindow =
-                pixmap.drawable.width + xOff >= content.width
-                        && pixmap.drawable.height + yOff >= content.height;
         if (sharedStorage) pixmap.drawable.forceUpdate();
 
         synchronized (content.renderLock) {
-            if ((asr != null || (vr != null && gpuBacked)) && !sharedStorage && gpuBacked
-                    && pixmapFillsWindow) {
+            // Flip GPU presents even when undersized: the Vulkan render list stretches the
+            // cover window to the X screen so freeform frames stay filled. Avoid copyArea
+            // into a larger content buffer — that leaves previous frames as ghost UI.
+            if ((asr != null || (vr != null && gpuBacked)) && !sharedStorage && gpuBacked) {
                 content.setTexture(pixmap.drawable.getTexture());
                 content.setDirectScanout(pixmap.drawable.isDirectScanout());
                 if (vr != null && content.isDirectScanout()) {
@@ -390,7 +392,7 @@ public class PresentExtension implements Extension {
                 }
                 if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
                 else sendIdleNotify(window, pixmap, serial, idleFence);
-            } else if (asr != null && !sharedStorage && pixmapFillsWindow) {
+            } else if (asr != null && !sharedStorage) {
                 content.setTexture(pixmap.drawable.getTexture());
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
                 if (window.attributes.isMapped()) {
@@ -399,16 +401,8 @@ public class PresentExtension implements Extension {
                 if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
                 else sendIdleNotify(window, pixmap, serial, idleFence);
             } else if (vr != null && window.attributes.isMapped()) {
-                if (!pixmapFillsWindow && content.getData() != null && pixmap.drawable.getData() != null) {
-                    content.copyArea((short)0, (short)0, xOff, yOff,
-                            pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
-                    sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-                    vr.onUpdateWindowContent(window);
-                } else {
-                    // Undersized GPU/AHB or full-size CPU: draw pixmap at its size (Direct).
-                    sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-                    vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
-                }
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+                vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
                 if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
                 else sendIdleNotify(window, pixmap, serial, idleFence);
             } else {

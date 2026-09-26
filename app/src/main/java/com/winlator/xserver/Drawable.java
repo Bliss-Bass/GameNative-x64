@@ -215,6 +215,27 @@ public class Drawable extends XResource {
         forceUpdate();
     }
 
+    /**
+     * Detach a flipped Present/DRI3 GPU texture and restore a local opaque-white
+     * buffer at the current drawable size. Used when an undersized Present arrives
+     * after freeform resize — stretching the stale pixmap shows ghost UI.
+     */
+    public void restoreLocalOpaqueWhite() {
+        if (useSharedData) return;
+        synchronized (renderLock) {
+            directScanout = false;
+            if (Drawable.DRAWABLE_FOR_ASR) {
+                AHBImage g = new AHBImage(width, height);
+                this.texture = g;
+                this.data = g.getVirtualData();
+            } else {
+                this.texture = new Texture();
+                this.data = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN);
+            }
+            fillOpaqueWhite();
+        }
+    }
+
     private short getStride() {
         return texture instanceof NativeTexture ? ((NativeTexture)texture).getStride() : width;
     }

@@ -67,6 +67,10 @@ public class DrawableManager extends XResourceManager implements XResourceManage
         if (resource instanceof Pixmap) removeDrawable(((Pixmap)resource).drawable.id);
     }
 
+    public XServer getXServer() {
+        return xServer;
+    }
+
     public Visual getVisual() {
         return xServer.pixmapManager.visual;
     }

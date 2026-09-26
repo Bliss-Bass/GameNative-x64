@@ -1348,7 +1348,8 @@ ok=true;}catch(...){}
             if (it==texMap.end()) continue;
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
-            DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
+            DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,
+                         re.w > 0 ? re.w : wt.w, re.h > 0 ? re.h : wt.h};
             de.isAHB=wt.isAHB;
             if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
             if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) {
@@ -1587,10 +1588,14 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     needsRender.store(true); dirtyCV.notify_one();
 }
 
-void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
+void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys,
+                                          const int* ws, const int* hs, int count) {
     std::lock_guard<std::mutex> lk(renderMutex);
     renderList.resize(count);
-    for (int i=0;i<count;i++) renderList[i]={ids[i],xs[i],ys[i]};
+    for (int i=0;i<count;i++) {
+        renderList[i]={ids[i], xs[i], ys[i],
+                       ws ? ws[i] : 0, hs ? hs[i] : 0};
+    }
     needsRender.store(true); dirtyCV.notify_one();
 }
 

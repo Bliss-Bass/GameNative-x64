@@ -448,8 +448,13 @@ public abstract class WindowRequests {
             outputStream.writeInt(client.xServer.windowManager.rootWindow.id);
             outputStream.writeShort(x);
             outputStream.writeShort(y);
-            outputStream.writeShort(drawable.width);
-            outputStream.writeShort(drawable.height);
+            // Window geometry must win over drawable backing size. After freeform resize the
+            // content drawable can briefly disagree with the window (Present flip / remap);
+            // Mesa/GTK size their swapchains from GetGeometry.
+            short geoW = window != null ? window.getWidth() : drawable.width;
+            short geoH = window != null ? window.getHeight() : drawable.height;
+            outputStream.writeShort(geoW);
+            outputStream.writeShort(geoH);
             outputStream.writeShort(borderWidth);
             outputStream.writePad(10);
         }

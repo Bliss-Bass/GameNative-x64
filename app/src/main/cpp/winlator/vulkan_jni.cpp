@@ -185,7 +185,8 @@ Java_com_winlator_renderer_VulkanRenderer_nativeUpdateCursorImage(
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeSetRenderList(
-    JNIEnv* env, jobject, jlong handle, jlongArray jids, jintArray jxs, jintArray jys, jint count)
+    JNIEnv* env, jobject, jlong handle, jlongArray jids, jintArray jxs, jintArray jys,
+    jintArray jws, jintArray jhs, jint count)
 {
     auto* r=reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r||count<=0) return;
@@ -193,7 +194,11 @@ Java_com_winlator_renderer_VulkanRenderer_nativeSetRenderList(
     jlong* ids=(jlong*)env->GetPrimitiveArrayCritical(jids,nullptr);
     jint*  xs =(jint*) env->GetPrimitiveArrayCritical(jxs, nullptr);
     jint*  ys =(jint*) env->GetPrimitiveArrayCritical(jys, nullptr);
-    r->setRenderList(reinterpret_cast<const int64_t*>(ids),xs,ys,count);
+    jint*  ws =(jint*) env->GetPrimitiveArrayCritical(jws, nullptr);
+    jint*  hs =(jint*) env->GetPrimitiveArrayCritical(jhs, nullptr);
+    r->setRenderList(reinterpret_cast<const int64_t*>(ids),xs,ys,ws,hs,count);
+    env->ReleasePrimitiveArrayCritical(jhs, hs,  JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(jws, ws,  JNI_ABORT);
     env->ReleasePrimitiveArrayCritical(jys, ys,  JNI_ABORT);
     env->ReleasePrimitiveArrayCritical(jxs, xs,  JNI_ABORT);
     env->ReleasePrimitiveArrayCritical(jids,ids, JNI_ABORT);
