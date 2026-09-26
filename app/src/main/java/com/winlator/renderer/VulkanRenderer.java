@@ -701,6 +701,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             }
             java.nio.ByteBuffer buf = drawable.getBuffer();
             if (buf == null) return;
+            if (com.winlator.core.XPathStats.isEnabled()) {
+                com.winlator.core.XPathStats.count(com.winlator.core.XPathStats.CPU_UPLOAD,
+                        drawable.width, drawable.height, drawable.width, drawable.height);
+            }
             short stride = (short)(buf.capacity() / (drawable.height * 4));
             if (drawable.isForceOpaqueAlpha()) {
                 nativeUpdateWindowContentOpaque(handle, drawableId, buf,

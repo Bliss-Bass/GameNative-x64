@@ -138,6 +138,12 @@ public class MITSHMExtension implements Extension {
             throw new UnsupportedOperationException("GC Function other than COPY is not supported.");
         }
 
+        if (com.winlator.core.XPathStats.isEnabled()) {
+            com.winlator.core.XPathStats.count(drawable.getOnDrawListener() != null
+                            ? com.winlator.core.XPathStats.SHM_PUT_IMAGE_WINDOW
+                            : com.winlator.core.XPathStats.SHM_PUT_IMAGE_PIXMAP,
+                    srcWidth, srcHeight, drawable.width, drawable.height);
+        }
         drawable.drawImage(srcX, srcY, dstX, dstY, srcWidth, srcHeight, depth, data, totalWidth, totalHeight);
 
         // Only a blit whose clipped destination covers >=80% of the drawable

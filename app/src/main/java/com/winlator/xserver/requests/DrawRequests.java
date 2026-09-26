@@ -45,6 +45,20 @@ public abstract class DrawRequests {
             throw new UnsupportedOperationException("GC Function other than COPY is not supported.");
         }
 
+        if (com.winlator.core.XPathStats.isEnabled()) {
+            com.winlator.core.XPathStats.count(drawable.getOnDrawListener() != null
+                            ? com.winlator.core.XPathStats.PUT_IMAGE_WINDOW
+                            : com.winlator.core.XPathStats.PUT_IMAGE_PIXMAP,
+                    width, height, drawable.width, drawable.height);
+        }
+
+        boolean splitBand = format == Format.Z_PIXMAP && drawable.getOnDrawListener() != null
+                && isSplitBand(width, depth, PUT_IMAGE_HEADER_BYTES + length);
+        if (splitBand) {
+            int generation = drawable.beginSplitBand(dstX, dstY, width, height);
+            scheduleBandFlush(client, drawable, generation);
+        }
+
         switch (format) {
             case BITMAP:
                 if (leftPad != 0) throw new UnsupportedOperationException("PutImage.leftPad cannot be != 0.");
@@ -63,6 +77,42 @@ public abstract class DrawRequests {
                 else throw new BadMatch();
                 break;
         }
+
+        // The shorter last band (or any unsplit PutImage) completes the image.
+        if (!splitBand) drawable.endDeferredDraw();
+    }
+
+    private static final int PUT_IMAGE_HEADER_BYTES = 24;
+    /** Largest request a client without BIG-REQUESTS may send (65535 four-byte units). */
+    private static final int CORE_MAX_REQUEST_BYTES = 65535 * 4;
+    /** Flush a held band sequence whose final band is also full-sized (height divides evenly). */
+    private static final long BAND_FLUSH_TIMEOUT_MS = 32;
+    private static final java.util.concurrent.ScheduledExecutorService bandFlushExecutor =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "PutImageBandFlush");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * True when another scanline would not have fit in this request: Xlib only fills a
+     * PutImage to the core limit when it is splitting a larger image, so more bands follow.
+     */
+    private static boolean isSplitBand(int width, int depth, int requestBytes) {
+        if (depth != 24 && depth != 32) return false;
+        int rowBytes = width * 4;
+        return requestBytes <= CORE_MAX_REQUEST_BYTES && requestBytes + rowBytes > CORE_MAX_REQUEST_BYTES;
+    }
+
+    private static void scheduleBandFlush(XClient client, Drawable drawable, int generation) {
+        final com.winlator.xserver.XServer xServer = client.xServer;
+        bandFlushExecutor.schedule(() -> {
+            try (com.winlator.xserver.XLock lock = xServer.lock(com.winlator.xserver.XServer.Lockable.DRAWABLE_MANAGER)) {
+                if (drawable.isDeferredDrawGeneration(generation)) drawable.endDeferredDraw();
+            } catch (Exception e) {
+                android.util.Log.w("DrawRequests", "band flush failed", e);
+            }
+        }, BAND_FLUSH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
     public static void getImage(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -115,6 +165,13 @@ public abstract class DrawRequests {
         if (graphicsContext == null) throw new BadGraphicsContext(gcId);
 
         if (srcDrawable.visual.depth != dstDrawable.visual.depth) throw new BadMatch();
+
+        if (com.winlator.core.XPathStats.isEnabled()) {
+            com.winlator.core.XPathStats.count(dstDrawable.getOnDrawListener() != null
+                            ? com.winlator.core.XPathStats.COPY_AREA_TO_WINDOW
+                            : com.winlator.core.XPathStats.COPY_AREA_TO_PIXMAP,
+                    width, height, dstDrawable.width, dstDrawable.height);
+        }
 
         dstDrawable.copyArea(srcX, srcY, dstX, dstY, width, height, srcDrawable, graphicsContext.getFunction());
     }

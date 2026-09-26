@@ -9,8 +9,26 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <chrono>
+#include <sys/system_properties.h>
 #include "window_vert.h"
 #include "window_frag.h"
+
+// debug.gamenative.vk.tearfix=0 restores the old direct-to-staging CPU upload for A/B checks.
+static bool snapshotUploadsEnabled() {
+    static std::atomic<int64_t> lastCheckMs{0};
+    static std::atomic<bool> enabled{true};
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    int64_t last = lastCheckMs.load(std::memory_order_relaxed);
+    if (last == 0 || now - last > 2000) {
+        lastCheckMs.store(now, std::memory_order_relaxed);
+        char value[PROP_VALUE_MAX] = {0};
+        __system_property_get("debug.gamenative.vk.tearfix", value);
+        enabled.store(value[0] != '0', std::memory_order_relaxed);
+    }
+    return enabled.load(std::memory_order_relaxed);
+}
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH, void* aHandle)
     : window(win), surfaceWidth(cW), surfaceHeight(cH), containerWidth(cW), containerHeight(cH),
@@ -1352,7 +1370,23 @@ ok=true;}catch(...){}
                          re.w > 0 ? re.w : wt.w, re.h > 0 ? re.h : wt.h};
             de.isAHB=wt.isAHB;
             if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
-            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) {
+            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE && snapshotUploadsEnabled()) {
+                std::lock_guard<std::mutex> ul(uploadMutex);
+                auto pit=pendingUploads.find(re.id);
+                if (pit!=pendingUploads.end() && pit->second.fresh && wt.mapped &&
+                    pit->second.w==wt.w && pit->second.h==wt.h) {
+                    // The other frame slot may still be copying out of stg on the GPU.
+                    if (wt.stgSlot>=0 && wt.stgSlot!=(int)currentFrame &&
+                        (size_t)wt.stgSlot<inFlightFences.size()) {
+                        vk_.WaitForFences(device,1,&inFlightFences[wt.stgSlot],VK_TRUE,UINT64_MAX);
+                    }
+                    memcpy(wt.mapped,pit->second.px.data(),(size_t)wt.w*wt.h*4);
+                    pit->second.fresh=false;
+                    de.upload=wt.stg;
+                    wt.stgSlot=(int)currentFrame;
+                }
+                wt.dirty=false;
+            } else if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) {
                 de.upload=wt.stg;
                 wt.dirty=false;
             } else if (wt.isAHB) {
@@ -1524,6 +1558,31 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
     const size_t dstPitch=(size_t)w*4;
     const int32_t srcStride=stride>0?stride:w;
     uint32_t* src2=static_cast<uint32_t*>(px);
+    if (snapshotUploadsEnabled()) {
+        {
+            std::lock_guard<std::mutex> ul(uploadMutex);
+            PendingUpload& pu=pendingUploads[id];
+            pu.px.resize((size_t)w*h);
+            uint32_t* dst=pu.px.data();
+            for (int row=0;row<h;++row) {
+                const uint32_t* srcRow=&src2[(size_t)row*srcStride];
+                uint32_t* dstRow=dst+(size_t)row*w;
+                if (forceOpaqueAlpha) {
+                    for (int col=0;col<w;++col) dstRow[col]=srcRow[col]|0xFF000000u;
+                } else {
+                    memcpy(dstRow,srcRow,(size_t)w*4);
+                }
+            }
+            pu.w=w; pu.h=h; pu.fresh=true;
+        }
+        {
+            std::lock_guard<std::mutex> lk(renderMutex);
+            auto it=texMap.find(id);
+            if (it!=texMap.end()) it->second.dirty=true;
+        }
+        needsRender.store(true); dirtyCV.notify_one();
+        return;
+    }
     uint8_t*  dst2=static_cast<uint8_t*>(mapped);
     if (forceOpaqueAlpha) {
         for (int row=0;row<h;++row) {
@@ -1610,7 +1669,10 @@ void VulkanRendererContext::removeWindow(int64_t id) {
         else it->second = {};
         texMap.erase(it);
     }
-
+    {
+        std::lock_guard<std::mutex> ul(uploadMutex);
+        pendingUploads.erase(id);
+    }
 
     auto wit = windowAhbs.find(id);
     if (wit != windowAhbs.end()) {

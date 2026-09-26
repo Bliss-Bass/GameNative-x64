@@ -207,7 +207,21 @@ private:
         bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
+        // Frame slot whose command buffer last copied out of stg; -1 when none is pending.
+        int                  stgSlot        = -1;
     };
+
+    // Latest complete CPU frame per window. The X thread only ever writes here; the render
+    // thread moves it into the staging buffer once no in-flight GPU copy still reads it, so
+    // an upload can never mix rows from two frames.
+    struct PendingUpload {
+        std::vector<uint32_t> px;
+        int  w = 0, h = 0;
+        bool fresh = false;
+    };
+    std::unordered_map<int64_t, PendingUpload> pendingUploads;
+    // Lock order: renderMutex before uploadMutex; never take renderMutex while holding it.
+    std::mutex uploadMutex;
 
     struct RenderEntry { int64_t id; int x, y, w, h; };
     struct DrawEntry {

@@ -471,9 +471,51 @@ public class Drawable extends XResource {
         }
     }
 
+    /**
+     * Xlib splits a PutImage larger than the core request limit into back-to-back horizontal
+     * bands. Notifying the renderer per band lets it show the top of a new frame over the
+     * bottom of the old one (a horizontal tear), so draw notifications are held while a band
+     * sequence is in flight and released once by {@link #endDeferredDraw()}.
+     *
+     * @return a generation number; a band that does not continue the previous one flushes it.
+     */
+    public int beginSplitBand(int x, int y, int bandWidth, int bandHeight) {
+        if (deferDrawNotify && (x != deferNextX || y != deferNextY || bandWidth != deferWidth)) {
+            endDeferredDraw();
+        }
+        deferDrawNotify = true;
+        deferNextX = x;
+        deferNextY = y + bandHeight;
+        deferWidth = bandWidth;
+        return ++deferGeneration;
+    }
+
+    public boolean isDeferredDrawGeneration(int generation) {
+        return deferDrawNotify && deferGeneration == generation;
+    }
+
+    public void endDeferredDraw() {
+        if (!deferDrawNotify) return;
+        deferDrawNotify = false;
+        if (drawNotifyPending) {
+            drawNotifyPending = false;
+            Runnable runnable = this.onDrawListener;
+            if (runnable != null) runnable.run();
+        }
+    }
+
+    private volatile boolean deferDrawNotify = false;
+    private volatile boolean drawNotifyPending = false;
+    private int deferGeneration = 0;
+    private int deferNextX, deferNextY, deferWidth;
+
     public void forceUpdate() {
         if (!this.offscreenStorage) {
             this.texture.setNeedsUpdate(true);
+            if (deferDrawNotify) {
+                drawNotifyPending = true;
+                return;
+            }
             Runnable runnable = this.onDrawListener;
             if (runnable != null) {
                 runnable.run();
