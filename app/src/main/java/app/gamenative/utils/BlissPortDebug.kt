@@ -9,7 +9,11 @@ import timber.log.Timber
  * Does not run on upstream GameNative flavors or when Diagnostic Run is active.
  */
 object BlissPortDebug {
-    const val WINE_DEBUG_CHANNELS = "+seh,+module,+d3d9,+dxgi,+vulkan"
+    // Per-call channels (+vulkan, +d3d9, +dxgi) trace every API call; every guest stdout line is
+    // echoed to logcat, so they cost games tens of FPS. Opt in with
+    // `setprop debug.gamenative.winedebug +seh,+module,+vulkan` before launch.
+    const val WINE_DEBUG_CHANNELS = "+seh,+module"
+    private const val WINE_DEBUG_PROP = "debug.gamenative.winedebug"
 
     @JvmStatic
     fun isActive(diagnostics: Boolean): Boolean =
@@ -18,7 +22,7 @@ object BlissPortDebug {
     @JvmStatic
     fun applyLaunchEnv(envVars: EnvVars, diagnostics: Boolean) {
         if (!isActive(diagnostics)) return
-        envVars.put("WINEDEBUG", WINE_DEBUG_CHANNELS)
+        envVars.put("WINEDEBUG", systemProperty(WINE_DEBUG_PROP).ifBlank { WINE_DEBUG_CHANNELS })
         envVars.put("PROTON_LOG", "1")
         // Our SysV shm broker is silent unless asked, and its handful of calls per swapchain are the
         // only window onto whether guest Mesa reached it at all.
@@ -38,5 +42,15 @@ object BlissPortDebug {
     @JvmStatic
     fun logGuestLine(line: String) {
         Timber.tag("WineGuest").d(line)
+    }
+
+    private fun systemProperty(key: String): String {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            clazz.getMethod("get", String::class.java, String::class.java)
+                .invoke(null, key, "") as? String ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
     }
 }
