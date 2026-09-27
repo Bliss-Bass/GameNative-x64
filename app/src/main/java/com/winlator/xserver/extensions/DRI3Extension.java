@@ -366,7 +366,7 @@ public class DRI3Extension implements Extension {
             Texture t = d.getTexture();
             if (t instanceof GPUImage) ((GPUImage) t).destroy();
         });
-        client.xServer.pixmapManager.createPixmap(drawable);
+        createOwnedPixmap(client, drawable);
         XConnectorEpoll.closeFd(fd);
         android.util.Log.i("DRI3", "pixmapFromDmaBufAhb ok " + width + "x" + height +
                 " stride=" + stride + " mod=0x" + Long.toHexString(modifier));
@@ -403,11 +403,18 @@ public class DRI3Extension implements Extension {
             Texture t = d.getTexture();
             if (t instanceof GPUImage) ((GPUImage) t).destroy();
         });
-        client.xServer.pixmapManager.createPixmap(drawable);
+        createOwnedPixmap(client, drawable);
         XConnectorEpoll.closeFd(fd);
         android.util.Log.i("DRI3", "pixmapFromDmaBufVk ok " + width + "x" + height +
                 " stride=" + stride + " mod=0x" + Long.toHexString(modifier));
         return true;
+    }
+
+    // Pixmap ids are recycled per client slot: an unowned swapchain pixmap outlives its client
+    // and the next Vulkan client handed that id fails PixmapFromBuffers with BadIdChoice.
+    private static void createOwnedPixmap(XClient client, Drawable drawable) {
+        Pixmap pixmap = client.xServer.pixmapManager.createPixmap(drawable);
+        if (pixmap != null) client.registerAsOwnerOfResource(pixmap);
     }
 
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd) throws IOException, XRequestError {
@@ -417,7 +424,7 @@ public class DRI3Extension implements Extension {
             drawable.setTexture(image);
             drawable.setDirectScanout(true);
 
-            client.xServer.pixmapManager.createPixmap(drawable);
+            createOwnedPixmap(client, drawable);
         }
         finally {
             XConnectorEpoll.closeFd(fd);
@@ -466,7 +473,7 @@ public class DRI3Extension implements Extension {
                 XConnectorEpoll.closeFd(ownedFd);
             }
         });
-        client.xServer.pixmapManager.createPixmap(drawable);
+        createOwnedPixmap(client, drawable);
         android.util.Log.i("DRI3", "pixmapFromLinearFd fallback " + width + "x" + height +
                 " stride=" + stride + " size=" + size + " fd=" + fd);
     }
