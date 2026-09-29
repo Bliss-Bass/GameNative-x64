@@ -13,9 +13,13 @@
       The ROM's stub installer, which installs the launcher entries we generate for Linux
       applications. Named here because package visibility filtering otherwise hides it: without
       this, resolving or binding its service fails on a device that has it.
+
+      The Linux Services addon likewise, so the job engine can look up and verify the package
+      of a caller that binds it.
     -->
     <queries>
         <package android:name="app.gamenative.stubinstaller" />
+        <package android:name="org.ax86.linuxservices" />
     </queries>
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -261,6 +265,22 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs a Linux userland session — an X server and the applications in it — for as long as the user keeps it open" />
+        </service>
+
+        <!--
+            The Linux Services job engine. Exported with no permission because the check is in
+            code (LinuxJobCallers): a permission this user app declares cannot constrain the
+            platform-signed addon that is the only caller allowed.
+        -->
+        <service
+            android:name=".linux.services.LinuxJobService"
+            android:enabled="true"
+            android:exported="true"
+            android:foregroundServiceType="specialUse|dataSync"
+            tools:ignore="ExportedService">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the Linux services a device administrator configured, such as a menu server or an MQTT broker, running and restarts them when they exit" />
         </service>
 
         <!--

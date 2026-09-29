@@ -28,6 +28,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         const val NOTIFICATION_ID_EPIC = 3
         const val NOTIFICATION_ID_AMAZON = 4
         const val NOTIFICATION_ID_LINUX = 5
+        const val NOTIFICATION_ID_LINUX_JOBS = 6
         private const val NOTIFICATION_ID_SUMMARY = 100
 
         const val ACTION_EXIT = "com.oxgames.pluvia.EXIT"
@@ -56,6 +57,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         NOTIFICATION_ID_EPIC -> "Epic Games"
         NOTIFICATION_ID_AMAZON -> "Amazon Games"
         NOTIFICATION_ID_LINUX -> context.getString(R.string.linux_session_notification_title)
+        NOTIFICATION_ID_LINUX_JOBS -> context.getString(R.string.linux_jobs_notification_title)
         else -> context.getString(R.string.app_name)
     }
 
@@ -135,6 +137,24 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
             action = Action(context.getString(R.string.linux_session_stop_all), ACTION_STOP_LINUX_SESSIONS),
         )
 
+    /**
+     * The Linux Services jobs notification. No action: the jobs are the addon's to stop, and an
+     * Exit here would only have them restarted the moment the addon noticed.
+     */
+    fun createLinuxJobsNotification(content: String): Notification =
+        buildNotification(
+            title = serviceNameFor(NOTIFICATION_ID_LINUX_JOBS),
+            content = content,
+            isSummary = false,
+            action = null,
+        )
+
+    @Synchronized
+    fun notifyLinuxJobs(content: String) {
+        notificationManager.notify(NOTIFICATION_ID_LINUX_JOBS, createLinuxJobsNotification(content))
+        markActive(NOTIFICATION_ID_LINUX_JOBS)
+    }
+
     @Synchronized
     fun notifyLinuxSessions(content: String) {
         notificationManager.notify(NOTIFICATION_ID_LINUX, createLinuxSessionNotification(content))
@@ -189,7 +209,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         content: String,
         isSummary: Boolean,
         progress: Int = NO_PROGRESS,
-        action: Action = Action("Exit", ACTION_EXIT),
+        action: Action? = Action("Exit", ACTION_EXIT),
     ): Notification {
         val intent = Intent(
             Intent.ACTION_VIEW,
@@ -213,17 +233,19 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         // in SteamService just emits EndProcess and returns, which crashes the app when
         // the targeted service wasn't already running (e.g. Exit tapped on a GOG
         // notification with no active Steam session).
-        val stopIntent = Intent(context, NotificationActionReceiver::class.java).apply {
-            setAction(action.broadcast)
+        val stopPendingIntent = action?.let {
+            val stopIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                setAction(it.broadcast)
+            }
+            PendingIntent.getBroadcast(
+                context,
+                // Distinct per action: PendingIntents are matched ignoring extras, so one request
+                // code for both would hand out whichever was built first.
+                it.broadcast.hashCode(),
+                stopIntent,
+                PendingIntent.FLAG_IMMUTABLE,
+            )
         }
-        val stopPendingIntent = PendingIntent.getBroadcast(
-            context,
-            // Distinct per action: PendingIntents are matched ignoring extras, so one request
-            // code for both would hand out whichever was built first.
-            action.broadcast.hashCode(),
-            stopIntent,
-            PendingIntent.FLAG_IMMUTABLE,
-        )
 
         val smallIconRes = if (PrefManager.useAltNotificationIcon) {
             R.drawable.ic_notification_alt
@@ -240,7 +262,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setGroup(GROUP_KEY)
-            .addAction(0, action.label, stopPendingIntent)
+        if (action != null) builder.addAction(0, action.label, stopPendingIntent)
 
         when {
             progress == NO_PROGRESS -> {}

@@ -8,6 +8,7 @@ import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -164,6 +165,23 @@ object LinuxRootfs {
      * stamp is written last, so an interrupted install is retried rather than trusted.
      */
     suspend fun install(context: Context, onProgress: (Progress) -> Unit = {}): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            // The Terminal screen and the Linux Services addon can both start one. Each deletes
+            // the rootfs before unpacking, so a second run would undo the first; one that waited
+            // out another's install takes its result instead.
+            val waited = !installLock.tryLock()
+            if (waited) installLock.lock()
+            try {
+                if (waited && isInstalled(context)) return@withContext Result.success(Unit)
+                installLocked(context, onProgress)
+            } finally {
+                installLock.unlock()
+            }
+        }
+
+    private val installLock = Mutex()
+
+    private suspend fun installLocked(context: Context, onProgress: (Progress) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
                 if (!isSupported()) throw UnsupportedAbiException()

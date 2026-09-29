@@ -2517,6 +2517,10 @@
     <string name="linux_session_none">No sessions running</string>
     <string name="linux_session_count">%1$d running</string>
     <string name="linux_session_stop_all">Stop all</string>
+    <string name="linux_jobs_notification_title">Linux services</string>
+    <string name="linux_jobs_running">%1$d of %2$d jobs running</string>
+    <string name="linux_environment_installing">Setting up the Linux environment</string>
+    <string name="linux_terminal_label">Terminal</string>
     <string name="linux_session_running">Running on display :%1$d</string>
     <string name="linux_session_stop">Stop this app</string>
     <string name="linux_session_restart">Restart this app</string>
