@@ -304,6 +304,9 @@ object JobSupervisor {
         val body = buildString {
             appendLine("#!/bin/sh")
             appendLine("# Linux Services job \"${job.name}\" (${job.id}); rewritten by GameNative on every start.")
+            // Re-exec once so the marker is in this shell's own environment, not just its children's.
+            val marker = ProcessInspector.JOB_MARKER
+            appendLine("[ \"\$$marker\" = ${quote(job.id)} ] || exec env $marker=${quote(job.id)} /bin/sh \"\$0\"")
             job.env.forEach { (key, value) -> appendLine("export $key=${quote(value)}") }
             appendLine("cd ${quote(job.cwd)} 2>/dev/null || cd /root")
             if (job.argv != null) {
@@ -371,6 +374,7 @@ object JobSupervisor {
             runner.exitCode = code
         }
         logs.note(job.id, job.logMaxBytes, "exited with status $code after ${ranMs / 1000}s")
+        endLeftovers(job)
 
         synchronized(runners) {
             when {
@@ -416,6 +420,18 @@ object JobSupervisor {
         }
     }
 
+    /**
+     * Ends guest processes a job left behind. A PRoot killed outright does not take its guests
+     * with it, and a restart next to them would run the job twice and find its port taken.
+     */
+    private fun endLeftovers(job: LinuxJob) {
+        val ended = ProcessInspector.endJob(job.id)
+        if (ended > 0) {
+            logs.note(job.id, job.logMaxBytes, "ended $ended leftover process(es)")
+            Timber.w("[JobSupervisor]: %s left %d processes behind, ended them", job.id, ended)
+        }
+    }
+
     private fun fail(runner: Runner, message: String) {
         synchronized(runners) {
             runner.desired = false
@@ -429,26 +445,29 @@ object JobSupervisor {
 
     /** Ends a job's processes, or its session. The caller has already cleared [Runner.desired]. */
     private fun halt(runner: Runner) {
-        val (process, pid) = synchronized(runners) {
+        val (process, pid, sessionSeen) = synchronized(runners) {
             runner.pendingRestart?.cancel()
             runner.pendingRestart = null
-            runner.process to runner.pid
+            // A new generation before anything is ended, so the exit this stop causes is not
+            // handled as a crash (or swept twice), and a start straight after it is not refused
+            // as already running.
+            runner.generation++
+            val seen = runner.sessionSeen
+            runner.sessionSeen = false
+            Triple(runner.process, runner.pid, seen)
         }
-        val wasUp = process != null || runner.sessionSeen
+        val wasUp = process != null || sessionSeen
         if (runner.job.type.hasWindow) {
-            if (LinuxSessions.isRunning(sessionKey(runner.job.id)) || runner.sessionSeen) {
+            if (LinuxSessions.isRunning(sessionKey(runner.job.id)) || sessionSeen) {
                 LinuxSessions.stop(appContext, sessionKey(runner.job.id))
             }
         } else if (process != null) {
             GuestProcesses.end(process, pid, "job ${runner.job.id}")
         }
+        endLeftovers(runner.job)
         synchronized(runners) {
-            // A new generation, so the exit this stop causes is not mistaken for a crash, and a
-            // start straight after it is not refused as already running.
-            runner.generation++
             runner.process = null
             runner.pid = -1
-            runner.sessionSeen = false
             if (runner.state != State.FAILED && runner.state != State.EXITED) runner.state = State.STOPPED
         }
         if (wasUp) logs.note(runner.job.id, runner.job.logMaxBytes, "stopped")

@@ -33,6 +33,7 @@ import app.gamenative.linux.LinuxSessions
 import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -147,6 +148,17 @@ fun LinuxDesktopScreen(
                 session = opened
             }
             .onFailure { error = it.message }
+    }
+
+    // A session stopped from elsewhere (a Linux Services job stop, the session list) never reaches
+    // the view's exit callback; without this its window would stay open on a dead session and a
+    // relaunch with the same key would only bring that window forward.
+    LaunchedEffect(key, session) {
+        if (session == null) return@LaunchedEffect
+        LinuxSessions.sessions.first { list -> list.any { it.key == key } }
+        LinuxSessions.sessions.first { list -> list.none { it.key == key } }
+        Timber.i("[LinuxDesktopScreen]: session %s ended elsewhere, closing", key)
+        onExit()
     }
 
     DisposableEffect(key) {

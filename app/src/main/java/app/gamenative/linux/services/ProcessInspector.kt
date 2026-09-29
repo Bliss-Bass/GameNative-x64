@@ -18,6 +18,9 @@ import org.json.JSONObject
  */
 object ProcessInspector {
 
+    /** Exported by every job script, naming the job. */
+    const val JOB_MARKER = "LINUX_SERVICES_JOB"
+
     enum class Status(val key: String) {
         RUNNING("running"),
         SLEEPING("sleeping"),
@@ -70,7 +73,7 @@ object ProcessInspector {
             val underApp = chain.contains(me) || p.ppid == me
             val owner = (listOf(p.pid) + chain).firstNotNullOfOrNull { pid ->
                 owners[pid] ?: byPid[pid]?.cmdline?.let(::jobFromCommand)
-            }
+            } ?: jobFromEnviron(p.pid)
             val status = when {
                 p.stateChar == 'Z' -> Status.ZOMBIE
                 !underApp -> Status.STALE
@@ -123,6 +126,34 @@ object ProcessInspector {
         if (File("/proc/$pid").exists()) runCatching { Os.kill(pid, OsConstants.SIGKILL) }
         return true
     }
+
+    /**
+     * Ends every guest process still carrying [jobId]'s marker, wherever it was reparented to.
+     * Returns how many there were.
+     */
+    fun endJob(jobId: String): Int {
+        val me = Process.myPid()
+        val pids = File("/proc").listFiles().orEmpty().mapNotNull { it.name.toIntOrNull() }
+            .filter { it != me && jobFromEnviron(it) == jobId }
+        if (pids.isEmpty()) return 0
+        pids.forEach { pid ->
+            runCatching { Os.kill(pid, OsConstants.SIGCONT) }
+            runCatching { Os.kill(pid, OsConstants.SIGTERM) }
+        }
+        Thread.sleep(500)
+        pids.filter { File("/proc/$it").exists() }.forEach { runCatching { Os.kill(it, OsConstants.SIGKILL) } }
+        return pids.size
+    }
+
+    /**
+     * The job a process belongs to, by the marker every job script exports. Descendants inherit
+     * it, so it survives exec and reparenting where the script path in the command line does not.
+     * Other uids' environments are unreadable, which keeps this to guest processes.
+     */
+    private fun jobFromEnviron(pid: Int): String? = runCatching {
+        File("/proc/$pid/environ").readText().split('\u0000')
+            .firstOrNull { it.startsWith("$JOB_MARKER=") }?.substringAfter('=')
+    }.getOrNull()?.ifBlank { null }
 
     private val jobScript = Regex(Regex.escape(JobSupervisor.SCRIPT_DIR) + "/([A-Za-z0-9._-]+)\\.sh")
 
