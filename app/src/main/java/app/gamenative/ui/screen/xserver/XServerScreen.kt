@@ -1595,6 +1595,7 @@ fun XServerScreen(
         if (waitingForManualResume) {
             when (it.event.keyCode) {
                 KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_BUTTON_A,
                 KeyEvent.KEYCODE_BUTTON_START -> {
                     if (it.event.action == KeyEvent.ACTION_DOWN && it.event.repeatCount == 0) {

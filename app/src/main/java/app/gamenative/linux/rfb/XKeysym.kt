@@ -17,6 +17,8 @@ object XKeysym {
     private val SPECIAL = mapOf(
         KeyEvent.KEYCODE_ENTER to 0xFF0D,
         KeyEvent.KEYCODE_NUMPAD_ENTER to 0xFF8D,
+        // The keyboard's Enter on x86 images that remap it for Leanback.
+        KeyEvent.KEYCODE_DPAD_CENTER to 0xFF0D,
         KeyEvent.KEYCODE_DEL to 0xFF08,
         KeyEvent.KEYCODE_FORWARD_DEL to 0xFFFF,
         KeyEvent.KEYCODE_TAB to 0xFF09,

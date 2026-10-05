@@ -443,7 +443,10 @@ class LinuxXServerView(
 
     private fun injectAndroidKey(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
-        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+        // DPAD_CENTER: x86 images that remap the keyboard's Enter key for Leanback send this instead.
+        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+        ) {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) injectEnterDown()
                 KeyEvent.ACTION_UP -> injectEnterUp()

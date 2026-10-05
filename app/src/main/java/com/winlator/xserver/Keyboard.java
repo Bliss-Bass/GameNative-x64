@@ -142,6 +142,8 @@ public class Keyboard {
         keycodeMap[KeyEvent.KEYCODE_ESCAPE] = XKeycode.KEY_ESC;
         keycodeMap[KeyEvent.KEYCODE_ENTER] = XKeycode.KEY_ENTER;
         keycodeMap[KeyEvent.KEYCODE_NUMPAD_ENTER] = XKeycode.KEY_ENTER;
+        // Some x86 images remap the keyboard's Enter (scan code 28) to DPAD_CENTER for Leanback.
+        keycodeMap[KeyEvent.KEYCODE_DPAD_CENTER] = XKeycode.KEY_ENTER;
         keycodeMap[KeyEvent.KEYCODE_DPAD_LEFT] = XKeycode.KEY_LEFT;
         keycodeMap[KeyEvent.KEYCODE_DPAD_RIGHT] = XKeycode.KEY_RIGHT;
         keycodeMap[KeyEvent.KEYCODE_DPAD_UP] = XKeycode.KEY_UP;
