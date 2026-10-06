@@ -17,6 +17,8 @@ import app.gamenative.data.TouchGestureConfig
 import com.winlator.renderer.VulkanRenderer
 import com.winlator.widget.TouchpadView
 import com.winlator.widget.XServerView
+import com.winlator.xserver.DesktopHelper
+import com.winlator.xserver.Keyboard
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.Window
 import com.winlator.xserver.XKeycode
@@ -240,7 +242,24 @@ class LinuxXServerView(
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
-        if (!hasWindowFocus) hideIme()
+        // A key or button held when focus moved to a dialog is released over there, never
+        // here; X would keep it down (xterm drops typing under a held button or Ctrl).
+        val keys = xServer.releaseAllKeys()
+        val buttons = releasePointerButtons()
+        if (keys > 0 || buttons > 0) {
+            Timber.i("[LinuxXServerView]: focus %s, released %d key(s) %d button(s)",
+                if (hasWindowFocus) "back" else "lost", keys, buttons)
+        }
+        if (!hasWindowFocus) {
+            hideIme()
+            return
+        }
+        requestFocus()
+        if (DesktopHelper.focusTopLevelIfNone(xServer)) {
+            Timber.i("[LinuxXServerView]: focus back, X focus was empty; gave it to the top-level")
+        } else {
+            xServer.reannounceFocus()
+        }
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -253,12 +272,27 @@ class LinuxXServerView(
         return super.onGenericMotionEvent(event)
     }
 
-    private fun releasePointerButtons() {
+    private fun releasePointerButtons(): Int {
+        var released = 0
         for (button in Pointer.Button.values()) {
             if (xServer.pointer.isButtonPressed(button)) {
                 xServer.injectPointerButtonRelease(button)
+                released++
             }
         }
+        return released
+    }
+
+    /** Why X would drop or garble [event] if typed now, or null when nothing stands in the way. */
+    private fun keyBlocker(event: KeyEvent): String? {
+        val focus = xServer.windowManager.focusedWindow
+        if (focus == null || focus == xServer.windowManager.rootWindow) return "no X focus window"
+        val held = Pointer.Button.values().filter { xServer.pointer.isButtonPressed(it) }
+        if (held.isNotEmpty()) return "pointer button(s) held: $held"
+        // Modifiers X holds while Android reports none are stuck, not part of a shortcut.
+        val keys = xServer.keyboard.pressedKeys.filter { !Keyboard.isModifier(it) || event.hasNoModifiers() }
+        if (keys.isNotEmpty()) return "X keycode(s) held: $keys"
+        return null
     }
 
     /** Keep the view key-focused; raise soft IME only when there is no hardware keyboard. */
@@ -443,6 +477,9 @@ class LinuxXServerView(
 
     private fun injectAndroidKey(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && !KeyEvent.isModifierKey(keyCode)) {
+            keyBlocker(event)?.let { Timber.w("[LinuxXServerView]: %s typed with %s", KeyEvent.keyCodeToString(keyCode), it) }
+        }
         // DPAD_CENTER: x86 images that remap the keyboard's Enter key for Leanback send this instead.
         if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
             keyCode == KeyEvent.KEYCODE_DPAD_CENTER

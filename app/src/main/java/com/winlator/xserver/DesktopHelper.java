@@ -37,6 +37,27 @@ public abstract class DesktopHelper {
         }
     }
 
+    /**
+     * Gives X focus to the topmost mapped top-level when nothing holds it (focus reverted to
+     * root or None after its window went away). Returns true when focus was moved.
+     */
+    public static boolean focusTopLevelIfNone(XServer xServer) {
+        try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+            Window root = xServer.windowManager.rootWindow;
+            Window current = xServer.windowManager.getFocusedWindow();
+            if (current != null && current != root) return false;
+            java.util.List<Window> children = root.getChildren();
+            for (int i = children.size() - 1; i >= 0; i--) {
+                Window target = resolveFocusTarget(xServer, children.get(i));
+                if (target != null && target.attributes.isMapped()) {
+                    applyFocus(xServer, target);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     private static void setFocusedWindow(XServer xServer, Window window) {
         Window focusTarget = resolveFocusTarget(xServer, window);
         if (focusTarget == null) return;

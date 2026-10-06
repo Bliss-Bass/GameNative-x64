@@ -307,6 +307,22 @@ public class XServer {
         }
     }
 
+    /** Releases every key X still holds down; returns how many there were. */
+    public int releaseAllKeys() {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
+            Byte[] held = keyboard.getPressedKeys().toArray(new Byte[0]);
+            for (Byte keycode : held) keyboard.setKeyRelease(keycode);
+            return held.length;
+        }
+    }
+
+    /** Re-sends FocusIn for the current X focus, so its client takes keyboard input again. */
+    public void reannounceFocus() {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER)) {
+            windowManager.reannounceFocus();
+        }
+    }
+
     private void registerExtension(Extension ext, int[] nextEventId, int[] nextErrorId) {
         if (ext.getNumEvents() > 0) {
             ext.setFirstEventId((byte) nextEventId[0]);
