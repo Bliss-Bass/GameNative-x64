@@ -21,6 +21,9 @@ object ProcessInspector {
     /** Exported by every job script, naming the job. */
     const val JOB_MARKER = "LINUX_SERVICES_JOB"
 
+    /** CPU share since the previous sample at which a process counts as running. */
+    private const val ACTIVE_CPU_PERCENT = 1.0
+
     enum class Status(val key: String) {
         RUNNING("running"),
         SLEEPING("sleeping"),
@@ -74,15 +77,22 @@ object ProcessInspector {
             val owner = (listOf(p.pid) + chain).firstNotNullOfOrNull { pid ->
                 owners[pid] ?: byPid[pid]?.cmdline?.let(::jobFromCommand)
             } ?: jobFromEnviron(p.pid)
+            val cpu = previous[p.pid]?.let { before ->
+                if (elapsedTicks > 0) ((p.cpuTicks - before) * 100.0 / elapsedTicks).coerceAtLeast(0.0) else null
+            }
+            // The state letter is only the main thread's: a browser's sits in poll() while its
+            // other threads decode and render. CPU used since the last sample, which counts every
+            // thread, is what says whether the process is doing anything.
+            val busy = (cpu != null && cpu >= ACTIVE_CPU_PERCENT) || p.stateChar == 'R' || anyThreadRunning(p.pid)
             val status = when {
                 p.stateChar == 'Z' -> Status.ZOMBIE
                 !underApp -> Status.STALE
-                p.stateChar == 'T' || p.stateChar == 't' || p.wchan.contains("freez") || p.wchan.contains("refrigerator") -> Status.PAUSED
-                p.stateChar == 'R' -> Status.RUNNING
+                p.wchan.contains("freez") || p.wchan.contains("refrigerator") -> Status.PAUSED
+                busy -> Status.RUNNING
+                // 't' is PRoot holding a tracee at a syscall, which is routine; only a group stop
+                // (SIGSTOP / SIGTSTP) is a pause.
+                p.stateChar == 'T' -> Status.PAUSED
                 else -> Status.SLEEPING
-            }
-            val cpu = previous[p.pid]?.let { before ->
-                if (elapsedTicks > 0) ((p.cpuTicks - before) * 100.0 / elapsedTicks).coerceAtLeast(0.0) else null
             }
             array.put(JSONObject().apply {
                 put("pid", p.pid)
@@ -162,6 +172,14 @@ object ProcessInspector {
      * processes under it, since its PRoot is the session's and the supervisor never sees its pid.
      */
     private fun jobFromCommand(cmdline: String): String? = jobScript.find(cmdline)?.groupValues?.get(1)
+
+    private fun anyThreadRunning(pid: Int): Boolean =
+        File("/proc/$pid/task").listFiles().orEmpty().any { task ->
+            runCatching {
+                val stat = File(task, "stat").readText()
+                stat[stat.lastIndexOf(')') + 2] == 'R'
+            }.getOrDefault(false)
+        }
 
     private fun ancestors(pid: Int, byPid: Map<Int, Proc>): List<Int> {
         val chain = mutableListOf<Int>()

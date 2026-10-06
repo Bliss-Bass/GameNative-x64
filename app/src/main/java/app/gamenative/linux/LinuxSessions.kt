@@ -45,6 +45,8 @@ object LinuxSessions {
         val display: Int,
         /** Whether a window is currently showing it, as opposed to it running unattended. */
         val watched: Boolean,
+        /** The program it was opened with; null for the desktop. */
+        val argv: String? = null,
     )
 
     private class Held(
@@ -218,7 +220,7 @@ object LinuxSessions {
 
     private fun publish() {
         _sessions.value = synchronized(held) {
-            held.values.map { Snapshot(it.key, it.label, it.session.display, it.viewers > 0) }
+            held.values.map { Snapshot(it.key, it.label, it.session.display, it.viewers > 0, it.argv) }
         }
     }
 }

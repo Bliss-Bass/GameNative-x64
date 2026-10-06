@@ -43,6 +43,9 @@ object JobSupervisor {
     private const val BACKOFF_MIN_MS = 1_000L
     private const val BACKOFF_MAX_MS = 60_000L
 
+    private val TERMINALS = setOf("xterm", "uxterm", "x-terminal-emulator", "lxterminal", "xfce4-terminal")
+    private val SHELLS = setOf("sh", "bash", "dash", "zsh", "fish", "ash")
+
     enum class State(val key: String) {
         STOPPED("stopped"),
 
@@ -193,8 +196,107 @@ object JobSupervisor {
             job.put("stale", claimsUp && mine.none { it.getString("status") != ProcessInspector.Status.ZOMBIE.key })
             job.put("paused", mine.isNotEmpty() && mine.all { it.getString("status") == ProcessInspector.Status.PAUSED.key })
         }))
+        snapshot.put("untracked", untracked((0 until processes.length()).map { processes.getJSONObject(it) }))
         return snapshot
     }
+
+    /**
+     * What the user started by hand that no job owns, offered so it can become one: applications
+     * opened from the drawer, and programs started from a terminal's shell. The terminal itself
+     * is left out; what runs in it is the part worth keeping.
+     */
+    private fun untracked(processes: List<JSONObject>): JSONArray {
+        val out = JSONArray()
+        val byPid = processes.associateBy { it.getInt("pid") }
+        val children = processes.groupBy { it.getInt("ppid") }
+        val sessionProcs = processes.filter { it.getString("owner") == "session" }
+
+        fun subtree(root: JSONObject): List<JSONObject> {
+            val all = mutableListOf(root)
+            var i = 0
+            while (i < all.size && all.size < 512) {
+                all += children[all[i].getInt("pid")].orEmpty()
+                i++
+            }
+            return all
+        }
+
+        fun describe(item: JSONObject, roots: List<JSONObject>) {
+            val tree = roots.flatMap(::subtree)
+            item.put("processCount", tree.size)
+            item.put("rssKb", tree.sumOf { it.getLong("rssKb") })
+            item.put("cpuPercent", Math.round(tree.sumOf { it.optDouble("cpuPercent", 0.0) } * 10) / 10.0)
+            item.put("status", when {
+                tree.any { it.getString("status") == ProcessInspector.Status.RUNNING.key } -> ProcessInspector.Status.RUNNING.key
+                tree.isNotEmpty() -> ProcessInspector.Status.SLEEPING.key
+                else -> "unknown"
+            })
+            out.put(item)
+        }
+
+        LinuxSessions.sessions.value.forEach { s ->
+            val argv = s.argv ?: return@forEach
+            if (s.key.startsWith(sessionKey(""))) return@forEach
+            if (programName(argv) in TERMINALS) return@forEach
+            // A launcher script often execs the real binary under another path, so fall back from
+            // the exact command to the program name.
+            val name = programName(argv)
+            val root = sessionProcs.firstOrNull { it.getString("cmdline") == argv.trim() }
+                ?: sessionProcs.firstOrNull { programName(it.getString("cmdline")) == name }
+                ?: sessionProcs.firstOrNull { it.getString("name").startsWith(name.take(15)) }
+            // Multi-process programs (browsers) fork copies of themselves; count from the first.
+            var top = root
+            while (top != null) {
+                val parent = byPid[top.getInt("ppid")] ?: break
+                if (programName(parent.getString("cmdline")) != programName(top.getString("cmdline"))) break
+                top = parent
+            }
+            describe(JSONObject().apply {
+                put("key", "session:${s.key}")
+                put("name", s.label)
+                put("command", argv)
+                put("type", LinuxJob.Type.GUI.key)
+            }, listOfNotNull(top))
+        }
+
+        // The shell puts every stage of a pipeline in one process group, so `a | b` is one entry.
+        sessionProcs.filter { p ->
+            val shell = byPid[p.getInt("ppid")] ?: return@filter false
+            val terminal = byPid[shell.getInt("ppid")] ?: return@filter false
+            programName(shell.getString("cmdline")) in SHELLS &&
+                programName(terminal.getString("cmdline")) in TERMINALS &&
+                programName(p.getString("cmdline")) !in SHELLS
+        }.groupBy { p -> p.getInt("ppid") to (processGroup(p.getInt("pid")) ?: p.getInt("pid")) }
+            .values.forEach { stages ->
+                val sorted = stages.sortedBy { it.getInt("pid") }
+                val first = sorted.first()
+                val command = sorted.joinToString(" | ") { it.getString("cmdline") }
+                describe(JSONObject().apply {
+                    put("key", "pid:${first.getInt("pid")}")
+                    put("name", programName(first.getString("cmdline")))
+                    put("command", command)
+                    put("type", LinuxJob.Type.SERVICE.key)
+                    guestCwd(first.getInt("pid"))?.let { put("workdir", it) }
+                }, sorted)
+            }
+        return out
+    }
+
+    private fun processGroup(pid: Int): Int? = runCatching {
+        File("/proc/$pid/stat").readText().substringAfterLast(") ").split(' ')[2].toInt()
+    }.getOrNull()
+
+    private fun programName(command: String): String =
+        command.trim().substringBefore(' ').substringAfterLast('/')
+
+    /** PRoot emulates chdir, so /proc/<pid>/cwd is always the rootfs; the shell's exported PWD is the guest one. */
+    private fun guestCwd(pid: Int): String? = runCatching {
+        File("/proc/$pid/environ").readBytes().toString(Charsets.UTF_8)
+            .split('\u0000')
+            .firstOrNull { it.startsWith("PWD=") }
+            ?.removePrefix("PWD=")
+            ?.takeIf { it.startsWith("/") }
+    }.getOrNull()
 
     /** The window for [id], or null for a service or an unknown job. */
     fun launchIntent(id: String): PendingIntent? {
