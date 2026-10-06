@@ -510,11 +510,10 @@ public class XClientRequestHandler implements RequestHandler {
                 case ClientOpcodes.GET_POINTER_MAPPING:
                     CursorRequests.getPointerMapping(client, inputStream, outputStream);
                     break;
+                // GrabServer and UngrabServer have no reply; xcb drops the connection on a stray one.
                 case ClientOpcodes.GRAB_SERVER:
                     try (XLock lock = client.xServer.lockAll()){
                         client.xServer.setGrabbed(true, client);
-                        outputStream.writeSuccessReply(client.getSequenceNumber(), 0);
-                        Log.d("XClientRequestHandler", "X_GrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
                 case ClientOpcodes.UNGRAB_SERVER:
@@ -522,8 +521,6 @@ public class XClientRequestHandler implements RequestHandler {
                         if (client.xServer.isGrabbedBy(client)) {
                             client.xServer.setGrabbed(false, null);
                         }
-                        outputStream.writeSuccessReply(client.getSequenceNumber(), 0);
-                        Log.d("XClientRequestHandler", "X_UngrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
                 default:
