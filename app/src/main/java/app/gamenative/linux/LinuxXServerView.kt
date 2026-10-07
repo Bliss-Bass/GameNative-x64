@@ -268,6 +268,14 @@ class LinuxXServerView(
         ) {
             post { ensureTypingFocus() }
         }
+        // TouchpadView only sees ACTION_SCROLL under pointer capture; uncaptured wheels land here.
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
+            emitScrollFromDelta(
+                event.getAxisValue(MotionEvent.AXIS_VSCROLL) * SCROLL_STEP_PX,
+                event.getAxisValue(MotionEvent.AXIS_HSCROLL) * SCROLL_STEP_PX,
+            )
+            return true
+        }
         if (touchpadView.onGenericMotionEvent(event)) return true
         return super.onGenericMotionEvent(event)
     }
