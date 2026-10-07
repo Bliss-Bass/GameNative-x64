@@ -447,7 +447,38 @@ object LinuxRootfs {
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
         writeXdefaults(rootfs)
         ensureFirefoxMediaCodecs(rootfs)
+        ensureFirefoxSandboxNotice(rootfs)
         ensureOpenshotLaunchWrapper(rootfs)
+    }
+
+    /**
+     * Hides Firefox's "The security sandbox is disabled" bar, which has no pref and never
+     * clears. PRoot cannot host the sandbox (see `MOZ_DISABLE_CONTENT_SANDBOX` in
+     * [LinuxProgramLauncher]); the guest is still confined by GameNative's Android sandbox.
+     * An autoconfig script no-ops the function that adds the bar before the first window.
+     */
+    private fun ensureFirefoxSandboxNotice(rootfs: File) {
+        val autoconfig = """
+            pref("general.config.filename", "gamenative.cfg");
+            pref("general.config.obscure_value", 0);
+            pref("general.config.sandbox_enabled", false);
+            """.trimIndent() + "\n"
+        // Autoconfig skips the first line of the file.
+        val script = """
+            // GameNative: hide the sandbox-disabled bar; PRoot cannot host Firefox's sandbox.
+            try {
+              const { SandboxUtils } = ChromeUtils.importESModule("resource://gre/modules/SandboxUtils.sys.mjs");
+              SandboxUtils.maybeWarnAboutDisabledContentSandbox = function () {};
+            } catch (e) {
+              Components.utils.reportError(e);
+            }
+            """.trimIndent() + "\n"
+        for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
+            val appDir = File(rootfs, dirName)
+            if (!appDir.isDirectory) continue
+            File(appDir, "defaults/pref").apply { mkdirs() }.resolve("autoconfig.js").writeText(autoconfig)
+            File(appDir, "gamenative.cfg").writeText(script)
+        }
     }
 
     /**
