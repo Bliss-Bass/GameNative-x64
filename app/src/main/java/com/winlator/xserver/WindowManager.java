@@ -390,6 +390,12 @@ public class WindowManager extends XResourceManager {
         }
     }
 
+    /** Restack a window above all its siblings, as a WM would; Linux app sessions run without one. */
+    public void raiseWindow(Window window) {
+        if (window == null || window == rootWindow || window.getParent() == null) return;
+        changeWindowZOrder(Window.StackMode.ABOVE, window, null);
+    }
+
     private void changeWindowZOrder(Window.StackMode stackMode, Window window, Window sibling) {
         Window parent = window.getParent();
         switch (stackMode) {

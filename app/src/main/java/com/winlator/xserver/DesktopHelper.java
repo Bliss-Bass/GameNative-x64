@@ -104,7 +104,10 @@ public abstract class DesktopHelper {
         while (top.getParent() != null && top.getParent() != root) {
             top = top.getParent();
         }
-        if (top != root && top.isRenderable() && !top.attributes.isOverrideRedirect()) {
+        // Menus and tooltips are override-redirect: focusing anything inside one takes focus
+        // from the app window, and GTK/Firefox close the popup on that FocusOut.
+        if (top != root && top.attributes.isOverrideRedirect()) return null;
+        if (top != root && top.isRenderable()) {
             return top;
         }
 

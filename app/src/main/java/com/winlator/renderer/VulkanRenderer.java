@@ -435,7 +435,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         try (XLock xl = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
             collectWindows(newList, xServer.windowManager.rootWindow,
                 xServer.windowManager.rootWindow.getX(),
-                xServer.windowManager.rootWindow.getY());
+                xServer.windowManager.rootWindow.getY(), null);
         }
         synchronized (lock) {
             renderableWindows = newList;
@@ -443,9 +443,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
-    private void collectWindows(ArrayList<RenderableWindow> list, Window window, int x, int y) {
+    private void collectWindows(ArrayList<RenderableWindow> list, Window window, int x, int y, Window topLevel) {
         if (!window.attributes.isMapped()) return;
-        if (window != xServer.windowManager.rootWindow) {
+        boolean isRoot = window == xServer.windowManager.rootWindow;
+        if (!isRoot && topLevel == null) topLevel = window;
+        if (!isRoot) {
             boolean viewable = true;
             if (unviewableWMClasses != null) {
                 String wc = window.getClassName();
@@ -458,11 +460,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             }
             if (viewable) {
                 list.add(new RenderableWindow(
-                    window.getContent(), x, y, window.attributes.isOverrideRedirect()));
+                    window.getContent(), x, y, window.attributes.isOverrideRedirect(), topLevel));
             }
         }
         for (Window child : window.getChildren())
-            collectWindows(list, child, child.getX() + x, child.getY() + y);
+            collectWindows(list, child, child.getX() + x, child.getY() + y, topLevel);
     }
 
     private void pushRenderList(ArrayList<RenderableWindow> list) {
@@ -470,9 +472,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
 
         // Topmost non-OR window that covers (or nearly covers) the screen. GTK/Mesa
-        // already composite CSD/widgets into that Present. Drawing nested X children or
-        // stale override-redirect chrome on top is what produces ghost headers after
-        // freeform resize — APP sessions draw the cover alone.
+        // already composite CSD/widgets into that Present. Drawing its nested X children
+        // on top is what produces ghost headers after freeform resize, so those are
+        // skipped; other top-levels stacked above it (dialogs, menus, tooltips) are not.
         int cover = -1;
         for (int i = list.size() - 1; i >= 0; i--) {
             RenderableWindow rw = list.get(i);
@@ -486,8 +488,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         ArrayList<RenderableWindow> draw = list;
         boolean forceScreenFill = false;
         if (cover >= 0) {
-            draw = new ArrayList<>(1);
-            draw.add(list.get(cover));
+            RenderableWindow coverWindow = list.get(cover);
+            draw = new ArrayList<>();
+            draw.add(coverWindow);
+            for (int i = cover + 1; i < list.size(); i++) {
+                RenderableWindow rw = list.get(i);
+                if (rw.topLevel != coverWindow.topLevel) draw.add(rw);
+            }
             forceScreenFill = true;
         } else {
             int start = 0;
@@ -528,9 +535,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         for (int i = 0; i < n; i++) {
             RenderableWindow rw = draw.get(i);
             ids[i] = did(rw.content);
-            // Single cover window: pin to origin and stretch to the X screen so a
+            // Cover window (always first): pin to origin and stretch to the X screen so a
             // stale Present pixmap (often stuck at launch WxH) fills the freeform frame.
-            if (fillW > 0 && fillH > 0 && n == 1) {
+            if (fillW > 0 && fillH > 0 && i == 0) {
                 xs[i] = 0;
                 ys[i] = 0;
                 ws[i] = fillW;
@@ -1081,8 +1088,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private static class RenderableWindow {
         public final Drawable content; public int rootX, rootY;
         public final boolean overrideRedirect;
-        public RenderableWindow(Drawable c, int x, int y, boolean overrideRedirect) {
-            content = c; rootX = x; rootY = y; this.overrideRedirect = overrideRedirect;
+        public final Window topLevel;
+        public RenderableWindow(Drawable c, int x, int y, boolean overrideRedirect, Window topLevel) {
+            content = c; rootX = x; rootY = y; this.overrideRedirect = overrideRedirect; this.topLevel = topLevel;
         }
     }
 }

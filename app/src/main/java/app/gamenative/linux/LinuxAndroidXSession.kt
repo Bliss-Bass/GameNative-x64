@@ -9,6 +9,7 @@ import android.view.View
 import com.winlator.xconnector.UnixSocketConfig
 import com.winlator.xenvironment.components.SysVSharedMemoryComponent
 import com.winlator.xenvironment.components.XServerComponent
+import com.winlator.xserver.Atom
 import com.winlator.xserver.ScreenInfo
 import com.winlator.xserver.XServer
 import java.io.File
@@ -63,6 +64,7 @@ class LinuxAndroidXSession private constructor(
      */
     @Volatile
     private var suppressGeometryFitUntilMs: Long = 0L
+    private var raisingDialogs = false
 
     @Volatile
     override var isRunning = false
@@ -221,20 +223,27 @@ class LinuxAndroidXSession private constructor(
             object : com.winlator.xserver.WindowManager.OnWindowModificationListener {
                 override fun onMapWindow(window: com.winlator.xserver.Window) {
                     Timber.i(
-                        "[LinuxAndroidXSession]: map window id=%d %dx%d parent=%s override=%s io=%s",
+                        "[LinuxAndroidXSession]: map window id=%d %dx%d parent=%s override=%s io=%s type=%s transient=%s",
                         window.id,
                         window.width.toInt(),
                         window.height.toInt(),
                         if (window.parent == server.windowManager.rootWindow) "root" else "other",
                         window.attributes.isOverrideRedirect,
                         window.isInputOutput,
+                        windowTypes(window).joinToString(","),
+                        window.getProperty(Atom.getId("WM_TRANSIENT_FOR")) != null,
                     )
                     // Live screenInfo — not closed-over shorts from install time — so freeform
                     // resize keeps fitting to the current X screen.
                     fitTopLevel(server, window)
+                    keepDialogsOnTop(server)
                     // GTK often maps before size hints relax; re-fit shortly after map only.
                     scheduleMapRefit(server, window, 750L)
                     scheduleMapRefit(server, window, 2000L)
+                }
+
+                override fun onChangeWindowZOrder(window: com.winlator.xserver.Window) {
+                    keepDialogsOnTop(server)
                 }
 
                 override fun onUpdateWindowGeometry(
@@ -425,6 +434,15 @@ class LinuxAndroidXSession private constructor(
         // Skip tiny dialogs (xmessage ~90×60). Everything else in APP mode fills the
         // freeform client area so xterm/Firefox match the Android window frame.
         if (window.width < 200 || window.height < 150) return
+        val types = windowTypes(window)
+        if (window.getProperty(Atom.getId("WM_TRANSIENT_FOR")) != null ||
+            "DIALOG" in types || "SPLASH" in types
+        ) {
+            centerDialog(server, window, width, height)
+            return
+        }
+        // Utility, toolbar and similar windows (OpenShot's tutorial) place themselves.
+        if (types.isNotEmpty() && "NORMAL" !in types) return
         // Skip already-full windows (avoids drawable churn on the delayed re-fit).
         if (window.width == width && window.height == height &&
             window.x.toInt() == 0 && window.y.toInt() == 0
@@ -454,6 +472,77 @@ class LinuxAndroidXSession private constructor(
             )
         } catch (t: Throwable) {
             Timber.w(t, "[LinuxAndroidXSession]: could not fit window %#x", window.id)
+        }
+    }
+
+    /**
+     * A modal dialog stacked under another window blocks the app's input while staying out of
+     * sight (OpenShot's tutorial raised itself over one). Restack dialogs above the rest.
+     */
+    private fun keepDialogsOnTop(server: XServer) {
+        if (!isRunning || raisingDialogs) return
+        val stack = server.windowManager.rootWindow.children.toList()
+        val managed = stack.filter { it.attributes.isMapped && !it.attributes.isOverrideRedirect }
+        val dialogs = managed.filter(::isDialog)
+        if (dialogs.isEmpty()) return
+        val firstDialog = stack.indexOf(dialogs.first())
+        val buried = managed.any { it !in dialogs && stack.indexOf(it) > firstDialog }
+        if (!buried) return
+        raisingDialogs = true
+        try {
+            server.lock(XServer.Lockable.WINDOW_MANAGER).use {
+                for (dialog in dialogs) server.windowManager.raiseWindow(dialog)
+            }
+        } finally {
+            raisingDialogs = false
+        }
+        Timber.i("[LinuxAndroidXSession]: raised %d dialog(s) above other windows", dialogs.size)
+    }
+
+    private fun isDialog(window: com.winlator.xserver.Window): Boolean {
+        if ("DIALOG" in windowTypes(window)) return true
+        val state = window.getProperty(Atom.getId("_NET_WM_STATE")) ?: return false
+        val modal = Atom.getId("_NET_WM_STATE_MODAL")
+        return (0 until state.data.capacity() / 4).any { state.getInt(it) == modal }
+    }
+
+    /** `_NET_WM_WINDOW_TYPE` names without the prefix, e.g. NORMAL, DIALOG, UTILITY. */
+    private fun windowTypes(window: com.winlator.xserver.Window): List<String> {
+        val prop = window.getProperty(Atom.getId("_NET_WM_WINDOW_TYPE")) ?: return emptyList()
+        return (0 until prop.data.capacity() / 4).mapNotNull { i ->
+            val id = prop.getInt(i)
+            if (Atom.isValid(id)) Atom.getName(id).removePrefix("_NET_WM_WINDOW_TYPE_") else null
+        }
+    }
+
+    /** Dialogs keep their own size (capped to the screen) and are centered, as a WM would. */
+    private fun centerDialog(
+        server: XServer,
+        window: com.winlator.xserver.Window,
+        screenW: Short,
+        screenH: Short,
+    ) {
+        val w = minOf(window.width.toInt(), screenW.toInt())
+        val h = minOf(window.height.toInt(), screenH.toInt())
+        val x = (screenW - w) / 2
+        val y = (screenH - h) / 2
+        if (window.x.toInt() == x && window.y.toInt() == y &&
+            window.width.toInt() == w && window.height.toInt() == h
+        ) {
+            return
+        }
+        try {
+            server.lock(
+                XServer.Lockable.WINDOW_MANAGER,
+                XServer.Lockable.DRAWABLE_MANAGER,
+            ).use {
+                server.windowManager.forceGeometry(
+                    window, x.toShort(), y.toShort(), w.toShort(), h.toShort(),
+                )
+            }
+            Timber.i("[LinuxAndroidXSession]: centered dialog %#x %dx%d@%d,%d", window.id, w, h, x, y)
+        } catch (t: Throwable) {
+            Timber.w(t, "[LinuxAndroidXSession]: could not center dialog %#x", window.id)
         }
     }
 
