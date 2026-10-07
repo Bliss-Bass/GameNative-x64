@@ -513,7 +513,9 @@ object LinuxRootfs {
             pref("media.gmp-manager.updateEnabled", true);
             """.trimIndent() + "\n"
 
-        val policies = """
+        // Older builds locked EME on with a policy, which shows "managed by your organization"
+        // and greys out the DRM toggle. The default prefs above already turn it on.
+        val oldPolicies = """
             {
               "policies": {
                 "EncryptedMediaExtensions": {
@@ -538,8 +540,10 @@ object LinuxRootfs {
             }
             val prefDir = File(appDir, "defaults/pref").apply { mkdirs() }
             File(prefDir, "gamenative-media.js").writeText(prefs)
-            val distDir = File(appDir, "distribution").apply { mkdirs() }
-            File(distDir, "policies.json").writeText(policies)
+            val policyFile = File(appDir, "distribution/policies.json")
+            if (policyFile.isFile && runCatching { policyFile.readText() }.getOrNull() == oldPolicies) {
+                policyFile.delete()
+            }
         }
     }
 
