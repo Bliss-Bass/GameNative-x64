@@ -59,10 +59,11 @@ object LinuxProgramLauncher {
         // dpkg chowns every file it unpacks, so without fake root apt cannot install
         // anything -- the feature's whole point.
         argv += "--root-id"
-        // Deliberately no --link2symlink: /data is ext4 and takes hardlinks, and PRoot's
-        // emulation writes host-absolute targets into the .l2s symlinks it creates, which
-        // do not resolve from inside the guest. dpkg's unpack-and-rename left perl -- and
-        // so debconf, and so every package with a postinst -- pointing at nothing.
+        // Deliberately no --link2symlink: PRoot's emulation writes host-absolute targets
+        // into the .l2s symlinks it creates, which do not resolve from inside the guest.
+        // dpkg's unpack-and-rename left perl -- and so debconf, and so every package with a
+        // postinst -- pointing at nothing. Where SELinux denies hard links (stock Android,
+        // targetSdk 29+), our PRoot build copies the file instead.
         argv += "--rootfs=${rootfs.absolutePath}"
         argv += "--cwd=$cwd"
         argv += "--bind=/dev"

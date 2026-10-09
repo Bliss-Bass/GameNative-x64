@@ -1,0 +1,174 @@
+From ec94d04551548c1df23e7bbf7f302d391a2e267b Mon Sep 17 00:00:00 2001
+From: Jon West <electrikjesus@gmail.com>
+Date: Fri, 9 Oct 2026 17:09:33 -0400
+Subject: [PATCH] syscall: copy when the host denies a hard link
+
+Android's SELinux policy denies "link" on app data files to apps that
+target API 29 or later. dpkg hard-links every file it is about to
+replace as a backup, so under such an app it cannot unpack a package
+that replaces an existing file. When link(2) or linkat(2) fails with
+EACCES or EPERM, give the new path a copy of the file instead, or the
+same target for a symlink. The kernel's error stands if the copy fails.
+---
+ src/syscall/exit.c    | 115 ++++++++++++++++++++++++++++++++++++++++++
+ src/syscall/seccomp.c |   4 +-
+ 2 files changed, 117 insertions(+), 2 deletions(-)
+
+diff --git a/src/syscall/exit.c b/src/syscall/exit.c
+index fa9d154..5c1c69c 100644
+--- a/src/syscall/exit.c
++++ b/src/syscall/exit.c
+@@ -27,6 +27,8 @@
+ #include <linux/prctl.h> /* PR_GET_AUXV, */
+ #include <string.h>      /* strlen(3), */
+ #include <unistd.h>      /* readlink(2), */
++#include <fcntl.h>       /* open(2), O_*, */
++#include <sys/stat.h>    /* lstat(2), fchmod(2), */
+ 
+ #include "cli/note.h"
+ #include "syscall/syscall.h"
+@@ -54,6 +56,81 @@
+  * this syscall to @tracee->status if an error occured previously
+  * during the translation, that is, if @tracee->status is less than 0.
+  */
++/**
++ * Give @new_path the contents and mode of @old_path, or the same
++ * target if @old_path is a symlink, as a stand-in for a hard link the
++ * host refused.  Both paths are host paths.  This function returns
++ * -errno if an error occured, otherwise 0.
++ */
++static int copy_for_link(const char *old_path, const char *new_path)
++{
++	char buffer[64 * 1024];
++	struct stat statl;
++	ssize_t size;
++	int status = 0;
++	int in;
++	int out;
++
++	if (lstat(old_path, &statl) < 0)
++		return -errno;
++
++	if (S_ISLNK(statl.st_mode)) {
++		size = readlink(old_path, buffer, sizeof(buffer) - 1);
++		if (size < 0)
++			return -errno;
++		buffer[size] = '\0';
++		return symlink(buffer, new_path) < 0 ? -errno : 0;
++	}
++
++	if (!S_ISREG(statl.st_mode))
++		return -EPERM;
++
++	in = open(old_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++	if (in < 0)
++		return -errno;
++
++	out = open(new_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, statl.st_mode & 07777);
++	if (out < 0) {
++		status = -errno;
++		close(in);
++		return status;
++	}
++
++	while (status == 0 && (size = read(in, buffer, sizeof(buffer))) != 0) {
++		ssize_t done = 0;
++
++		if (size < 0) {
++			if (errno != EINTR)
++				status = -errno;
++			continue;
++		}
++
++		while (done < size) {
++			ssize_t written = write(out, buffer + done, size - done);
++			if (written < 0) {
++				if (errno == EINTR)
++					continue;
++				status = -errno;
++				break;
++			}
++			done += written;
++		}
++	}
++
++	/* open(2) applied the umask.  */
++	if (status == 0 && fchmod(out, statl.st_mode & 07777) < 0)
++		status = -errno;
++
++	close(in);
++	if (close(out) < 0 && status == 0)
++		status = -errno;
++
++	if (status < 0)
++		unlink(new_path);
++
++	return status;
++}
++
+ void translate_syscall_exit(Tracee *tracee)
+ {
+ 	word_t syscall_number;
+@@ -259,6 +336,44 @@ void translate_syscall_exit(Tracee *tracee)
+ 		status = 0;
+ 		break;
+ 
++	case PR_link:
++	case PR_linkat: {
++		/* Android denies hard links to apps that target API 29
++		 * or later (SELinux "link" on app_data_file), and dpkg
++		 * links every file it is about to replace as a backup.
++		 * A copy serves that; only the shared inode is lost.  */
++		char old_path[PATH_MAX];
++		char new_path[PATH_MAX];
++		Reg old_reg;
++		Reg new_reg;
++
++		if ((int) syscall_result != -EACCES && (int) syscall_result != -EPERM)
++			goto end;
++
++		if (syscall_number == PR_link) {
++			old_reg = SYSARG_1;
++			new_reg = SYSARG_2;
++		}
++		else {
++			old_reg = SYSARG_2;
++			new_reg = SYSARG_4;
++		}
++
++		status = read_path(tracee, old_path, peek_reg(tracee, MODIFIED, old_reg));
++		if (status < 0)
++			goto end;
++
++		status = read_path(tracee, new_path, peek_reg(tracee, MODIFIED, new_reg));
++		if (status < 0)
++			goto end;
++
++		/* Keep the kernel's answer if the copy fails too.  */
++		status = copy_for_link(old_path, new_path);
++		if (status < 0)
++			goto end;
++		break;
++	}
++
+ 	case PR_rename:
+ 	case PR_renameat: {
+ 		char old_path[PATH_MAX];
+diff --git a/src/syscall/seccomp.c b/src/syscall/seccomp.c
+index 2f8930e..e20bfb4 100644
+--- a/src/syscall/seccomp.c
++++ b/src/syscall/seccomp.c
+@@ -370,8 +370,8 @@ static FilteredSysnum proot_sysnums[] = {
+ 	{ PR_lchown,		0 },
+ 	{ PR_lchown32,		0 },
+ 	{ PR_lgetxattr,		0 },
+-	{ PR_link,		0 },
+-	{ PR_linkat,		0 },
++	{ PR_link,		FILTER_SYSEXIT },
++	{ PR_linkat,		FILTER_SYSEXIT },
+ 	{ PR_listxattr,		0 },
+ 	{ PR_llistxattr,	0 },
+ 	{ PR_lremovexattr,	0 },
+-- 
+2.43.0
+

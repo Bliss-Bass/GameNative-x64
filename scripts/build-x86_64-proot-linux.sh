@@ -137,6 +137,19 @@ if [ ! -d "$PROOT_SRC/.git" ]; then
     git clone --depth 1 --branch "$PROOT_REF" "$PROOT_REPO" "$PROOT_SRC"
 fi
 
+# Our fixes on top of the pinned tag, kept as format-patch output. Applied as commits so a
+# rebuild in an existing clone can tell which are already in by subject.
+for patch in "$ROOT"/scripts/patches/proot-linux/*.patch; do
+    [ -e "$patch" ] || continue
+    subject="$(sed -n 's/^Subject: \[PATCH[^]]*\] //p' "$patch" | head -n 1)"
+    if git -C "$PROOT_SRC" log --format=%s | grep -Fxq "$subject"; then
+        continue
+    fi
+    log "applying $(basename "$patch")"
+    GIT_COMMITTER_NAME="proot-linux build" GIT_COMMITTER_EMAIL="build@localhost" \
+        git -C "$PROOT_SRC" am -q "$patch" || die "$(basename "$patch") does not apply"
+done
+
 # ashmem_memfd.c calls strcmp/memset without including <string.h>; glibc's headers pull
 # it in transitively and bionic's do not. Implicit declarations are fatal here, and for
 # memset an implicit int return would truncate a pointer, so this is not warning noise.

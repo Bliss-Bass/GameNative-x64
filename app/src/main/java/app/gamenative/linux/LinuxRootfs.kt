@@ -403,6 +403,16 @@ object LinuxRootfs {
         )
         if (preseed.isNotBlank()) Timber.w("[LinuxRootfs]: debconf-set-selections: %s", preseed)
 
+        // An earlier attempt that died mid-unpack leaves dpkg "interrupted", and apt then
+        // refuses everything until this has run. A no-op on a healthy database.
+        val recover = LinuxProgramLauncher.runWithOutput(
+            context,
+            "dpkg --configure -a",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 600,
+        )
+        if (recover.isNotBlank()) Timber.i("[LinuxRootfs]: dpkg --configure -a:\n%s", recover.takeLast(2000))
+
         onProgress(Progress("Installing the graphical session", -1f))
         val install = LinuxProgramLauncher.runWithOutput(
             context,
