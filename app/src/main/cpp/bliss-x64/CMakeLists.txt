@@ -81,7 +81,10 @@ target_link_options(android-sysvshm PRIVATE -Wl,-z,max-page-size=16384)
 
 # Preloaded into Wine so its exec/spawn of binaries in app storage goes through linker64; stock
 # Android denies apps a direct exec there. Stands in for the ARM-only libredirect-bionic-wx.so.
-add_library(exec-redirect SHARED ${CMAKE_CURRENT_LIST_DIR}/exec_redirect.c)
+# Also patches the x86_64 ntdll.so for 32-bit Windows code when the kernel has no ia32 syscalls.
+add_library(exec-redirect SHARED
+    ${CMAKE_CURRENT_LIST_DIR}/exec_redirect.c
+    ${CMAKE_CURRENT_LIST_DIR}/wow64_fs.c)
 target_compile_options(exec-redirect PRIVATE -Wall -Wextra -Werror -Wno-vla)
 target_link_libraries(exec-redirect log dl)
 target_link_options(exec-redirect PRIVATE -Wl,-z,max-page-size=16384)

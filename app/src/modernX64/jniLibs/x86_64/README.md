@@ -14,6 +14,12 @@ Produces: `libwinlator.so`, `libwinlator_11.so`, `libvulkan_renderer.so` (Mesa/s
 their data directory, so it starts those binaries through `/system/bin/linker64` instead. This is
 the part of the ARM-only `libredirect-bionic-wx.so` that x86_64 needs.
 
+It also keeps 32-bit Windows programs working on kernels without ia32 syscalls (booted with
+`ia32_emulation=false`, as on stock Android 17 devices). When `int $0x80` fails and the CPU has
+FSGSBASE, it patches the x86_64 `ntdll.so` as it loads to set the 32-bit TEB through the fs base
+instead of a GDT descriptor, and removes the `%fs` reload in `wow64cpu.dll`. Set
+`EXEC_REDIRECT_WOW64_FS=off` to skip this, or `force` to apply it even when `int $0x80` works.
+
 ## Pulse + bionic font libs (x86_64)
 
 ```bash
