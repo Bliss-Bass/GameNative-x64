@@ -168,6 +168,28 @@ object HostBionicLibs {
         }
     }
 
+    /**
+     * The asset's manifests name their driver under /data/data/app.gamenative, which only exists
+     * for Android user 0; in any other user the loader finds no driver and offers no surfaces.
+     */
+    private fun pointIcdsAtStagedLibs(context: Context, manifests: List<File>) {
+        val libDir = hostVulkanLibDir(context)
+        val libraryPath = Regex("(\"library_path\"\\s*:\\s*\")([^\"]*)(\")")
+        for (manifest in manifests) {
+            runCatching {
+                val text = manifest.readText()
+                val fixed = libraryPath.replace(text) { m ->
+                    val lib = File(libDir, File(m.groupValues[2]).name).absolutePath
+                    m.groupValues[1] + lib + m.groupValues[3]
+                }
+                if (fixed != text) {
+                    manifest.writeText(fixed)
+                    Timber.i("HostBionicLibs: %s now loads from %s", manifest.name, libDir.path)
+                }
+            }.onFailure { Timber.e(it, "HostBionicLibs: could not update %s", manifest.path) }
+        }
+    }
+
     /** Points the guest Vulkan loader at staged ICDs so DXVK can get an X11 surface. */
     @JvmStatic
     fun applyGuestVulkanEnv(envVars: EnvVars, context: Context) {
@@ -176,6 +198,7 @@ object HostBionicLibs {
         if (manifests.isEmpty()) return
 
         overrideGuestShmemLib(context)
+        pointIcdsAtStagedLibs(context, manifests)
         val value = manifests.joinToString(":") { it.absolutePath }
         envVars.put("VK_ICD_FILENAMES", value)
         envVars.put("VK_DRIVER_FILES", value)
