@@ -90,6 +90,7 @@ class LinuxDisplaySession private constructor(
             width: Int,
             height: Int,
             densityDpi: Int,
+            scalePercent: Int,
             mode: LinuxDesktopConfig.Mode,
         ): Result<LinuxDisplaySession> = withContext(Dispatchers.IO) {
             runCatching {
@@ -102,7 +103,7 @@ class LinuxDisplaySession private constructor(
 
                 val port = claimPort()
                 val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode)
-                runCatching { session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi)) }
+                runCatching { session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi, scalePercent)) }
                     .onFailure {
                         // Nothing is listening on it and nothing will be, so holding the claim
                         // would retire a display for the life of the process.
@@ -323,8 +324,8 @@ class LinuxDisplaySession private constructor(
      * Rewrites the XSETTINGS file and signals the daemon, so a density change reaches
      * running GTK and Qt apps. They read DPI once at startup otherwise.
      */
-    override fun setDpi(densityDpi: Int) {
-        val dpi = LinuxDisplayScale.xdpi(densityDpi)
+    override fun setDpi(densityDpi: Int, scalePercent: Int) {
+        val dpi = LinuxDisplayScale.xdpi(densityDpi, scalePercent)
         writeXdefaults(dpi)
         LinuxRootfs.writeFirefoxScale(LinuxRootfs.rootfsDir(context), dpi)
         val settings = File(LinuxRootfs.rootfsDir(context), "root/.xsettingsd")

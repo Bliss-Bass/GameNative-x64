@@ -218,7 +218,14 @@ class LinuxXServerView(
         return handled
     }
 
+    /**
+     * Sees every key before X does; true keeps it from X. For the window's menu, whose keys
+     * arrive here first because [onKeyPreIme] runs ahead of the activity.
+     */
+    var keyInterceptor: ((KeyEvent) -> Boolean)? = null
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (keyInterceptor?.invoke(event) == true) return true
         if (injectAndroidKey(event)) return true
         return super.dispatchKeyEvent(event)
     }
@@ -229,13 +236,12 @@ class LinuxXServerView(
      * Soft-keyboard glyphs still arrive via [InputConnection.commitText].
      */
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (imeWanted) {
-                hideIme()
-                return true
-            }
-            return super.onKeyPreIme(keyCode, event)
+        if (keyCode == KeyEvent.KEYCODE_BACK && imeWanted) {
+            hideIme()
+            return true
         }
+        if (keyInterceptor?.invoke(event) == true) return true
+        if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyPreIme(keyCode, event)
         if (injectAndroidKey(event)) return true
         return super.onKeyPreIme(keyCode, event)
     }

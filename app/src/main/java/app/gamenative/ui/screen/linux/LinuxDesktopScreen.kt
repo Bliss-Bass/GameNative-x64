@@ -1,5 +1,7 @@
 package app.gamenative.ui.screen.linux
 
+import android.view.View
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +33,7 @@ import app.gamenative.R
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxSession
 import app.gamenative.linux.LinuxSessions
+import app.gamenative.linux.LinuxXServerView
 import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,12 +63,15 @@ private val FRAME_VERIFY_DELAYS_MS = longArrayOf(200L, 500L, 1_000L)
  * @param argv the program this session is for, or null for a bare desktop.
  * @param entryId the desktop entry the program came from, which is what keys the session.
  * @param label how the session names itself in the shade and in the session list.
+ * @param menuOpen whether [LinuxSessionMenu] is showing; hoisted so the activity can open it from
+ * keys it sees before the X view does.
  */
 @Composable
 fun LinuxDesktopScreen(
     argv: String? = null,
     entryId: String? = null,
     label: String? = null,
+    menuOpen: MutableState<Boolean> = remember { mutableStateOf(false) },
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -72,6 +79,7 @@ fun LinuxDesktopScreen(
     val key = remember(entryId, argv) { LinuxSessions.keyFor(entryId, argv) }
 
     var session by remember { mutableStateOf<LinuxSession?>(null) }
+    var linuxView by remember { mutableStateOf<View?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     // Size the X screen to this composable's client area. safeDrawing clears freeform
@@ -143,7 +151,7 @@ fun LinuxDesktopScreen(
             densityDpi = metrics.densityDpi,
         )
             .onSuccess { opened ->
-                withContext(Dispatchers.IO) { opened.setDpi(metrics.densityDpi) }
+                withContext(Dispatchers.IO) { LinuxSessions.applyScale(context, key, metrics.densityDpi) }
                 LinuxSessions.attach(key)
                 session = opened
             }
@@ -164,6 +172,9 @@ fun LinuxDesktopScreen(
     DisposableEffect(key) {
         onDispose { LinuxSessions.detach(context, key) }
     }
+
+    // Back opens the menu rather than closing the window; closing is in the menu and the caption.
+    BackHandler(enabled = session != null && !menuOpen.value) { menuOpen.value = true }
 
     Box(
         modifier = Modifier
@@ -187,9 +198,34 @@ fun LinuxDesktopScreen(
                         }
                         LinuxSessions.stop(context, key)
                         onExit()
-                    }.apply { requestFocus() }
+                    }.apply {
+                        (this as? LinuxXServerView)?.keyInterceptor = linuxMenuKeyInterceptor(menuOpen)
+                        requestFocus()
+                    }.also { linuxView = it }
                 },
-                onRelease = { active.releaseView(it) },
+                onRelease = {
+                    (it as? LinuxXServerView)?.keyInterceptor = null
+                    if (linuxView === it) linuxView = null
+                    active.releaseView(it)
+                },
+            )
+        }
+
+        if (session != null) {
+            LinuxSessionMenu(
+                visible = menuOpen.value,
+                sessionKey = key,
+                title = label ?: context.getString(R.string.linux_session_notification_title),
+                onDismiss = {
+                    menuOpen.value = false
+                    linuxView?.requestFocus()
+                },
+                onShowKeyboard = (linuxView as? LinuxXServerView)?.let { view -> { view.showIme() } },
+                onCloseApp = {
+                    menuOpen.value = false
+                    LinuxSessions.stop(context, key)
+                    onExit()
+                },
             )
         }
     }

@@ -1901,7 +1901,7 @@ private fun ImmersiveQuickMenuTab(
 }
 
 @Composable
-private fun QuickMenuSectionHeader(
+internal fun QuickMenuSectionHeader(
     title: String,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
@@ -1927,7 +1927,7 @@ private fun QuickMenuSectionHeader(
 }
 
 @Composable
-private fun QuickMenuCloseButton(
+internal fun QuickMenuCloseButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1975,7 +1975,7 @@ private fun QuickMenuCloseButton(
 }
 
 @Composable
-private fun QuickMenuTabButton(
+internal fun QuickMenuTabButton(
     icon: ImageVector,
     contentDescriptionResId: Int,
     selected: Boolean,
@@ -2041,7 +2041,7 @@ private fun QuickMenuTabButton(
 }
 
 @Composable
-private fun QuickMenuRailActionButton(
+internal fun QuickMenuRailActionButton(
     item: QuickMenuItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2586,7 +2586,7 @@ private fun QuickMenuSwitch(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickMenuDetailRow(
+internal fun QuickMenuDetailRow(
     title: String,
     subtitle: String,
     accentColor: Color,

@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
@@ -21,6 +22,8 @@ import app.gamenative.linux.LinuxXServerView
 import app.gamenative.stubs.StubIcons
 import app.gamenative.stubs.Stubs
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
+import app.gamenative.ui.screen.linux.isLinuxMenuKey
+import app.gamenative.ui.screen.linux.toggleLinuxMenu
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.AppUiScale
 import app.gamenative.ui.util.ProvideAppUiScale
@@ -40,6 +43,9 @@ import timber.log.Timber
  * distinct data as distinct documents, and relaunching the same one brings its window forward.
  */
 class LinuxSessionActivity : ComponentActivity() {
+
+    /** Whether the side menu is open; see [dispatchKeyEvent]. */
+    private val menuOpen = mutableStateOf(false)
 
     override fun onCreate(state: Bundle?) {
         // Edge-to-edge: freeform captionBar / status / nav are applied in Compose via
@@ -80,6 +86,7 @@ class LinuxSessionActivity : ComponentActivity() {
                         argv = argv,
                         entryId = entryId,
                         label = label,
+                        menuOpen = menuOpen,
                         // The session's own window: when the last thing in it exits there is nothing
                         // left to show, so the window goes too.
                         onExit = { finish() },
@@ -149,11 +156,24 @@ class LinuxSessionActivity : ComponentActivity() {
     /**
      * Compose can hold activity focus away from [LinuxXServerView]; forward keys the same way
      * we forward scroll so the guest gets keyboard input.
+     *
+     * Except the menu's keys: Back and Shift+Esc open it (as in a game), and while it is open
+     * keys drive the menu. Releases still reach the guest then, so a modifier held when the menu
+     * opened does not stay down in X.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isLinuxMenuKey(event, menuOpen.value)) {
+            toggleLinuxMenu(menuOpen, event)
+            return true
+        }
+        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
+        if (menuOpen.value) {
+            if (event.action == KeyEvent.ACTION_UP && content != null) dispatchKeyToLinuxView(content, event)
+            return super.dispatchKeyEvent(event)
+        }
+
         val focus = currentFocus
         if (focus is LinuxXServerView && focus.dispatchKeyEvent(event)) return true
-        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
         if (content != null && dispatchKeyToLinuxView(content, event)) return true
         return super.dispatchKeyEvent(event)
     }

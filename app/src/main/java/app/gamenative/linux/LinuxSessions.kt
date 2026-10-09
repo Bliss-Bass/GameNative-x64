@@ -57,7 +57,7 @@ object LinuxSessions {
         /** Remembered so a restart can bring the session back the size it was. */
         val width: Int,
         val height: Int,
-        val densityDpi: Int,
+        var densityDpi: Int,
         var viewers: Int = 0,
     )
 
@@ -120,12 +120,13 @@ object LinuxSessions {
 
         val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
         val backend = PrefManager.linuxDisplayBackend
-        Timber.i("[LinuxSessions]: opening %s with backend %s", key, backend.key)
+        val scale = LinuxAppSettings.scalePercent(context, key)
+        Timber.i("[LinuxSessions]: opening %s with backend %s at %d%%", key, backend.key, scale)
         return@withLock when (backend) {
             LinuxDisplayBackend.ANDROID_X ->
-                LinuxAndroidXSession.start(context, width, height, densityDpi, mode)
+                LinuxAndroidXSession.start(context, width, height, densityDpi, scale, mode)
             LinuxDisplayBackend.XTIGERVNC ->
-                LinuxDisplaySession.start(context, width, height, densityDpi, mode)
+                LinuxDisplaySession.start(context, width, height, densityDpi, scale, mode)
         }
             .onSuccess { session ->
                 synchronized(held) {
@@ -213,6 +214,29 @@ object LinuxSessions {
                 densityDpi = previous.densityDpi,
             )
         }
+    }
+
+    /**
+     * Retells running sessions their scale ([LinuxAppSettings.scalePercent]) after it changed:
+     * just [key], or every session when null. [densityDpi], when given, is the density the
+     * window showing [key] now has.
+     *
+     * Blocks on file writes; call off the main thread or use [applyScaleAsync].
+     */
+    fun applyScale(context: Context, key: String? = null, densityDpi: Int? = null) {
+        val targets = synchronized(held) {
+            held.values.filter { key == null || it.key == key }.onEach { h ->
+                if (densityDpi != null) h.densityDpi = densityDpi
+            }.map { it.key to it }
+        }
+        for ((target, h) in targets) {
+            runCatching { h.session.setDpi(h.densityDpi, LinuxAppSettings.scalePercent(context, target)) }
+                .onFailure { Timber.w(it, "[LinuxSessions]: could not rescale %s", target) }
+        }
+    }
+
+    fun applyScaleAsync(context: Context, key: String? = null) {
+        scope.launch { applyScale(context, key) }
     }
 
     /** How the service describes itself, and how it knows whether to keep running. */

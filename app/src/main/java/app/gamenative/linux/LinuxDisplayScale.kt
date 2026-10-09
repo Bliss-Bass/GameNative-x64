@@ -32,7 +32,7 @@ object LinuxDisplayScale {
      * Lifts matched X dpi so desktop-toolkit chrome approaches Material touch size.
      * Tuned from Calculator vs Android dock/caption sizing on 219dpi tablets (~0.67× before).
      */
-    private const val DESKTOP_TO_ANDROID_VISUAL = 1.5f
+    internal const val DESKTOP_TO_ANDROID_VISUAL = 1.5f
 
     const val DEFAULT_SCALE_PERCENT = 100
 

@@ -460,6 +460,35 @@ object LinuxRootfs {
         ensureFirefoxMediaCodecs(rootfs)
         ensureFirefoxSandboxNotice(rootfs)
         ensureOpenshotLaunchWrapper(rootfs)
+        ensureFirefoxLaunchWrapper(rootfs)
+    }
+
+    /**
+     * Puts a `/usr/local/bin/firefox` shim ahead of the packaged `/usr/bin/firefox`.
+     *
+     * Firefox sizes its own toolbar and tab fonts from the GTK font DPI, which is the session's
+     * Xft/DPI and so carries [LinuxDisplayScale.DESKTOP_TO_ANDROID_VISUAL]. That lift is for GTK
+     * widgets; Firefox already gets Android's density through devPixelsPerPx, so with it the
+     * browser chrome came out half again larger than its pages and than Android's own UI.
+     * GDK_DPI_SCALE takes it back out for Firefox alone.
+     */
+    private fun ensureFirefoxLaunchWrapper(rootfs: File) {
+        val real = File(rootfs, "usr/bin/firefox")
+        val wrapper = File(rootfs, "usr/local/bin/firefox")
+        if (!real.exists() && !java.nio.file.Files.isSymbolicLink(real.toPath())) {
+            if (wrapper.exists()) wrapper.delete()
+            return
+        }
+        val dpiScale = "%.3f".format(java.util.Locale.ROOT, 1f / LinuxDisplayScale.DESKTOP_TO_ANDROID_VISUAL)
+        wrapper.parentFile?.mkdirs()
+        wrapper.writeText(
+            """|#!/bin/sh
+            |# Written by GameNative. See ensureFirefoxLaunchWrapper.
+            |export GDK_DPI_SCALE=$dpiScale
+            |exec /usr/bin/firefox "${'$'}@"
+            |""".trimMargin(),
+        )
+        wrapper.setExecutable(true, false)
     }
 
     /**
@@ -483,6 +512,13 @@ object LinuxRootfs {
             } catch (e) {
               Components.utils.reportError(e);
             }
+            // GameNative: this window's scale, which may differ from the shared default pref.
+            try {
+              const scale = getenv("$DEVICE_SCALE_ENV");
+              if (scale) defaultPref("layout.css.devPixelsPerPx", scale);
+            } catch (e) {
+              Components.utils.reportError(e);
+            }
             """.trimIndent() + "\n"
         for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
             val appDir = File(rootfs, dirName)
@@ -493,17 +529,33 @@ object LinuxRootfs {
     }
 
     /**
+     * Read by the Firefox autoconfig script ([ensureFirefoxSandboxNotice]) as the window's device
+     * scale. Sessions that set it can each run at their own scale; the pref file written by
+     * [writeFirefoxScale] is what the rest fall back on.
+     */
+    const val DEVICE_SCALE_ENV = "GAMENATIVE_DEVICE_SCALE"
+
+    /**
      * Gives Firefox the session's scale as a default pref; see [LinuxDisplayScale.deviceScale].
      * A default rather than a user pref, so about:config can still override it. Firefox reads it
      * at startup, so a density change reaches the next window, not a running one.
+     *
+     * Firefox also zooms by GTK's text scale, Xft/DPI over 96, which here is the toolkit DPI
+     * (about 2.4x) rather than anything meant for a browser; on top of devPixelsPerPx that made
+     * pages several times too large, worse after any XSETTINGS change. Pinned to 100% so
+     * devPixelsPerPx is Firefox's only scale.
      */
     fun writeFirefoxScale(rootfs: File, xdpi: Int) {
         val scale = "%.3f".format(java.util.Locale.ROOT, LinuxDisplayScale.deviceScale(xdpi))
+        val prefs = """
+            pref("layout.css.devPixelsPerPx", "$scale");
+            pref("ui.textScaleFactor", 100);
+            pref("browser.display.os-zoom-behavior", 0);
+            """.trimIndent() + "\n"
         for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
             val appDir = File(rootfs, dirName)
             if (!appDir.isDirectory) continue
-            File(appDir, "defaults/pref").apply { mkdirs() }.resolve("gamenative-scale.js")
-                .writeText("pref(\"layout.css.devPixelsPerPx\", \"$scale\");\n")
+            File(appDir, "defaults/pref").apply { mkdirs() }.resolve("gamenative-scale.js").writeText(prefs)
         }
     }
 

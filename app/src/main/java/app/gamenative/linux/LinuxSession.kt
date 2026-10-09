@@ -24,8 +24,11 @@ interface LinuxSession {
     /** Runs [argv] against this session's display, for launching applications into it. */
     fun run(argv: String)
 
-    /** Retells the session Android's density, so running clients resize their text. */
-    fun setDpi(densityDpi: Int)
+    /**
+     * Retells the session Android's density and the scale it runs at, so running clients resize
+     * their text. [scalePercent] is [LinuxAppSettings.scalePercent] for this session's key.
+     */
+    fun setDpi(densityDpi: Int, scalePercent: Int)
 
     /**
      * Matches the X screen (and APP-mode top-levels) to the Android freeform client area so

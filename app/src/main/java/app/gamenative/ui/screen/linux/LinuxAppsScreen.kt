@@ -294,11 +294,13 @@ private suspend fun removeFromDrawer(context: Context, app: LinuxAppScanner.Linu
  * Here rather than in Settings because it is only meaningful once there is a userland to apply it
  * to, and this is the screen someone is on when they notice the size is wrong.
  *
- * Takes effect when a session next starts: the X server is told its DPI on the command line, and
- * a running session's clients have already sized their windows from it.
+ * Running sessions without their own size are retold at once, which GTK apps follow live through
+ * XSETTINGS; anything that reads DPI only at startup picks it up when restarted. A session's own
+ * override is set from its window's menu ([LinuxSessionMenu]).
  */
 @Composable
 private fun ScaleRow() {
+    val context = LocalContext.current
     var percent by rememberSaveable { mutableIntStateOf(PrefManager.linuxUiScalePercent) }
     var expanded by remember { mutableStateOf(false) }
 
@@ -341,6 +343,7 @@ private fun ScaleRow() {
                         onClick = {
                             percent = choice
                             PrefManager.linuxUiScalePercent = choice
+                            LinuxSessions.applyScaleAsync(context)
                             expanded = false
                         },
                     )

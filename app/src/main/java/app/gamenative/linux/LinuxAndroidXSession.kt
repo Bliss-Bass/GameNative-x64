@@ -74,6 +74,15 @@ class LinuxAndroidXSession private constructor(
     val displaySocketDir: File
         get() = File(sessionRoot, "tmp/.X11-unix")
 
+    /**
+     * Guest path of this display's own XSETTINGS and X resources. Per display rather than in
+     * `/root`, since each window may run at its own scale and every session shares the rootfs.
+     */
+    private val guestConfigDir = "/root/.config/gamenative/x11-$display"
+
+    private val configDir: File
+        get() = File(LinuxRootfs.rootfsDir(context), guestConfigDir.removePrefix("/"))
+
     companion object {
         private const val FIRST_DISPLAY = 10
         private const val DISPLAY_COUNT = 16
@@ -81,6 +90,7 @@ class LinuxAndroidXSession private constructor(
         /** Grace after freeform resize before geometry snap-backs may re-fit. */
         private const val RESIZE_FIT_GRACE_MS = 450L
         private const val MIN_RESIZE_PX = 64
+        private const val SIGHUP = 1
         /**
          * Re-check frame vs X screen after settle. Freeform + SurfaceView + GTK land on
          * different clocks; a few spaced rounds catch missed applies after repeated resizes.
@@ -94,6 +104,7 @@ class LinuxAndroidXSession private constructor(
             width: Int,
             height: Int,
             densityDpi: Int,
+            scalePercent: Int,
             mode: LinuxDesktopConfig.Mode,
         ): Result<LinuxAndroidXSession> = withContext(Dispatchers.IO) {
             runCatching {
@@ -115,7 +126,7 @@ class LinuxAndroidXSession private constructor(
                     session.launch(
                         width.coerceAtLeast(320),
                         height.coerceAtLeast(240),
-                        LinuxDisplayScale.xdpi(densityDpi),
+                        LinuxDisplayScale.xdpi(densityDpi, scalePercent),
                     )
                 }.onFailure {
                     releaseDisplay(display)
@@ -197,7 +208,7 @@ class LinuxAndroidXSession private constructor(
             // Openbox needs XKB/Shape/RandR that Winlator does not advertise and SIGSEGVs on
             // BadImplementation. Wine games never use a guest WM either — DesktopHelper plus
             // [installAppWindowFitter] fill application windows instead.
-            settings = startGuest("/usr/bin/xsettingsd", tag = "xsettingsd")
+            settings = startGuest("/bin/sh $guestConfigDir/xsettingsd.sh", tag = "xsettingsd")
             if (desktop) {
                 startGuest("/usr/bin/xsetroot -solid ${LinuxDesktopConfig.BACKGROUND}", tag = "xsetroot")
                 // tint2 also expects a WM; skip until we have a compatible panel story.
@@ -548,21 +559,28 @@ class LinuxAndroidXSession private constructor(
 
     private fun writeXresources(dpi: Int) {
         val rootfs = LinuxRootfs.rootfsDir(context)
-        LinuxRootfs.writeFirefoxScale(rootfs, dpi)
-        val settingsFile = File(rootfs, "root/.xsettingsd")
-        if (settingsFile.isFile) {
-            val text = settingsFile.readText()
-            val updated = text.lines().joinToString("\n") { line ->
-                if (line.startsWith("Xft/DPI ")) "Xft/DPI ${dpi * 1024}" else line
-            }
-            if (updated != text) settingsFile.writeText(updated)
-        }
+        val dir = configDir.apply { mkdirs() }
+        // The shared file carries the font settings; only the DPI is this display's own.
+        val shared = File(rootfs, "root/.xsettingsd").takeIf { it.isFile }?.readText().orEmpty()
+        val settings = shared.lines().filter { it.isNotBlank() && !it.startsWith("Xft/DPI ") } +
+            "Xft/DPI ${dpi * 1024}"
+        File(dir, "xsettingsd").writeText(settings.joinToString("\n", postfix = "\n"))
+        // Xt merges $XENVIRONMENT over ~/.Xdefaults (see [graphicalEnv]).
+        File(dir, "Xresources").writeText("Xft.dpi: $dpi\n")
+        // A pid file, so [reloadXsettings] signals this display's daemon and no other. Under
+        // PRoot the daemon shows only as "xsettingsd" and the tracer's command line contains the
+        // config path too, so matching by name or path would hit other sessions or PRoot itself.
+        File(dir, "xsettingsd.sh").writeText(
+            """
+            |#!/bin/sh
+            |echo ${'$'}${'$'} > $guestConfigDir/xsettingsd.pid
+            |exec /usr/bin/xsettingsd -c $guestConfigDir/xsettingsd
+            |""".trimMargin(),
+        )
         // Android X has no RENDER, so Xft faceName leaves xterm with nothing to draw.
-        // Core fonts + server-side ImageText/PolyText are what work here; keep faceSize
-        // out and pin Xft.dpi for any client that still reads ~/.Xdefaults.
+        // Core fonts + server-side ImageText/PolyText are what work here; keep faceSize out.
         File(rootfs, "root/.Xdefaults").writeText(
             """
-            Xft.dpi: $dpi
             XTerm*font: fixed
             XTerm*toolBar: false
             XTerm*background: black
@@ -617,6 +635,28 @@ class LinuxAndroidXSession private constructor(
         putAll(LinuxProgramLauncher.mesaEnv())
         // Qt does not always honor XSETTINGS; pin the same matched DPI the server advertises.
         put("QT_FONT_DPI", sessionDpi.toString())
+        put("XENVIRONMENT", "$guestConfigDir/Xresources")
+        // Read by the Firefox autoconfig script; see [LinuxRootfs.writeFirefoxScale].
+        put(
+            LinuxRootfs.DEVICE_SCALE_ENV,
+            "%.3f".format(java.util.Locale.ROOT, LinuxDisplayScale.deviceScale(sessionDpi)),
+        )
+    }
+
+    /** Has this display's xsettingsd reread its config, which is how GTK apps hear of a new DPI. */
+    private fun reloadXsettings() {
+        val pid = runCatching { File(configDir, "xsettingsd.pid").readText().trim().toInt() }.getOrNull()
+        if (pid == null) {
+            Timber.w("[LinuxAndroidXSession]: no xsettingsd pid for slot %d", display)
+            return
+        }
+        // A stale pid may since have been reused by anything else this app runs.
+        val name = runCatching { File("/proc/$pid/comm").readText().trim() }.getOrNull()
+        if (name != "xsettingsd") {
+            Timber.w("[LinuxAndroidXSession]: pid %d is %s, not xsettingsd; not signalling", pid, name)
+            return
+        }
+        android.os.Process.sendSignal(pid, SIGHUP)
     }
 
     override fun run(argv: String) {
@@ -660,18 +700,12 @@ class LinuxAndroidXSession private constructor(
         viewCallback = null
     }
 
-    override fun setDpi(densityDpi: Int) {
-        val dpi = LinuxDisplayScale.xdpi(densityDpi)
+    override fun setDpi(densityDpi: Int, scalePercent: Int) {
+        val dpi = LinuxDisplayScale.xdpi(densityDpi, scalePercent)
         sessionDpi = dpi
         writeXresources(dpi)
-        LinuxProgramLauncher.exec(
-            context = context,
-            argv = "/usr/bin/pkill -HUP xsettingsd",
-            extraEnv = graphicalEnv(),
-            displaySocketDir = displaySocketDir,
-            extraBinds = LinuxProgramLauncher.graphicalBinds(),
-        )
-        Timber.i("[LinuxAndroidXSession]: dpi set to %d", dpi)
+        reloadXsettings()
+        Timber.i("[LinuxAndroidXSession]: slot %d dpi set to %d (%d%%)", display, dpi, scalePercent)
     }
 
     override fun resize(width: Int, height: Int) {
