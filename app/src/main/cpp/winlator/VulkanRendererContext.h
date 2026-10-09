@@ -109,6 +109,7 @@ struct VkTable {
 #include <mutex>
 #include <shared_mutex>
 #include <condition_variable>
+#include <chrono>
 
 static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -147,6 +148,8 @@ public:
     void updateWindowContentDmaBuf(int64_t id, int fd, int w, int h, int strideBytes,
                                    int drmFormat, uint64_t modifier, int x, int y);
     bool supportsDmaBufImport() const { return dmaBufImportSupported; }
+    // Returns once no submitted or in-progress frame can still read a texture replaced earlier.
+    void waitForSampling();
     void updateCursorImage(void* pixels, short w, short h, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys,
@@ -209,6 +212,8 @@ private:
         AHardwareBuffer*     ahb            = nullptr;
         // Frame slot whose command buffer last copied out of stg; -1 when none is pending.
         int                  stgSlot        = -1;
+        // Newest frame snapshot that may still sample this texture once it is retired.
+        uint64_t             retiredAfter   = 0;
     };
 
     // Latest complete CPU frame per window. The X thread only ever writes here; the render
@@ -365,6 +370,13 @@ private:
     std::vector<VkFence>     inFlightFences;
     std::vector<VkFence>     imgInFlight;
     uint32_t                 currentFrame = 0;
+    // Draw lists are numbered; each slot remembers the one its last submit sampled.
+    uint64_t                 snapshotSeq = 0;
+    uint64_t                 slotSnapshot[MAX_FRAMES_IN_FLIGHT] = {};
+    void retireWinTex(WinTex wt);
+    uint32_t                 failedFrames = 0;
+    std::chrono::steady_clock::time_point lastFailureLog{};
+    void logFrameFailure(const char* step, VkResult res);
 
     VkSampler        sampler    = VK_NULL_HANDLE;
     VkDescriptorPool winTexPool = VK_NULL_HANDLE;

@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <chrono>
 #include <sys/system_properties.h>
 #include "window_vert.h"
@@ -867,6 +868,10 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int fd, int w,
                                                       int strideBytes, int drmFormat,
                                                       uint64_t modifier, int, int) {
     if (fd < 0 || w <= 0 || h <= 0) return;
+    // Mesa's X11 WSI sends no Present wait fence and relies on the dma-buf's implicit fence, which
+    // Vulkan sampling ignores. POLLIN waits for the writer, so a frame is not shown half-drawn.
+    struct pollfd pfd{fd, POLLIN, 0};
+    poll(&pfd, 1, 100);
     std::lock_guard<std::mutex> lk(renderMutex);
 
     WinTex& wt = texMap[id];
@@ -908,9 +913,14 @@ void VulkanRendererContext::destroyWinTex(WinTex& wt) {
         
         WinTex deferred = wt;
         deferred.isAHB = false;
-        deleteQueue.push_back(deferred);
+        retireWinTex(deferred);
     }
     wt={};
+}
+
+void VulkanRendererContext::retireWinTex(WinTex wt) {
+    wt.retiredAfter = snapshotSeq;
+    deleteQueue.push_back(wt);
 }
 
 void VulkanRendererContext::ensureCursorTex(short w, short h) {
@@ -1267,6 +1277,15 @@ void VulkanRendererContext::flushDeleteQueue() {
     deleteQueue.clear();
 }
 
+void VulkanRendererContext::logFrameFailure(const char* step, VkResult res) {
+    auto now = std::chrono::steady_clock::now();
+    failedFrames++;
+    if (now - lastFailureLog < std::chrono::seconds(1)) return;
+    lastFailureLog = now;
+    RLOG_E("renderFrame: %s returned %d (%u failures since last report)", step, (int)res, failedFrames);
+    failedFrames = 0;
+}
+
 void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
@@ -1314,9 +1333,13 @@ ok=true;}catch(...){}
     uint32_t imgIdx = 0;
     VkResult res = VK_SUCCESS;
     if (!toXr) {
-        res=vk_.AcquireNextImageKHR(device,swapchain,UINT64_MAX,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
+        // Bounded so a SurfaceFlinger stall cannot pin frameMutex and hang surface teardown.
+        res=vk_.AcquireNextImageKHR(device,swapchain,500'000'000ULL,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
         if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR){fbResized.store(true);return;}
-        if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) return;
+        if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) {
+            logFrameFailure("acquire", res);
+            return;
+        }
         if (imgIdx >= swapchainFBs.size() || imgIdx >= swapchainImages.size()) {
             RLOG_E("renderFrame: invalid acquired image index=%u (fb=%zu images=%zu)",
                 imgIdx, swapchainFBs.size(), swapchainImages.size());
@@ -1338,21 +1361,33 @@ ok=true;}catch(...){}
     float ox,oy,sx,sy,cw,ch;
     short ptrX,ptrY,curHotX,curHotY,curW,curH; bool curVis;
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
+    uint64_t frameSnapshot=0;
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
 
 
         if (!deleteQueue.empty()) {
+            // This slot's fence has signaled, but the other slot's frame may still be sampling a
+            // texture retired since; freeing it under the GPU reads unmapped memory (black on Xe).
+            uint64_t completed = snapshotSeq;
+            for (uint32_t s = 0; s < inFlightFences.size() && s < MAX_FRAMES_IN_FLIGHT; s++) {
+                if (s == currentFrame) continue;
+                if (vk_.GetFenceStatus && vk_.GetFenceStatus(device, inFlightFences[s]) == VK_SUCCESS) continue;
+                if (slotSnapshot[s] > 0) completed = std::min(completed, slotSnapshot[s] - 1);
+            }
+            size_t kept = 0;
             for (auto& wt:deleteQueue) {
+                if (wt.retiredAfter > completed) { deleteQueue[kept++] = wt; continue; }
                 if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
                 if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
                 if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
                 if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
                 if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
             }
-            deleteQueue.clear();
+            deleteQueue.resize(kept);
         }
+        frameSnapshot = ++snapshotSeq;
 
         ox=sceneOffsetX; oy=sceneOffsetY; sx=sceneScaleX; sy=sceneScaleY;
         cw=(float)containerWidth; ch=(float)containerHeight;
@@ -1424,18 +1459,23 @@ ok=true;}catch(...){}
     si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
 
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
-    if (vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame])!=VK_SUCCESS) {
+    VkResult sres=vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame]);
+    if (sres!=VK_SUCCESS) {
+        logFrameFailure("submit", sres);
+        for (auto& f:imgInFlight) if (f==inFlightFences[currentFrame]) f=VK_NULL_HANDLE;
         vk_.DestroyFence(device,inFlightFences[currentFrame],nullptr);
         VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
         vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
         return;
     }
+    if (currentFrame < MAX_FRAMES_IN_FLIGHT) slotSnapshot[currentFrame] = frameSnapshot;
     if (!toXr) {
         VkSwapchainKHR scs[]={swapchain};
         VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
         res=vk_.QueuePresentKHR(graphicsQueue,&pi);
         if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+        else if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) logFrameFailure("present", res);
     } else {
         // The XR session samples xrAhb from its own GL context with no fence handoff;
         // blocking here means the buffer is fully written whenever this thread is idle,
@@ -1524,6 +1564,20 @@ void VulkanRendererContext::updatePointerPosition(short x, short y) {
 
 void VulkanRendererContext::setCursorVisible(bool v) {
     cursorVisible.store(v); cursorMoved.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::waitForSampling() {
+    // renderFrame holds frameMutex shared from building its draw list until submit. It can sit in
+    // acquire while SurfaceFlinger withholds buffers, so give up rather than stall the X server.
+    std::unique_lock<std::shared_mutex> fl(frameMutex, std::defer_lock);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    while (!fl.try_lock()) {
+        if (std::chrono::steady_clock::now() >= deadline) return;
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+    if (device == VK_NULL_HANDLE) return;
+    // Bounded: a frame that bailed out after resetting its fence never signals it.
+    for (auto& f : inFlightFences) vk_.WaitForFences(device, 1, &f, VK_TRUE, 50'000'000);
 }
 
 void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short hotX, short hotY) {
@@ -1681,7 +1735,7 @@ void VulkanRendererContext::removeWindow(int64_t id) {
             if (cit != ahbImportCache.end()) {
                 WinTex deferred = cit->second;
                 deferred.isAHB  = false;
-                deleteQueue.push_back(deferred);
+                retireWinTex(deferred);
                 AHardwareBuffer_release(ahb);
                 ahbImportCache.erase(cit);
             }
@@ -1781,7 +1835,7 @@ void VulkanRendererContext::setSwapRB(bool enabled) {
     for (auto& [ahb,wt] : ahbImportCache) {
         WinTex deferred = wt;
         deferred.isAHB = false;
-        deleteQueue.push_back(deferred);
+        retireWinTex(deferred);
         AHardwareBuffer_release(ahb);
     }
     ahbImportCache.clear();

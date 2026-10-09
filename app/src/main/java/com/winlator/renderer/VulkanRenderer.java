@@ -169,6 +169,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetClearColor(long handle, float r, float g, float b, float a);
     private native void nativeSetPointerPos(long handle, short x, short y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
+    private native void nativeWaitForSampling(long handle);
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
         short width, short height, short hotX, short hotY);
     private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys,
@@ -782,6 +783,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (pw == window) { lastCursor = window.attributes.getCursor(); sendCursorToNative(lastCursor); }
             }
         }
+    }
+
+    /** Blocks until no composited frame can still be reading a window texture that was replaced. */
+    public void waitForSampling() {
+        final long handle;
+        synchronized (lock) { handle = nativeHandle; }
+        if (handle != 0) nativeWaitForSampling(handle);
     }
 
     public void setCursorVisible(boolean visible) {

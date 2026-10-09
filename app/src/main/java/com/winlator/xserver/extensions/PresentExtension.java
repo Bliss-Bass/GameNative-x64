@@ -72,6 +72,12 @@ public class PresentExtension implements Extension {
     private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> pendingIdles =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Flipped dma-buf pixmaps the compositor samples in place, per window. Each one stays busy
+    // until the next present to that window replaces it; an earlier idle lets the client render
+    // its next frame into the buffer on screen, which shows up as black or half-drawn frames.
+    private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> heldFlips =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private volatile android.view.Choreographer choreographer = null;
     private volatile boolean choreographerChecked = false;
     private final Object choreographerLock = new Object();
@@ -215,6 +221,11 @@ public class PresentExtension implements Extension {
             }
             cpuQueue.offer(new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
         }
+    }
+
+    private void releaseIdle(PendingIdle p, int targetFps, VulkanRenderer renderer) {
+        if (targetFps > 0) scheduleIdleNotify(p.window, p.pixmap, p.serial, p.idleFence, targetFps, renderer);
+        else sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
 
     private static abstract class ClientOpcodes {
@@ -375,6 +386,8 @@ public class PresentExtension implements Extension {
         final boolean gpuBacked = pixmap.drawable.getTexture() instanceof com.winlator.renderer.GPUImage;
         if (sharedStorage) pixmap.drawable.forceUpdate();
 
+        PendingIdle replacedFlip = null;
+        boolean heldNow = false;
         synchronized (content.renderLock) {
             // Flip GPU presents even when undersized: the Vulkan render list stretches the
             // cover window to the X screen so freeform frames stay filled. Avoid copyArea
@@ -390,8 +403,13 @@ public class PresentExtension implements Extension {
                     if (vr != null) vr.onUpdateWindowContent(window);
                     else asr.onUpdateWindowContent(window);
                 }
-                if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
-                else sendIdleNotify(window, pixmap, serial, idleFence);
+                PendingIdle release = new PendingIdle(window, pixmap, serial, idleFence, 0, 0);
+                if (((com.winlator.renderer.GPUImage) pixmap.drawable.getTexture()).hasDmaBufFd()) {
+                    replacedFlip = heldFlips.put(window.id, release);
+                    heldNow = true;
+                } else {
+                    releaseIdle(release, targetFps, vr);
+                }
             } else if (asr != null && !sharedStorage) {
                 content.setTexture(pixmap.drawable.getTexture());
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
@@ -414,6 +432,13 @@ public class PresentExtension implements Extension {
                 else sendIdleNotify(window, pixmap, serial, idleFence);
             }
         }
+        if (!heldNow && replacedFlip == null) replacedFlip = heldFlips.remove(window.id);
+        if (replacedFlip != null) {
+            // The compositor may still be drawing the replaced buffer; the client clears it
+            // for its next frame as soon as it is idle.
+            if (vr != null) vr.waitForSampling();
+            releaseIdle(replacedFlip, targetFps, vr);
+        }
     }
 
     /**
@@ -429,6 +454,7 @@ public class PresentExtension implements Extension {
         }
         cpuQueue.removeIf(p -> p.window != null && p.window.originClient == client);
         pendingIdles.values().removeIf(p -> p.window != null && p.window.originClient == client);
+        heldFlips.values().removeIf(p -> p.window != null && p.window.originClient == client);
         windowTimings.keySet().removeIf(id -> {
             Window w = client.xServer.windowManager.getWindow(id);
             return w == null || w.originClient == client;
