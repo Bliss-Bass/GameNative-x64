@@ -8,7 +8,11 @@
 
 Produces: `libwinlator.so`, `libwinlator_11.so`, `libvulkan_renderer.so` (Mesa/system Vulkan, no adrenotools),
 `libextras.so`, `libvirglrenderer.so`, `libpatchelf.so`, `libxconnectorpatch.so`, `libandroid-sysvshm.so`,
-`libevshim.so` (host stub).
+`libevshim.so` (host stub), `libexec-redirect.so`.
+
+`libexec-redirect.so` is preloaded into Wine. Stock Android denies apps a direct exec of files in
+their data directory, so it starts those binaries through `/system/bin/linker64` instead. This is
+the part of the ARM-only `libredirect-bionic-wx.so` that x86_64 needs.
 
 ## Pulse + bionic font libs (x86_64)
 
@@ -34,7 +38,7 @@ unpack a package under it.
 
 | Library | Notes |
 |---------|--------|
-| `libredirect-bionic-wx.so` | Closed-source; modern Bionic LD_PRELOAD |
+| `libredirect-bionic-wx.so` | Closed-source; modern Bionic LD_PRELOAD (exec redirect covered by `libexec-redirect.so`) |
 | `libhook_impl.so`, `libmain_hook.so` | Closed-source; Turnip wrapper ICD path |
 | `libevshim.so` | Host stub only; full SDL vjoy needs `third_party/SDL2/` |
 | `libsteambootstrap.so` | Source not in public tree |

@@ -79,6 +79,13 @@ set_target_properties(android-sysvshm PROPERTIES OUTPUT_NAME "android-sysvshm")
 target_link_libraries(android-sysvshm log android)
 target_link_options(android-sysvshm PRIVATE -Wl,-z,max-page-size=16384)
 
+# Preloaded into Wine so its exec/spawn of binaries in app storage goes through linker64; stock
+# Android denies apps a direct exec there. Stands in for the ARM-only libredirect-bionic-wx.so.
+add_library(exec-redirect SHARED ${CMAKE_CURRENT_LIST_DIR}/exec_redirect.c)
+target_compile_options(exec-redirect PRIVATE -Wall -Wextra -Werror -Wno-vla)
+target_link_libraries(exec-redirect log dl)
+target_link_options(exec-redirect PRIVATE -Wl,-z,max-page-size=16384)
+
 # The same code again under the name Mesa's ICDs were linked against.
 #
 # LD_PRELOAD is not enough for them: libvulkan_intel.so carries a DT_NEEDED on

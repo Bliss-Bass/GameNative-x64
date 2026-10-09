@@ -100,6 +100,22 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         return imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
     }
 
+    // x86_64 has no libredirect build; libexec-redirect.so covers the exec redirect that stock
+    // Android needs to run Wine's loader, wineserver and child processes from app storage.
+    private void addRedirectPreload(Context context, ImageFs imageFs, ArrayList<String> preloadLibs) {
+        if (!HostCpu.current().isX86_64()) {
+            String replacePath = resolveLibredirectPreload(imageFs);
+            if (replacePath != null && new File(replacePath).exists()) preloadLibs.add(replacePath);
+            return;
+        }
+        String execRedirect = context.getApplicationInfo().nativeLibraryDir + "/libexec-redirect.so";
+        if (new File(execRedirect).exists()) {
+            preloadLibs.add(execRedirect);
+        } else {
+            Log.w("BionicProgramLauncherComponent", "libexec-redirect.so missing at " + execRedirect);
+        }
+    }
+
     /** Numeric Steam appid for the game in this container (e.g. "221380").
      *  Set from XServerScreen before start(); only consumed in real-Steam mode
      *  to publish SteamGameId / SteamAppId for the steam_helper handshake. */
@@ -208,19 +224,22 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
     private int execGuestProgram() {
 
         final int MAX_PLAYERS = 4;
+        Context context = environment.getContext();
+        ImageFs imageFs = ImageFs.find(context);
+        File rootDir = imageFs.getRootDir();
 
         // Get the number of enabled players directly from ControllerManager.
         for (int i = 0; i < MAX_PLAYERS; i++) {
-            String memPath;
+            String memName;
             if (i == 0) {
                 // Player 1 uses the original, non-numbered path that is known to work.
-                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad.mem";
+                memName = "gamepad.mem";
             } else {
                 // Players 2, 3, 4 use a 1-based index.
-                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad" + i + ".mem";
+                memName = "gamepad" + i + ".mem";
             }
 
-            File memFile = new File(memPath);
+            File memFile = new File(rootDir, "tmp/" + memName);
             memFile.getParentFile().mkdirs();
             try (RandomAccessFile raf = new RandomAccessFile(memFile, "rw")) {
                 raf.setLength(64);
@@ -228,9 +247,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 Log.e("EVSHIM_HOST", "Failed to create mem file for player index "+i, e);
             }
         }
-        Context context = environment.getContext();
-        ImageFs imageFs = ImageFs.find(context);
-        File rootDir = imageFs.getRootDir();
 
         PrefManager.init(context);
         boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", true);
@@ -253,6 +269,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         // Use the ControllerManager's dynamic count for the environment variable
         envVars.put("EVSHIM_MAX_PLAYERS", String.valueOf(MAX_PLAYERS));
+        // WinHandler maps gamepad_shm under getFilesDir(); evshim's /data/data default is user 0 only.
+        envVars.put("EVSHIM_BASE_PATH", context.getFilesDir().getAbsolutePath());
         if (true) {
             envVars.put("EVSHIM_SHM_ID", 1);
         }
@@ -334,13 +352,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             Log.w("BionicProgramLauncherComponent",
                     "libevshim.so missing at " + evshimPath + ", skipping evshim preload");
         }
-        if (!HostCpu.current().isX86_64()) {
-            String replacePath = resolveLibredirectPreload(imageFs);
-            if (replacePath != null && new File(replacePath).exists()) preloadLibs.add(replacePath);
-        } else {
-            Log.w("BionicProgramLauncherComponent",
-                    "Skipping bionic redirect preload on x86_64 host (x86_64 libredirect pending upstream)");
-        }
+        addRedirectPreload(context, imageFs, preloadLibs);
 
         envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
         envVars.put("EVSHIM_WINE", 1);
@@ -840,10 +852,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         ArrayList<String> preloadLibs = new ArrayList<>();
         String sysvPath = resolveSysvShmPreloadPath(context, imageFs);
         if (sysvPath != null) preloadLibs.add(sysvPath);
-        if (!HostCpu.current().isX86_64()) {
-            String replacePath = resolveLibredirectPreload(imageFs);
-            if (replacePath != null && new File(replacePath).exists()) preloadLibs.add(replacePath);
-        }
+        addRedirectPreload(context, imageFs, preloadLibs);
 
         envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
 
