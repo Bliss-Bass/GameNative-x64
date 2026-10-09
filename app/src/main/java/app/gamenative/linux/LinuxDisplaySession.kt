@@ -163,6 +163,7 @@ class LinuxDisplaySession private constructor(
         // TigerVNC has RENDER/Xft; restore faceName so a prior Android X session's core-font
         // ~/.Xdefaults does not leave xterm on "fixed" under this backend.
         writeXdefaults(dpi)
+        LinuxRootfs.writeFirefoxScale(LinuxRootfs.rootfsDir(context), dpi)
 
         // Audio before any client that might open Cubeb/Pulse (browsers, media players).
         LinuxPulse.acquire(context)
@@ -325,6 +326,7 @@ class LinuxDisplaySession private constructor(
     override fun setDpi(densityDpi: Int) {
         val dpi = LinuxDisplayScale.xdpi(densityDpi)
         writeXdefaults(dpi)
+        LinuxRootfs.writeFirefoxScale(LinuxRootfs.rootfsDir(context), dpi)
         val settings = File(LinuxRootfs.rootfsDir(context), "root/.xsettingsd")
         val text = settings.takeIf { it.isFile }?.readText() ?: return
         val updated = text.lines().joinToString("\n") { line ->

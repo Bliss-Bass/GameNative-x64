@@ -548,6 +548,7 @@ class LinuxAndroidXSession private constructor(
 
     private fun writeXresources(dpi: Int) {
         val rootfs = LinuxRootfs.rootfsDir(context)
+        LinuxRootfs.writeFirefoxScale(rootfs, dpi)
         val settingsFile = File(rootfs, "root/.xsettingsd")
         if (settingsFile.isFile) {
             val text = settingsFile.readText()

@@ -70,4 +70,13 @@ object LinuxDisplayScale {
      * up the same physical size as everything the toolkits are laying out.
      */
     fun factor(context: Context): Float = xdpi(context).toFloat() / X_BASELINE_DPI
+
+    /**
+     * The device scale (pixels per CSS px) for clients that take one instead of a DPI, given the
+     * session's [xdpi]. Firefox is the case in point: it ignores Xft/DPI for layout and scales by
+     * GDK's integer factor, so it drew at 1x. This undoes [DESKTOP_TO_ANDROID_VISUAL], which is
+     * for toolkit chrome, leaving Android's own density times the user's scale -- web content
+     * then comes out the size Android's browser draws it.
+     */
+    fun deviceScale(xdpi: Int): Float = xdpi / (X_BASELINE_DPI * DESKTOP_TO_ANDROID_VISUAL)
 }

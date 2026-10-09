@@ -456,6 +456,7 @@ object LinuxRootfs {
         LinuxDesktopConfig.writeWindowManagerConfigs(rootfs)
         writeXsettings(rootfs, context.resources.displayMetrics.densityDpi)
         writeXdefaults(rootfs)
+        writeFirefoxScale(rootfs, LinuxDisplayScale.xdpi(context.resources.displayMetrics.densityDpi))
         ensureFirefoxMediaCodecs(rootfs)
         ensureFirefoxSandboxNotice(rootfs)
         ensureOpenshotLaunchWrapper(rootfs)
@@ -488,6 +489,21 @@ object LinuxRootfs {
             if (!appDir.isDirectory) continue
             File(appDir, "defaults/pref").apply { mkdirs() }.resolve("autoconfig.js").writeText(autoconfig)
             File(appDir, "gamenative.cfg").writeText(script)
+        }
+    }
+
+    /**
+     * Gives Firefox the session's scale as a default pref; see [LinuxDisplayScale.deviceScale].
+     * A default rather than a user pref, so about:config can still override it. Firefox reads it
+     * at startup, so a density change reaches the next window, not a running one.
+     */
+    fun writeFirefoxScale(rootfs: File, xdpi: Int) {
+        val scale = "%.3f".format(java.util.Locale.ROOT, LinuxDisplayScale.deviceScale(xdpi))
+        for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
+            val appDir = File(rootfs, dirName)
+            if (!appDir.isDirectory) continue
+            File(appDir, "defaults/pref").apply { mkdirs() }.resolve("gamenative-scale.js")
+                .writeText("pref(\"layout.css.devPixelsPerPx\", \"$scale\");\n")
         }
     }
 
@@ -572,7 +588,8 @@ object LinuxRootfs {
             if (!appDir.isDirectory) continue
             for ((name, target) in libs) {
                 val link = File(appDir, name)
-                if (link.exists()) continue
+                // The target is a guest path, so from here the link always looks dangling.
+                if (java.nio.file.Files.isSymbolicLink(link.toPath()) || link.exists()) continue
                 runCatching {
                     java.nio.file.Files.createSymbolicLink(link.toPath(), java.nio.file.Paths.get(target))
                 }.onFailure {
