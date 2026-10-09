@@ -352,7 +352,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             short y = xServer.pointer.getClampedY();
 
             if (cursor != null) {
-                if (cursor.isVisible()) renderDrawable(cursor.cursorImage, x - cursor.hotSpotX, y - cursor.hotSpotY, cursorMaterial);
+                Drawable image = cursor.cursorImage != null ? cursor.cursorImage : rootCursorDrawable;
+                if (cursor.isVisible()) renderDrawable(image, x - cursor.hotSpotX, y - cursor.hotSpotY, cursorMaterial);
             }
             else renderDrawable(rootCursorDrawable, x, y, cursorMaterial);
         }

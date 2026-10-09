@@ -558,7 +558,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         boolean effVis = cursorVisible;
         if (cursor != null) {
             if (!cursor.isVisible()) effVis = false;
-            cd = cursor.cursorImage; hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY;
+            cd = cursor.cursorImage != null ? cursor.cursorImage : rootCursorDrawable;
+            hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY;
         } else { cd = rootCursorDrawable; }
         nativeSetCursorVisible(nativeHandle, effVis);
         if (effVis && cd != null && cd.getBuffer() != null) {

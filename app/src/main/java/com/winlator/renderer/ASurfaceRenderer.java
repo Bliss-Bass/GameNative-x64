@@ -441,7 +441,7 @@ public class ASurfaceRenderer implements WindowManager.OnWindowModificationListe
 
     private void sendCursorToNative(Cursor cursor) {
         if (!containerCursorVisible) return;
-        Drawable cd = cursor != null ? cursor.cursorImage : rootCursorDrawable;
+        Drawable cd = cursor != null && cursor.cursorImage != null ? cursor.cursorImage : rootCursorDrawable;
         if (cursor != null && !cursor.isVisible()) return;
         if (cd == null || cd.getBuffer() == null) return;
         synchronized (cd.renderLock) {

@@ -3,6 +3,7 @@ package com.winlator.xserver;
 public class Cursor extends XResource {
     public final int hotSpotX;
     public final int hotSpotY;
+    /** Null for glyph cursors, which renderers draw with their default arrow. */
     public final Drawable cursorImage;
     public final Drawable sourceImage;
     public final Drawable maskImage;
