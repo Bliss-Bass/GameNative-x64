@@ -26,6 +26,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import app.gamenative.ui.component.GradientProgressBar
+import app.gamenative.ui.component.SourceConfirmationBadges
+import app.gamenative.ui.data.SteamSourceCompatStore
 import app.gamenative.ui.component.InfoCard
 import app.gamenative.ui.component.topbar.BackButton
 import app.gamenative.ui.data.Achievement
@@ -168,6 +170,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import app.gamenative.utils.SteamSourceCompatService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -591,6 +594,17 @@ internal fun AppScreenContent(
 
     LaunchedEffect(displayInfo.appId) {
         scrollState.animateScrollTo(0)
+    }
+
+    val steamAppId = displayInfo.appId.removePrefix("STEAM_").toIntOrNull()
+        ?.takeIf { displayInfo.appId.startsWith("STEAM_") } ?: 0
+    LaunchedEffect(steamAppId) {
+        if (steamAppId <= 0) return@LaunchedEffect
+        val ids = listOf(steamAppId)
+        val cached = SteamSourceCompatService.loadFresh(context, ids)
+        if (cached.isNotEmpty()) SteamSourceCompatStore.publish(cached)
+        val fetched = SteamSourceCompatService.fetchMissing(context, ids)
+        if (fetched.isNotEmpty()) SteamSourceCompatStore.publish(fetched)
     }
 
     LaunchedEffect(Unit) {
@@ -1079,6 +1093,14 @@ internal fun AppScreenContent(
                             text = displayInfo.compatibilityMessage,
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(displayInfo.compatibilityColor),
+                        )
+                    }
+                    if (steamAppId > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SourceConfirmationBadges(
+                            gameNative = null,
+                            steamAppId = steamAppId,
+                            includeGameNative = false,
                         )
                     }
                 }

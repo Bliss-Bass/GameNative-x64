@@ -44,6 +44,7 @@ import app.gamenative.steam.SteamCollectionFilter
 import app.gamenative.steam.curated.CuratedListDescriptor
 import app.gamenative.steam.curated.CuratedListRepository
 import app.gamenative.ui.data.LibraryState
+import app.gamenative.ui.data.SteamSourceCompatStore
 import app.gamenative.ui.data.LibraryCounts
 import app.gamenative.ui.data.statsFor
 import app.gamenative.ui.enums.AppFilter
@@ -60,6 +61,7 @@ import app.gamenative.utils.DeviceGameStatsCache
 import app.gamenative.utils.GpuGameStatsCache
 import app.gamenative.utils.GameCompatibilityCache
 import app.gamenative.utils.GameCompatibilityService
+import app.gamenative.utils.SteamSourceCompatService
 import app.gamenative.utils.HardwareUtils
 import app.gamenative.utils.unaccent
 import com.winlator.core.GPUInformation
@@ -78,6 +80,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
@@ -1293,6 +1296,7 @@ class LibraryViewModel @Inject constructor(
 
             // Fetch compatibility for current page games
             fetchCompatibilityForPage(pagedList.map { it.name })
+            fetchSteamSourceCompat(pagedList)
 
             // App ids across every source the Favorites tab shows. Cache it so a later favorite
             // toggle can recount the badge cheaply, and use it here so the badge matches the tab
@@ -1342,6 +1346,25 @@ class LibraryViewModel @Inject constructor(
      */
     private fun matches(gameName: String, searchQuery:String): Boolean {
         return gameName.contains(searchQuery, ignoreCase = true) || gameName.unaccent().contains(searchQuery, ignoreCase = true)
+    }
+
+    /** ProtonDB and Steam Deck/SteamOS ratings for the Steam apps on this page. */
+    private fun fetchSteamSourceCompat(items: List<LibraryItem>) {
+        val appIds = items
+            .filter { it.gameSource == GameSource.STEAM && it.gameId > 0 }
+            .map { it.gameId }
+            .distinct()
+        if (appIds.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val cached = SteamSourceCompatService.loadFresh(context, appIds)
+            if (cached.isNotEmpty()) {
+                withContext(Dispatchers.Main) { SteamSourceCompatStore.publish(cached) }
+            }
+            val fetched = SteamSourceCompatService.fetchMissing(context, appIds)
+            if (fetched.isNotEmpty()) {
+                withContext(Dispatchers.Main) { SteamSourceCompatStore.publish(fetched) }
+            }
+        }
     }
 
     /**

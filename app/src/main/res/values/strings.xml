@@ -1432,6 +1432,19 @@
     <string name="library_gpu_compatible">GPU Compatible</string>
     <string name="library_compatibility_unknown">Unknown</string>
     <string name="library_not_compatible">Not Compatible</string>
+    <string name="compat_source_gamenative">GN</string>
+    <string name="compat_source_proton">Proton</string>
+    <string name="compat_source_deck">Deck</string>
+    <string name="compat_source_steamos">SteamOS</string>
+    <string name="compat_tier_platinum">Platinum</string>
+    <string name="compat_tier_gold">Gold</string>
+    <string name="compat_tier_silver">Silver</string>
+    <string name="compat_tier_bronze">Bronze</string>
+    <string name="compat_tier_borked">Borked</string>
+    <string name="compat_tier_pending">Pending</string>
+    <string name="compat_steam_verified">Verified</string>
+    <string name="compat_steam_playable">Playable</string>
+    <string name="compat_steam_unsupported">Unsupported</string>
 
     <!-- Device game stats key/legend (for your device) -->
     <string name="stats_key_runs">Successful runs on your GPU</string>

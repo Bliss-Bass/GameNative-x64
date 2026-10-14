@@ -66,6 +66,7 @@ import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.gog.GogRecommendationsRepository
 import app.gamenative.ui.component.CompatibilityBadge
+import app.gamenative.ui.component.SourceConfirmationBadges
 import app.gamenative.ui.component.GameStatsRow
 import app.gamenative.ui.component.focusRing
 import app.gamenative.ui.data.GameCardStats
@@ -435,10 +436,20 @@ internal fun GridViewCard(
                     } else {
                         compatibilityStatus
                     }
-                    badgeStatus?.let { status ->
-                        CompatibilityBadge(
-                            status = status,
-                            showLabel = true,
+                    if (appInfo.isRecommended) {
+                        badgeStatus?.let { status ->
+                            CompatibilityBadge(
+                                status = status,
+                                showLabel = true,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(top = topOverlayPadding, start = topOverlayPadding),
+                            )
+                        }
+                    } else {
+                        SourceConfirmationBadges(
+                            gameNative = compatibilityStatus,
+                            steamAppId = if (appInfo.gameSource == app.gamenative.data.GameSource.STEAM) appInfo.gameId else 0,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(top = topOverlayPadding, start = topOverlayPadding),
