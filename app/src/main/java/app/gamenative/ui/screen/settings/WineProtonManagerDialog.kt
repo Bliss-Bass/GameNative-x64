@@ -50,6 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
 import app.gamenative.service.SteamService
+import app.gamenative.utils.HostContainerPolicy
+import app.gamenative.utils.ManifestContentTypes
+import app.gamenative.utils.ManifestRepository
 import app.gamenative.utils.Net
 import com.winlator.core.StringUtils
 import com.winlator.container.ContainerManager
@@ -118,11 +121,19 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
             Timber.tag("WineProtonManagerDialog").d("Wine profiles from manager: ${wineList?.size ?: 0}, Proton profiles: ${protonList?.size ?: 0}")
 
             if (wineList != null) {
-                val filtered = wineList.filter { it.remoteUrl == null && seenProfiles.add(Pair(it.type, it.verName)) }
+                val filtered = wineList.filter {
+                    it.remoteUrl == null &&
+                        HostContainerPolicy.bionicWineMatchesHost(it.verName) &&
+                        seenProfiles.add(Pair(it.type, it.verName))
+                }
                 installedProfiles.addAll(filtered)
             }
             if (protonList != null) {
-                val filtered = protonList.filter { it.remoteUrl == null && seenProfiles.add(Pair(it.type, it.verName)) }
+                val filtered = protonList.filter {
+                    it.remoteUrl == null &&
+                        HostContainerPolicy.bionicWineMatchesHost(it.verName) &&
+                        seenProfiles.add(Pair(it.type, it.verName))
+                }
                 installedProfiles.addAll(filtered)
             }
             Timber.tag("WineProtonManagerDialog").d("=== Total installed profiles after refresh: ${installedProfiles.size} ===")
@@ -141,17 +152,16 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
             } catch (_: Exception) {}
             refreshInstalled()
             scope.launch(Dispatchers.IO) {
-                loadWineProtonManifest(
-                    onSuccess = { manifest ->
-                        wineProtonManifest = manifest
-                        isLoadingManifest = false
-                        manifestError = null
-                    },
-                    onError = { error ->
-                        manifestError = error
-                        isLoadingManifest = false
+                val manifest = loadWineProtonManifest(ctx)
+                withContext(Dispatchers.Main) {
+                    wineProtonManifest = manifest
+                    isLoadingManifest = false
+                    manifestError = if (manifest.isEmpty()) {
+                        ctx.getString(R.string.wine_proton_error_unknown)
+                    } else {
+                        null
                     }
-                )
+                }
             }
         }
     }
@@ -1033,44 +1043,60 @@ private suspend fun performFinishInstall(
 }
 
 /**
- * Loads the Wine/Proton manifest from the remote server.
- * Filters entries to only include Wine and Proton packages.
+ * Wine/Proton builds this host can install.
+ * The flat component-manifest only publishes the ARM package. x86_64 Proton
+ * versions come from the full component catalog and are kept when they match
+ * [HostContainerPolicy.bionicWineMatchesHost].
  */
-private suspend fun loadWineProtonManifest(
-    onSuccess: suspend (Map<String, String>) -> Unit,
-    onError: suspend (String) -> Unit
-) {
+private suspend fun loadWineProtonManifest(context: Context): Map<String, String> {
+    val merged = linkedMapOf<String, String>()
     try {
-        val manifestUrl = "https://downloads.gamenative.app/component-manifest.json"
-        val request = Request.Builder()
-            .url(manifestUrl)
-            .build()
-
-        val response = Net.http.newCall(request).execute()
-        if (response.isSuccessful) {
-            val jsonString = response.body?.string() ?: "{}"
-            val jsonObject = Json.decodeFromString<JsonObject>(jsonString)
-
-            val manifest = jsonObject.entries
-                .filter { it.key.startsWith("wine", ignoreCase = true) ||
-                         it.key.startsWith("proton", ignoreCase = true) }
-                .associate { it.key to it.value.toString().removeSurrounding("\"") }
-
-            withContext(Dispatchers.Main) {
-                onSuccess(manifest)
+        val data = ManifestRepository.loadManifest(context)
+        val entries = (
+            data.items[ManifestContentTypes.WINE].orEmpty() +
+                data.items[ManifestContentTypes.PROTON].orEmpty()
+            )
+            .filter { entry ->
+                entry.variant == null || entry.variant.equals("bionic", ignoreCase = true)
             }
-        } else {
-            withContext(Dispatchers.Main) {
-                onError("Failed to load manifest: ${response.code}")
-            }
-            Timber.w("WineProtonManagerDialog: Failed to load manifest HTTP=${response.code}")
+            .filter { HostContainerPolicy.bionicWineMatchesHost(it.id) }
+        for (entry in entries) {
+            val fileName = entry.url.substringAfterLast('/').substringBefore('?')
+            if (fileName.isBlank()) continue
+            val label = entry.name.ifBlank { entry.id }
+            merged[label] = fileName
         }
     } catch (e: Exception) {
-        withContext(Dispatchers.Main) {
-            onError("Error loading manifest: ${e.message}")
-        }
-        Timber.e(e, "WineProtonManagerDialog: Error loading manifest")
+        Timber.e(e, "WineProtonManagerDialog: full manifest failed")
     }
+
+    try {
+        val request = Request.Builder()
+            .url("https://downloads.gamenative.app/component-manifest.json")
+            .build()
+        Net.http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Timber.w("WineProtonManagerDialog: component-manifest HTTP=${response.code}")
+                return@use
+            }
+            val jsonObject = Json.decodeFromString<JsonObject>(response.body?.string() ?: "{}")
+            jsonObject.entries
+                .filter {
+                    it.key.startsWith("wine", ignoreCase = true) ||
+                        it.key.startsWith("proton", ignoreCase = true)
+                }
+                .filter { HostContainerPolicy.bionicWineMatchesHost(it.key) }
+                .forEach { (key, value) ->
+                    val fileName = value.toString().removeSurrounding("\"")
+                    if (key !in merged && fileName !in merged.values) {
+                        merged[key] = fileName
+                    }
+                }
+        }
+    } catch (e: Exception) {
+        Timber.w(e, "WineProtonManagerDialog: component-manifest fetch failed")
+    }
+    return merged
 }
 
 /**

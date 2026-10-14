@@ -39,6 +39,7 @@ import java.io.File
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import app.gamenative.ui.component.dialog.WineDebugChannelsDialog
+import app.gamenative.utils.HostCpu
 
 @Suppress("UnnecessaryOptInAnnotation") // ExperimentalFoundationApi
 @OptIn(ExperimentalCoilApi::class, ExperimentalFoundationApi::class)
@@ -210,18 +211,20 @@ fun SettingsGroupDebug() {
                 }
             },
         )
-        SettingsSwitch(
-            colors = settingsTileColorsAlt(),
-            state = enableBox86Logs,
-            title = { Text(text = stringResource(R.string.settings_debug_box_logs_title)) },
-            subtitle = { Text(text = stringResource(R.string.settings_debug_box_logs_subtitle)) },
-            onCheckedChange = {
-                enableBox86Logs = it
-                if (!isPreview) {
-                    WinlatorPrefManager.putBoolean("enable_box86_64_logs", it)
-                }
-            },
-        )
+        if (isPreview || !HostCpu.current().isX86_64) {
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                state = enableBox86Logs,
+                title = { Text(text = stringResource(R.string.settings_debug_box_logs_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_debug_box_logs_subtitle)) },
+                onCheckedChange = {
+                    enableBox86Logs = it
+                    if (!isPreview) {
+                        WinlatorPrefManager.putBoolean("enable_box86_64_logs", it)
+                    }
+                },
+            )
+        }
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_debug_view_crash_title)) },

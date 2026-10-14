@@ -19,6 +19,7 @@ import app.gamenative.ui.component.settings.SettingsListDropdownSearchable
 import app.gamenative.ui.component.settings.SettingsMultiListDropdown
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
+import app.gamenative.utils.HostCpu
 import app.gamenative.utils.LsfgVkManager
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsSwitch
@@ -32,8 +33,11 @@ import kotlin.math.roundToInt
 @Composable
 fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
     val config = state.config.value
+    val showArmGraphics = !HostCpu.current().isX86_64
     SettingsGroup() {
         if (config.containerVariant.equals(Container.BIONIC, ignoreCase = true)) {
+            // Wrapper drivers and Adreno Turnip are ARM. x86_64 uses the host Vulkan driver.
+            if (showArmGraphics) {
             // Bionic: Graphics Driver (Wrapper/Wrapper-v2)
             SettingsListDropdown(
                 colors = settingsTileColors(),
@@ -104,7 +108,9 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                     },
                 )
             }
+            }
             DxWrapperSection(state)
+            if (showArmGraphics) {
             // Bionic: Exposed Vulkan Extensions (same UI as Vortek)
             SettingsMultiListDropdown(
                 colors = settingsTileColors(),
@@ -172,6 +178,7 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                     state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
                 },
             )
+            }
             if (app.gamenative.BuildConfig.XR_BUILD && !default) {
                 val xrRates = listOf(72, 90, 120)
                 SettingsListDropdown(
@@ -217,6 +224,7 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                     state.config.value = config.copy(rendererPresentMode = state.rendererPresentModes[idx])
                 },
             )
+            if (showArmGraphics) {
             SettingsListDropdown(
                 colors = settingsTileColors(),
                 title = { Text(text = stringResource(R.string.resource_type)) },
@@ -253,6 +261,7 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                     state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
                 },
             )
+            }
             // Sharpness (vkBasalt)
             SettingsListDropdown(
                 colors = settingsTileColors(),

@@ -94,6 +94,8 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.HostContainerPolicy
+import app.gamenative.utils.HostCpu
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.ManifestComponentHelper
 import app.gamenative.utils.ManifestContentTypes
@@ -342,7 +344,9 @@ fun ContainerConfigDialog(
         val containerVariants = staticData.containerVariants
         val bionicWineEntriesBase = staticData.bionicWineEntriesBase
         val glibcWineEntriesBase = staticData.glibcWineEntriesBase
-        val bionicWineEntriesRef = remember { mutableStateOf(bionicWineEntriesBase) }
+        val bionicWineEntriesRef = remember {
+            mutableStateOf(bionicWineEntriesBase.filter { HostContainerPolicy.bionicWineMatchesHost(it) })
+        }
         var bionicWineEntries by bionicWineEntriesRef
         val glibcWineEntriesRef = remember { mutableStateOf(glibcWineEntriesBase) }
         var glibcWineEntries by glibcWineEntriesRef
@@ -430,15 +434,20 @@ fun ContainerConfigDialog(
         }
 
         val bionicWineManifest = remember(manifestWine, manifestProton) {
-            ManifestComponentHelper.filterManifestByVariant(manifestWine, "bionic") +
-                ManifestComponentHelper.filterManifestByVariant(manifestProton, "bionic")
+            (ManifestComponentHelper.filterManifestByVariant(manifestWine, "bionic") +
+                ManifestComponentHelper.filterManifestByVariant(manifestProton, "bionic"))
+                .filter { HostContainerPolicy.bionicWineMatchesHost(it.id) }
         }
         val glibcWineManifest = remember(manifestWine, manifestProton) {
             ManifestComponentHelper.filterManifestByVariant(manifestWine, "glibc") +
                 ManifestComponentHelper.filterManifestByVariant(manifestProton, "glibc")
         }
         val bionicWineOptions = remember(bionicWineEntriesBase, installedWine, installedProton, bionicWineManifest) {
-            ManifestComponentHelper.buildVersionOptionList(bionicWineEntriesBase, installedWine + installedProton, bionicWineManifest)
+            ManifestComponentHelper.buildVersionOptionList(
+                bionicWineEntriesBase.filter { HostContainerPolicy.bionicWineMatchesHost(it) },
+                (installedWine + installedProton).filter { HostContainerPolicy.bionicWineMatchesHost(it) },
+                bionicWineManifest,
+            )
         }
         val glibcWineOptions = remember(glibcWineEntriesBase, glibcWineManifest) {
             ManifestComponentHelper.buildVersionOptionList(glibcWineEntriesBase, emptyList(), glibcWineManifest)
@@ -476,7 +485,9 @@ fun ContainerConfigDialog(
             val installed = availabilityUpdated.installed
 
             wrapperVersions = (baseWrapperVersions + availabilityUpdated.installedDrivers).distinct()
-            bionicWineEntries = (bionicWineEntriesBase + installed.proton + installed.wine).distinct()
+            bionicWineEntries = (bionicWineEntriesBase + installed.proton + installed.wine)
+                .filter { HostContainerPolicy.bionicWineMatchesHost(it) }
+                .distinct()
             glibcWineEntries = glibcWineEntriesBase
         }
 
@@ -1252,17 +1263,27 @@ fun ContainerConfigDialog(
                     },
                 ) { paddingValues ->
                     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-                    val tabs = listOf(
-                        stringResource(R.string.container_config_tab_general),
-                        stringResource(R.string.container_config_tab_graphics),
-                        stringResource(R.string.container_config_tab_emulation),
-                        stringResource(R.string.container_config_tab_controller),
-                        stringResource(R.string.container_config_tab_wine),
-                        stringResource(R.string.container_config_tab_win_components),
-                        stringResource(R.string.container_config_tab_environment),
-                        stringResource(R.string.container_config_tab_drives),
-                        stringResource(R.string.container_config_tab_advanced)
-                    )
+                    val showEmulationTab = !HostCpu.current().isX86_64
+                    val generalLabel = stringResource(R.string.container_config_tab_general)
+                    val graphicsLabel = stringResource(R.string.container_config_tab_graphics)
+                    val emulationLabel = stringResource(R.string.container_config_tab_emulation)
+                    val controllerLabel = stringResource(R.string.container_config_tab_controller)
+                    val wineLabel = stringResource(R.string.container_config_tab_wine)
+                    val winComponentsLabel = stringResource(R.string.container_config_tab_win_components)
+                    val environmentLabel = stringResource(R.string.container_config_tab_environment)
+                    val drivesLabel = stringResource(R.string.container_config_tab_drives)
+                    val advancedLabel = stringResource(R.string.container_config_tab_advanced)
+                    val tabs = buildList {
+                        add(generalLabel)
+                        add(graphicsLabel)
+                        if (showEmulationTab) add(emulationLabel)
+                        add(controllerLabel)
+                        add(wineLabel)
+                        add(winComponentsLabel)
+                        add(environmentLabel)
+                        add(drivesLabel)
+                        add(advancedLabel)
+                    }
 
                     // Let controller shoulder buttons cycle through the tabs: R1/R2
                     // forward, L1/L2 back (both wrap). The handler lives on the content
@@ -1298,10 +1319,11 @@ fun ContainerConfigDialog(
                             )
                             .fillMaxSize(),
                     ) {
-                        ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
+                        val safeTab = selectedTab.coerceIn(0, tabs.lastIndex)
+                        ScrollableTabRow(selectedTabIndex = safeTab, edgePadding = 0.dp) {
                             tabs.forEachIndexed { index, label ->
                                 Tab(
-                                    selected = selectedTab == index,
+                                    selected = safeTab == index,
                                     onClick = { selectedTab = index },
                                     text = { Text(text = label) },
                                     modifier = if (index == 0) {
@@ -1317,15 +1339,18 @@ fun ContainerConfigDialog(
                                 .verticalScroll(scrollState)
                                 .weight(1f),
                         ) {
-                            if (selectedTab == 0) GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
-                            if (selectedTab == 1) GraphicsTabContent(state, default)
-                            if (selectedTab == 2) EmulationTabContent(state)
-                            if (selectedTab == 3) ControllerTabContent(state, default)
-                            if (selectedTab == 4) WineTabContent(state)
-                            if (selectedTab == 5) WinComponentsTabContent(state)
-                            if (selectedTab == 6) EnvironmentTabContent(state)
-                            if (selectedTab == 7) DrivesTabContent(state)
-                            if (selectedTab == 8) AdvancedTabContent(state)
+                            when (tabs[safeTab]) {
+                                generalLabel ->
+                                    GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
+                                graphicsLabel -> GraphicsTabContent(state, default)
+                                emulationLabel -> EmulationTabContent(state)
+                                controllerLabel -> ControllerTabContent(state, default)
+                                wineLabel -> WineTabContent(state)
+                                winComponentsLabel -> WinComponentsTabContent(state)
+                                environmentLabel -> EnvironmentTabContent(state)
+                                drivesLabel -> DrivesTabContent(state)
+                                advancedLabel -> AdvancedTabContent(state)
+                            }
                         }
                     }
                 }

@@ -69,6 +69,22 @@ class HostContainerPolicyTest {
     }
 
     @Test
+    fun bionicWineMatchesHost_keepsX86ProtonOnX86AndHidesArm() {
+        assertTrue(HostContainerPolicy.bionicWineMatchesHost("proton-10.0-4-x86_64-1", HostCpu.X86_64))
+        assertTrue(HostContainerPolicy.bionicWineMatchesHost("proton-11.0-1-x86_64-1", HostCpu.X86_64))
+        assertTrue(HostContainerPolicy.bionicWineMatchesHost("Proton 11.0-2 x86-64", HostCpu.X86_64))
+        assertFalse(HostContainerPolicy.bionicWineMatchesHost("proton-10.0-arm64ec-2", HostCpu.X86_64))
+        assertFalse(HostContainerPolicy.bionicWineMatchesHost("proton-11.0-2-arm64ec-1", HostCpu.X86_64))
+    }
+
+    @Test
+    fun bionicWineMatchesHost_keepsArmProtonOnArmAndHidesX86() {
+        assertTrue(HostContainerPolicy.bionicWineMatchesHost("proton-10.0-arm64ec-2", HostCpu.ARM64))
+        assertFalse(HostContainerPolicy.bionicWineMatchesHost("proton-10.0-4-x86_64-1", HostCpu.ARM64))
+        assertFalse(HostContainerPolicy.bionicWineMatchesHost("Proton 11.0-2 x86-64", HostCpu.ARM64))
+    }
+
+    @Test
     fun mapWineVersionForHost_rewritesProton9X86ToHostDefault() {
         assertEquals(
             HostContainerPolicy.PROTON_X86_64,

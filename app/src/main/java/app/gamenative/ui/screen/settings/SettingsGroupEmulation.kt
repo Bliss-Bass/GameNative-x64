@@ -21,12 +21,14 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.HostCpu
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import com.alorma.compose.settings.ui.SettingsSwitch
 
 @Composable
 fun SettingsGroupEmulation() {
+    val showArmOptions = LocalInspectionMode.current || !HostCpu.current().isX86_64
     SettingsGroup(
     ) {
         var showConfigDialog by rememberSaveable { mutableStateOf(false) }
@@ -102,24 +104,26 @@ fun SettingsGroupEmulation() {
                 PrefManager.autoApplyKnownConfig = it
             },
         )
-        SettingsMenuLink(
-            colors = settingsTileColors(),
-            title = { Text(text = stringResource(R.string.settings_emulation_box64_presets_title)) },
-            subtitle = { Text(stringResource(R.string.settings_emulation_box64_presets_subtitle)) },
-            onClick = { showBox64PresetsDialog = true },
-        )
-        SettingsMenuLink(
-            colors = settingsTileColors(),
-            title = { Text(text = stringResource(R.string.fexcore_presets)) },
-            subtitle = { Text(text = stringResource(R.string.fexcore_presets_description)) },
-            onClick = { showFexcorePresetsDialog = true },
-        )
-        SettingsMenuLink(
-            colors = settingsTileColors(),
-            title = { Text(text = stringResource(R.string.settings_emulation_driver_manager_title)) },
-            subtitle = { Text(text = stringResource(R.string.settings_emulation_driver_manager_subtitle)) },
-            onClick = { showDriverManager = true },
-        )
+        if (showArmOptions) {
+            SettingsMenuLink(
+                colors = settingsTileColors(),
+                title = { Text(text = stringResource(R.string.settings_emulation_box64_presets_title)) },
+                subtitle = { Text(stringResource(R.string.settings_emulation_box64_presets_subtitle)) },
+                onClick = { showBox64PresetsDialog = true },
+            )
+            SettingsMenuLink(
+                colors = settingsTileColors(),
+                title = { Text(text = stringResource(R.string.fexcore_presets)) },
+                subtitle = { Text(text = stringResource(R.string.fexcore_presets_description)) },
+                onClick = { showFexcorePresetsDialog = true },
+            )
+            SettingsMenuLink(
+                colors = settingsTileColors(),
+                title = { Text(text = stringResource(R.string.settings_emulation_driver_manager_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_emulation_driver_manager_subtitle)) },
+                onClick = { showDriverManager = true },
+            )
+        }
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_emulation_contents_manager_title)) },

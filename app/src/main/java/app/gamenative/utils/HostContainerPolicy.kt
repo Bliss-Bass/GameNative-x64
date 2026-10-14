@@ -30,6 +30,18 @@ object HostContainerPolicy {
 
     fun isX86Host(): Boolean = HostCpu.current().isX86_64
 
+    /**
+     * Bionic Wine/Proton ids are arch-specific. x86_64 hosts keep x86_64 builds
+     * (and unlabeled custom imports); ARM hosts keep arm64ec. Glibc Wine is
+     * x86_64 on both hosts and must not be passed through here.
+     */
+    fun bionicWineMatchesHost(version: String, host: HostCpu = HostCpu.current()): Boolean {
+        val v = version.lowercase()
+        val isArm = v.contains("arm64")
+        val isX86 = v.contains("x86_64") || v.contains("x86-64")
+        return if (host.isX86_64) !isArm else !isX86
+    }
+
     fun defaultProtonWineVersion(): String =
         defaultProtonWineVersion(HostCpu.current())
 

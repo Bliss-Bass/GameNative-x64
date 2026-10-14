@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.res.stringResource
 import app.gamenative.R
 import app.gamenative.ui.component.settings.SettingsListDropdown
+import app.gamenative.utils.HostCpu
 import app.gamenative.ui.theme.settingsTileColors
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.winlator.contents.ContentProfile
@@ -16,6 +17,7 @@ import java.util.Locale
 @Composable
 fun EmulationTabContent(state: ContainerConfigState) {
     val config = state.config.value
+    if (HostCpu.current().isX86_64) return
     val wineIsX8664 = config.wineVersion.contains("x86_64", true)
     val wineIsArm64Ec = config.wineVersion.contains("arm64ec", true)
 

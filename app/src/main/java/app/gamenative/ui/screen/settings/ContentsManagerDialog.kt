@@ -44,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
 import app.gamenative.service.SteamService
+import app.gamenative.utils.HostCpu
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
 import kotlinx.coroutines.Dispatchers
@@ -262,14 +263,16 @@ fun ContentsManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         expanded = typeExpanded,
                         onDismissRequest = { typeExpanded = false }
                     ) {
-                        val allowed = listOf(
-                            ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-                            ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-                            ContentProfile.ContentType.CONTENT_TYPE_BOX64,
-                            ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64,
-                            ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-                            ContentProfile.ContentType.CONTENT_TYPE_WRAPPER
-                        )
+                        val allowed = buildList {
+                            add(ContentProfile.ContentType.CONTENT_TYPE_DXVK)
+                            add(ContentProfile.ContentType.CONTENT_TYPE_VKD3D)
+                            if (!HostCpu.current().isX86_64) {
+                                add(ContentProfile.ContentType.CONTENT_TYPE_BOX64)
+                                add(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64)
+                                add(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE)
+                                add(ContentProfile.ContentType.CONTENT_TYPE_WRAPPER)
+                            }
+                        }
                         ContentProfile.ContentType.values().filter { it in allowed }.forEach { t ->
                             DropdownMenuItem(
                                 text = { Text(t.toString()) },
