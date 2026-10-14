@@ -1773,6 +1773,10 @@
     <string name="workshop_update_prompt">%1$s MB of mod updates available. Download now or skip?</string>
     <string name="workshop_download_btn">Download</string>
     <string name="workshop_skip_btn">Skip</string>
+    <string name="launch_arg_conflict_title">Launch option will stop this game</string>
+    <string name="launch_arg_conflict_message">This container\'s launch options include \"%1$s\", which this game cannot start with here. Switch it to \"%2$s\"?</string>
+    <string name="launch_arg_conflict_switch">Switch</string>
+    <string name="launch_arg_conflict_keep">Keep mine</string>
     <string name="workshop_downloading">Downloading Workshop Mods (%1$d/%2$d)</string>
     <string name="workshop_processing">Processing mods…</string>
     <string name="workshop_failed_count">%1$d workshop mod(s) failed to update</string>

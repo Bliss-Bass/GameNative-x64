@@ -36,6 +36,7 @@ object GameFixesRegistry {
         STEAM_Fix_22380,
         STEAM_Fix_22490,
         STEAM_Fix_312520,
+        STEAM_Fix_379720,
         STEAM_Fix_413150,
         STEAM_Fix_413420,
         STEAM_Fix_752580,
@@ -59,18 +60,39 @@ object GameFixesRegistry {
     fun applyFor(context: Context, appId: String, container: Container) {
         val source = ContainerUtils.extractGameSourceFromContainerId(appId)
         val gameId = ContainerUtils.extractGameIdFromContainerId(appId)?.toString() ?: return
-        val catalogId = when (source) {
-            // EPIC auto-generates the id. so we need the catalog id instead.
-            GameSource.EPIC -> {
-                val game = EpicService.getEpicGameOf(gameId.toInt()) ?: return
-                game.catalogId
-            }
-            else -> gameId
-        }
+        val catalogId = catalogIdFor(source, gameId) ?: return
         Timber.i("GameFixesRegistry: Applying fixes for game: $source $catalogId if available")
         val fix = fixesProvider()[source to catalogId] ?: return
         val (installPath, installPathWindows) = resolvePaths(context, source, gameId) ?: return
         fix.apply(context, catalogId, installPath, installPathWindows, container)
+    }
+
+    /** Returns the user launch option that keeps this game from starting, if the fix knows one. */
+    fun findLaunchArgConflict(appId: String, container: Container): LaunchArgConflict? =
+        launchArgConflictFixFor(appId)?.findConflict(container)
+
+    fun resolveLaunchArgConflict(appId: String, container: Container, conflict: LaunchArgConflict, accept: Boolean) {
+        launchArgConflictFixFor(appId)?.resolveConflict(container, conflict, accept)
+    }
+
+    private fun launchArgConflictFixFor(appId: String): LaunchArgConflictFix? {
+        val source = ContainerUtils.extractGameSourceFromContainerId(appId)
+        val gameId = ContainerUtils.extractGameIdFromContainerId(appId)?.toString() ?: return null
+        val catalogId = catalogIdFor(source, gameId) ?: return null
+        return fixesProvider()[source to catalogId]?.launchArgConflictFix()
+    }
+
+    private fun GameFix.launchArgConflictFix(): LaunchArgConflictFix? = when (this) {
+        is LaunchArgConflictFix -> this
+        is KeyedCompositeGameFix -> fixes.firstNotNullOfOrNull { it.launchArgConflictFix() }
+        is CompositeGameFix -> fixes.firstNotNullOfOrNull { it.launchArgConflictFix() }
+        else -> null
+    }
+
+    // EPIC auto-generates the id, so fixes are keyed by the catalog id instead.
+    private fun catalogIdFor(source: GameSource, gameId: String): String? = when (source) {
+        GameSource.EPIC -> EpicService.getEpicGameOf(gameId.toInt())?.catalogId
+        else -> gameId
     }
 
     private fun resolvePaths(context: Context, source: GameSource, gameId: String): Pair<String, String>? {

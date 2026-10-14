@@ -156,6 +156,9 @@ private const val SNACKBAR_SHOW_TIMEOUT_MS = 15_000L
 /** Used to suspend preLaunchApp while the user decides on large workshop updates. */
 private var workshopUpdateDeferred: CompletableDeferred<Boolean>? = null
 
+/** Used to suspend preLaunchApp while the user decides whether to replace a conflicting launch option. */
+private var launchArgConflictDeferred: CompletableDeferred<Boolean>? = null
+
 private fun NavHostController.navigateFromLoginIfNeeded(
     targetRoute: String,
     logTag: String = "PluviaMain",
@@ -1319,6 +1322,18 @@ fun PluviaMain(
             }
         }
 
+        DialogType.LAUNCH_ARG_CONFLICT -> {
+            onConfirmClick = {
+                launchArgConflictDeferred?.complete(true)
+            }
+            onDismissClick = {
+                launchArgConflictDeferred?.complete(false)
+            }
+            onDismissRequest = {
+                launchArgConflictDeferred?.complete(false)
+            }
+        }
+
         else -> {
             onDismissRequest = null
             onDismissClick = null
@@ -2091,6 +2106,36 @@ fun preLaunchApp(
             GameFixesRegistry.applyFor(context, appId, container)
         } catch (e: Exception) {
             Timber.tag("GameFixes").w(e, "Game fixes failed in preLaunchApp")
+        }
+
+        // Fixes never override user launch options on their own; ask when one is known to
+        // keep the game from starting (e.g. a renderer the container cannot provide).
+        val argConflict = runCatching { GameFixesRegistry.findLaunchArgConflict(appId, container) }
+            .onFailure { Timber.tag("GameFixes").w(it, "Launch option conflict check failed") }
+            .getOrNull()
+        if (argConflict != null) {
+            setLoadingDialogVisible(false)
+            val userChoice = CompletableDeferred<Boolean>()
+            launchArgConflictDeferred = userChoice
+            setMessageDialogState(
+                MessageDialogState(
+                    visible = true,
+                    type = DialogType.LAUNCH_ARG_CONFLICT,
+                    title = context.getString(R.string.launch_arg_conflict_title),
+                    message = context.getString(
+                        R.string.launch_arg_conflict_message,
+                        argConflict.found,
+                        argConflict.replacement,
+                    ),
+                    confirmBtnText = context.getString(R.string.launch_arg_conflict_switch),
+                    dismissBtnText = context.getString(R.string.launch_arg_conflict_keep),
+                ),
+            )
+            val accept = userChoice.await()
+            launchArgConflictDeferred = null
+            setMessageDialogState(MessageDialogState(false))
+            setLoadingDialogVisible(true)
+            GameFixesRegistry.resolveLaunchArgConflict(appId, container, argConflict, accept)
         }
 
         val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)

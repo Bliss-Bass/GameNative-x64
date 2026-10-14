@@ -9,7 +9,7 @@ import com.winlator.container.Container
  * Every fix in [fixes] runs in order.
  */
 class CompositeGameFix(
-    private val fixes: List<GameFix>,
+    val fixes: List<GameFix>,
 ) : GameFix {
     override fun apply(
         context: Context,
@@ -32,5 +32,5 @@ class CompositeGameFix(
 class KeyedCompositeGameFix(
     override val gameSource: GameSource,
     override val gameId: String,
-    fixes: List<GameFix>,
+    val fixes: List<GameFix>,
 ) : KeyedGameFix, GameFix by CompositeGameFix(fixes)
