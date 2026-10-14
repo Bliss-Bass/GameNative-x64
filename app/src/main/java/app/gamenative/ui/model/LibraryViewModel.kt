@@ -786,7 +786,7 @@ class LibraryViewModel @Inject constructor(
                     return true
                 }
                 val cached = GameCompatibilityCache.getCached(gameName) ?: return true
-                val status = compatibilityStatusFor(cached)
+                val status = GameCompatibilityService.statusFor(cached)
                 return status == GameCompatibilityStatus.COMPATIBLE || status == GameCompatibilityStatus.GPU_COMPATIBLE
             }
 
@@ -1431,8 +1431,8 @@ class LibraryViewModel @Inject constructor(
     private fun updateCompatibilityState(
         results: Map<String, GameCompatibilityService.GameCompatibilityResponse>
     ) {
-        val compatibilityMap = results.mapValues { (gameName, response) ->
-            compatibilityStatusFor(response)
+        val compatibilityMap = results.mapValues { (_, response) ->
+            GameCompatibilityService.statusFor(response)
         }
 
         // Update state with compatibility map (merge with existing)
@@ -1444,15 +1444,4 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private fun compatibilityStatusFor(
-        response: GameCompatibilityService.GameCompatibilityResponse,
-    ): GameCompatibilityStatus {
-        return when {
-            response.isNotWorking -> GameCompatibilityStatus.NOT_COMPATIBLE
-            !response.hasBeenTried -> GameCompatibilityStatus.UNKNOWN
-            response.gpuPlayableCount > 0 -> GameCompatibilityStatus.GPU_COMPATIBLE
-            response.totalPlayableCount > 0 -> GameCompatibilityStatus.COMPATIBLE
-            else -> GameCompatibilityStatus.UNKNOWN
-        }
-    }
 }

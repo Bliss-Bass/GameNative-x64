@@ -110,7 +110,7 @@ class GogRecommendationsViewModel @Inject constructor(
                 }
             }
         }
-        val compatibilityMap = responses.mapValues { compatibilityStatusFor(it.value) }
+        val compatibilityMap = responses.mapValues { GameCompatibilityService.statusFor(it.value) }
 
         // Device / GPU stats are keyed by source+name; recommendations are GOG, but community
         // stats mostly live under other sources, so look each name up across every source.
@@ -141,16 +141,6 @@ class GogRecommendationsViewModel @Inject constructor(
         return names.toSet().mapNotNull { name ->
             GameSource.entries.firstNotNullOfOrNull { source -> all[source]?.get(name) }?.let { name to it }
         }.toMap()
-    }
-
-    private fun compatibilityStatusFor(
-        r: GameCompatibilityService.GameCompatibilityResponse,
-    ): GameCompatibilityStatus = when {
-        r.isNotWorking -> GameCompatibilityStatus.NOT_COMPATIBLE
-        !r.hasBeenTried -> GameCompatibilityStatus.UNKNOWN
-        r.gpuPlayableCount > 0 -> GameCompatibilityStatus.GPU_COMPATIBLE
-        r.totalPlayableCount > 0 -> GameCompatibilityStatus.COMPATIBLE
-        else -> GameCompatibilityStatus.UNKNOWN
     }
 
     private suspend fun collectOwnedGames(): List<OwnedGameRef> =

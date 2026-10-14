@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.graphics.Color
 import app.gamenative.BuildConfig
 import app.gamenative.R
+import app.gamenative.data.GameCompatibilityStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -51,13 +52,39 @@ object GameCompatibilityService {
      * Gets user-friendly compatibility message based on compatibility response.
      * Uses totalPlayableCount and gpuPlayableCount to determine the message.
      */
-    fun getCompatibilityMessageFromResponse(context: Context, response: GameCompatibilityResponse): CompatibilityMessage {
+    /**
+     * Play reports are not split by CPU architecture. On x86_64, totals and
+     * "not working" flags are mostly ARM phone runs, so a badge is shown only
+     * when this GPU itself has playable runs.
+     */
+    fun statusFor(
+        response: GameCompatibilityResponse,
+        host: HostCpu = HostCpu.current(),
+    ): GameCompatibilityStatus {
+        if (host.isX86_64) {
+            return if (response.gpuPlayableCount > 0) {
+                GameCompatibilityStatus.GPU_COMPATIBLE
+            } else {
+                GameCompatibilityStatus.UNKNOWN
+            }
+        }
         return when {
-            response.totalPlayableCount > 0 && response.gpuPlayableCount > 0 ->
+            response.isNotWorking -> GameCompatibilityStatus.NOT_COMPATIBLE
+            !response.hasBeenTried -> GameCompatibilityStatus.UNKNOWN
+            response.gpuPlayableCount > 0 -> GameCompatibilityStatus.GPU_COMPATIBLE
+            response.totalPlayableCount > 0 -> GameCompatibilityStatus.COMPATIBLE
+            else -> GameCompatibilityStatus.UNKNOWN
+        }
+    }
+
+    fun getCompatibilityMessageFromResponse(context: Context, response: GameCompatibilityResponse): CompatibilityMessage {
+        val host = HostCpu.current()
+        return when {
+            response.gpuPlayableCount > 0 ->
                 CompatibilityMessage(context.getString(R.string.best_config_exact_gpu_match), Color.Green)
-            response.gpuPlayableCount == 0 && response.totalPlayableCount > 0 ->
+            !host.isX86_64 && response.totalPlayableCount > 0 ->
                 CompatibilityMessage(context.getString(R.string.best_config_fallback_match), Color.Yellow)
-            response.isNotWorking ->
+            !host.isX86_64 && response.isNotWorking ->
                 CompatibilityMessage(context.getString(R.string.library_not_compatible), Color.Red)
             else ->
                 CompatibilityMessage(context.getString(R.string.library_compatibility_unknown), Color.Gray)
@@ -83,6 +110,7 @@ object GameCompatibilityService {
                 // Modern build can't run glibc containers — server should weight
                 // compatibility responses against bionic-only configs when true.
                 put("modernBuild", BuildConfig.MODERN_ANDROID)
+                put("arch", if (HostCpu.current().isX86_64) "x86_64" else "arm64")
             }
 
             val attestation = KeyAttestationHelper.getAttestationFields("https://api.gamenative.app")
