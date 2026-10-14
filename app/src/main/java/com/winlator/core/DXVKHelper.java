@@ -2,6 +2,7 @@ package com.winlator.core;
 
 import android.content.Context;
 
+import app.gamenative.utils.HostGraphicsEnv;
 import com.winlator.core.envvars.EnvVars;
 import com.winlator.xenvironment.ImageFs;
 
@@ -62,6 +63,9 @@ public class DXVKHelper {
 
         envVars.put("DXVK_CONFIG_FILE", rootDir + ImageFs.CONFIG_PATH+"/dxvk.conf");
         envVars.put("DXVK_CONFIG", content);
+        // setEnvVars replaces DXVK_CONFIG. Re-apply the Intel pin afterwards so a
+        // vkd3d/dxvk launch cannot drop it.
+        HostGraphicsEnv.pinIntelDxgiVendor(envVars);
     }
 
     public static void setVKD3DEnvVars(Context context, KeyValueSet config, EnvVars envVars) {

@@ -46,7 +46,52 @@ object HostGraphicsEnv {
         envVars.put("MESA_VK_WSI_PRESENT_MODE", "fifo")
 
         ensureDxvkDllOverrides(envVars)
+        // DXGI hides Intel and reports an RX 6700 XT (0x73df) once libxess.dll is
+        // loaded. That lie makes games pick a desktop preset. A custom vendor skips
+        // the hide and leaves the real device id in place.
+        pinIntelDxgiVendor(envVars)
         Timber.i("HostGraphicsEnv: sanitized guest env for x86_64 system Vulkan")
+    }
+
+    /**
+     * Keep DXGI advertising this machine's Intel vendor.
+     *
+     * DXVK forces `dxgi.hideIntelGpu` when XeSS is loaded, and that path is
+     * skipped entirely once `dxgi.customVendorId` is set. The device id is left
+     * alone, so the guest still sees this GPU rather than a stand-in.
+     */
+    @JvmStatic
+    fun pinIntelDxgiVendor(envVars: EnvVars) {
+        val gpu = HostGpu.current()
+        val vulkanHw = systemProperty("ro.hardware.vulkan")
+        if (!shouldPinIntelDxgi(gpu, vulkanHw)) {
+            Timber.i("HostGraphicsEnv: left DXGI vendor alone (drm=$gpu vulkan=$vulkanHw)")
+            return
+        }
+        pinIntelDxgiVendor(envVars, HostGpu.INTEL)
+    }
+
+    /**
+     * DRM sysfs is not readable from the app on some Android builds (the Googlebook
+     * publishes the GPU as `ro.hardware.vulkan=intel` instead). A known non-Intel
+     * DRM vendor still wins, so an AMD host is never pinned from a stale property.
+     */
+    @JvmStatic
+    fun shouldPinIntelDxgi(gpu: HostGpu, vulkanHardware: String): Boolean {
+        if (gpu == HostGpu.INTEL) return true
+        if (gpu != HostGpu.UNKNOWN) return false
+        return vulkanHardware.equals("intel", ignoreCase = true)
+    }
+
+    @JvmStatic
+    fun pinIntelDxgiVendor(envVars: EnvVars, gpu: HostGpu) {
+        if (gpu != HostGpu.INTEL) return
+        val raw = envVars.get("DXVK_CONFIG")
+        if (raw.contains("dxgi.customVendorId")) return
+        val inner = raw.trim().removePrefix("\"").removeSuffix("\"").trim()
+        val pin = "dxgi.customVendorId = 8086"
+        envVars.put("DXVK_CONFIG", if (inner.isEmpty()) pin else "$inner; $pin")
+        Timber.i("HostGraphicsEnv: pinned DXGI vendor to Intel 8086")
     }
 
     @JvmStatic
@@ -57,5 +102,15 @@ object HostGraphicsEnv {
             "WINEDLLOVERRIDES",
             if (existing.isEmpty()) DXVK_DLL_OVERRIDES else "$existing;$DXVK_DLL_OVERRIDES",
         )
+    }
+
+    private fun systemProperty(key: String): String {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            clazz.getMethod("get", String::class.java, String::class.java)
+                .invoke(null, key, "") as? String ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
     }
 }
