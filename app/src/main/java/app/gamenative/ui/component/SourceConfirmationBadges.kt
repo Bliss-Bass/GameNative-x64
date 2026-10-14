@@ -2,31 +2,37 @@ package app.gamenative.ui.component
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.VideogameAsset
+import androidx.compose.material.icons.rounded.WineBar
+import app.gamenative.ui.icons.Steam
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.ui.data.SteamSourceCompatStore
+import app.gamenative.ui.theme.PluviaColors
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.utils.ProtonTier
 import app.gamenative.utils.SteamCompatCategory
 
 /**
- * One pill per confirmation source. GameNative is this app's own reports.
- * Proton, Deck, and SteamOS are only shown for Steam apps.
+ * One icon per confirmation source, in a single row across the card.
+ * GameNative is this app's own reports. Proton, Deck, and SteamOS are only shown for Steam apps.
+ * The disc color is the rating; the glyph is the source.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SourceConfirmationBadges(
     gameNative: GameCompatibilityStatus?,
@@ -37,66 +43,99 @@ fun SourceConfirmationBadges(
     if (steamAppId <= 0 && (!includeGameNative || gameNative == null)) return
     val external = if (steamAppId > 0) SteamSourceCompatStore.byAppId[steamAppId] else null
     val colors = PluviaTheme.colors
-    FlowRow(
+    Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (includeGameNative) {
-            val (label, color) = gameNativeStyle(gameNative, colors)
-            SourcePill(
-                stringResource(R.string.compat_source_gamenative),
-                stringResource(label),
-                color,
+            val (tint, background) = gameNativeColors(gameNative, colors)
+            SourceMark(
+                icon = Icons.Rounded.SportsEsports,
+                description = markDescription(
+                    R.string.compat_source_gamenative,
+                    gameNativeLabel(gameNative),
+                ),
+                tint = tint,
+                background = background,
             )
         }
         if (steamAppId > 0) {
             val proton = external?.protonTier
             val deck = external?.deck
             val steamOs = external?.steamOs
-            SourcePill(
-                stringResource(R.string.compat_source_proton),
-                stringResource(proton.protonLabel()),
-                proton?.protonColor(colors) ?: colors.compatibilityUnknown,
+            SourceMark(
+                icon = Icons.Rounded.WineBar,
+                description = markDescription(R.string.compat_source_proton, proton.protonLabel()),
+                tint = proton?.protonTint(colors) ?: colors.compatibilityUnknown,
+                background = proton?.protonBackground(colors) ?: colors.compatibilityUnknownBackground,
             )
-            SourcePill(
-                stringResource(R.string.compat_source_deck),
-                stringResource(deck?.steamLabel() ?: R.string.library_compatibility_unknown),
-                deck?.steamColor(colors) ?: colors.compatibilityUnknown,
+            SourceMark(
+                icon = Icons.Rounded.VideogameAsset,
+                description = markDescription(
+                    R.string.compat_source_deck,
+                    deck?.steamLabel() ?: R.string.library_compatibility_unknown,
+                ),
+                tint = deck?.steamTint(colors) ?: colors.compatibilityUnknown,
+                background = deck?.steamBackground(colors) ?: colors.compatibilityUnknownBackground,
             )
-            SourcePill(
-                stringResource(R.string.compat_source_steamos),
-                stringResource(steamOs?.steamLabel() ?: R.string.library_compatibility_unknown),
-                steamOs?.steamColor(colors) ?: colors.compatibilityUnknown,
+            SourceMark(
+                icon = Icons.Filled.Steam,
+                description = markDescription(
+                    R.string.compat_source_steamos,
+                    steamOs?.steamLabel() ?: R.string.library_compatibility_unknown,
+                ),
+                tint = steamOs?.steamTint(colors) ?: colors.compatibilityUnknown,
+                background = steamOs?.steamBackground(colors) ?: colors.compatibilityUnknownBackground,
             )
         }
     }
 }
 
 @Composable
-private fun SourcePill(source: String, status: String, color: Color) {
-    Text(
-        text = "$source · $status",
+private fun markDescription(source: Int, status: Int): String =
+    "${stringResource(source)} ${stringResource(status)}"
+
+@Composable
+private fun SourceMark(
+    icon: ImageVector,
+    description: String,
+    tint: Color,
+    background: Color,
+) {
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(color.copy(alpha = 0.22f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-    )
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = tint,
+            modifier = Modifier.size(14.dp),
+        )
+    }
 }
 
-private fun gameNativeStyle(
-    status: GameCompatibilityStatus?,
-    colors: app.gamenative.ui.theme.PluviaColors,
-): Pair<Int, Color> = when (status) {
+private fun gameNativeLabel(status: GameCompatibilityStatus?): Int = when (status) {
     GameCompatibilityStatus.COMPATIBLE,
     GameCompatibilityStatus.GPU_COMPATIBLE,
-    -> R.string.library_compatible to colors.compatibilityGood
-    GameCompatibilityStatus.NOT_COMPATIBLE -> R.string.library_not_compatible to colors.compatibilityBad
-    else -> R.string.library_compatibility_unknown to colors.compatibilityUnknown
+    -> R.string.library_compatible
+    GameCompatibilityStatus.NOT_COMPATIBLE -> R.string.library_not_compatible
+    else -> R.string.library_compatibility_unknown
+}
+
+private fun gameNativeColors(
+    status: GameCompatibilityStatus?,
+    colors: PluviaColors,
+): Pair<Color, Color> = when (status) {
+    GameCompatibilityStatus.COMPATIBLE,
+    GameCompatibilityStatus.GPU_COMPATIBLE,
+    -> colors.compatibilityGood to colors.compatibilityGoodBackground
+    GameCompatibilityStatus.NOT_COMPATIBLE -> colors.compatibilityBad to colors.compatibilityBadBackground
+    else -> colors.compatibilityUnknown to colors.compatibilityUnknownBackground
 }
 
 private fun ProtonTier?.protonLabel(): Int = when (this) {
@@ -109,11 +148,18 @@ private fun ProtonTier?.protonLabel(): Int = when (this) {
     ProtonTier.UNKNOWN, null -> R.string.library_compatibility_unknown
 }
 
-private fun ProtonTier.protonColor(colors: app.gamenative.ui.theme.PluviaColors): Color = when (this) {
+private fun ProtonTier.protonTint(colors: PluviaColors): Color = when (this) {
     ProtonTier.PLATINUM, ProtonTier.GOLD -> colors.compatibilityGood
     ProtonTier.SILVER, ProtonTier.BRONZE -> colors.compatibilityPartial
     ProtonTier.BORKED -> colors.compatibilityBad
     ProtonTier.PENDING, ProtonTier.UNKNOWN -> colors.compatibilityUnknown
+}
+
+private fun ProtonTier.protonBackground(colors: PluviaColors): Color = when (this) {
+    ProtonTier.PLATINUM, ProtonTier.GOLD -> colors.compatibilityGoodBackground
+    ProtonTier.SILVER, ProtonTier.BRONZE -> colors.compatibilityPartialBackground
+    ProtonTier.BORKED -> colors.compatibilityBadBackground
+    ProtonTier.PENDING, ProtonTier.UNKNOWN -> colors.compatibilityUnknownBackground
 }
 
 private fun SteamCompatCategory.steamLabel(): Int = when (this) {
@@ -123,9 +169,16 @@ private fun SteamCompatCategory.steamLabel(): Int = when (this) {
     SteamCompatCategory.UNKNOWN -> R.string.library_compatibility_unknown
 }
 
-private fun SteamCompatCategory.steamColor(colors: app.gamenative.ui.theme.PluviaColors): Color = when (this) {
+private fun SteamCompatCategory.steamTint(colors: PluviaColors): Color = when (this) {
     SteamCompatCategory.VERIFIED -> colors.compatibilityGood
     SteamCompatCategory.PLAYABLE -> colors.compatibilityPartial
     SteamCompatCategory.UNSUPPORTED -> colors.compatibilityBad
     SteamCompatCategory.UNKNOWN -> colors.compatibilityUnknown
+}
+
+private fun SteamCompatCategory.steamBackground(colors: PluviaColors): Color = when (this) {
+    SteamCompatCategory.VERIFIED -> colors.compatibilityGoodBackground
+    SteamCompatCategory.PLAYABLE -> colors.compatibilityPartialBackground
+    SteamCompatCategory.UNSUPPORTED -> colors.compatibilityBadBackground
+    SteamCompatCategory.UNKNOWN -> colors.compatibilityUnknownBackground
 }
