@@ -15,7 +15,7 @@ import java.nio.file.Files
 object HostBionicLibs {
     const val PULSE_ASSET_ARM = "pulseaudio-gamenative-20260612.tzst"
     const val PULSE_ASSET_X86_64 = "pulseaudio-gamenative-x86_64-20260827.tzst"
-    const val BIONIC_LIBS_ASSET = "bionic-libs-x86_64-20260828.tzst"
+    const val BIONIC_LIBS_ASSET = "bionic-libs-x86_64-20261014.tzst"
 
     /**
      * Khronos loader + ICDs for ANV (Intel), RADV (AMD) and lavapipe (software).

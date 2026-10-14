@@ -9,7 +9,7 @@ SRC_DIR="$BUILD_DIR/.src"
 PREFIX="$BUILD_DIR/root-x86_64"
 OUT_LIB="$PREFIX/usr/lib"
 OUT_ETC="$PREFIX/usr/etc"
-ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20260828.tzst"
+ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20261014.tzst"
 
 NDK_ROOT="${NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}}"
 if [[ -z "$NDK_ROOT" ]]; then
@@ -243,6 +243,58 @@ fi
 
 if [[ ! -f "$OUT_LIB/libfreetype.so" ]]; then
     echo "ERROR: libfreetype.so missing after build" >&2
+    exit 1
+fi
+
+# GMP and Nettle generate their assembly with m4, which the toolchain image does not carry.
+ensure_host_m4() {
+  command -v m4 >/dev/null 2>&1 && return 0
+  local tools="$BUILD_DIR/host-tools"
+  if [[ ! -x "$tools/bin/m4" ]]; then
+    cd "$SRC_DIR"
+    [[ -f m4-1.4.19.tar.xz ]] || fetch m4-1.4.19.tar.xz \
+        https://ftp.gnu.org/gnu/m4/m4-1.4.19.tar.xz \
+        https://mirrors.kernel.org/gnu/m4/m4-1.4.19.tar.xz
+    rm -rf m4-1.4.19 && tar xf m4-1.4.19.tar.xz && cd m4-1.4.19
+    env CC=gcc CXX=g++ AR=ar RANLIB=ranlib CFLAGS=-O2 CPPFLAGS= LDFLAGS= \
+        ./configure --prefix="$tools"
+    make -j"$(nproc)" && make install
+  fi
+  export PATH="$tools/bin:$PATH"
+}
+
+# --- GnuTLS (with Nettle and GMP) ---
+# Proton's bcrypt.so dlopens libgnutls.so for every cipher and key operation (AES, RSA,
+# ECDSA) and libgmp.so for DH. Without them BCryptGenerateSymmetricKey fails, and games
+# that decrypt their own data (DOOM 2016's package.cfg) refuse to start.
+if [[ ! -f "$OUT_LIB/libgmp.so" ]]; then
+  ensure_host_m4
+  build_autotools gmp-6.3.0.tar.xz https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static --disable-cxx
+fi
+
+if [[ ! -f "$OUT_LIB/libhogweed.so" ]]; then
+  ensure_host_m4
+  # Nettle picks lib64 on x86_64 unless told otherwise.
+  build_autotools nettle-3.10.1.tar.gz https://ftp.gnu.org/gnu/nettle/nettle-3.10.1.tar.gz \
+    --host="$HOST" --prefix="$PREFIX/usr" --libdir="$PREFIX/usr/lib" \
+    --disable-static --disable-documentation --disable-openssl
+fi
+
+if [[ ! -f "$OUT_LIB/libgnutls.so" ]]; then
+  # PKG_CONFIG_LIBDIR keeps the build host's own p11-kit/idn2/zstd out of the link.
+  build_autotools gnutls-3.8.9.tar.xz https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.9.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --with-included-libtasn1 --with-included-unistring \
+    --without-p11-kit --without-idn --without-zlib --without-brotli --without-zstd \
+    --without-tpm --without-tpm2 --without-leancrypto \
+    --disable-tools --disable-cxx --disable-doc --disable-manpages --disable-tests \
+    --disable-guile --disable-nls --with-default-trust-store-file= \
+    PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
+fi
+
+if [[ ! -f "$OUT_LIB/libgnutls.so" ]]; then
+    echo "ERROR: libgnutls.so missing after build" >&2
     exit 1
 fi
 
