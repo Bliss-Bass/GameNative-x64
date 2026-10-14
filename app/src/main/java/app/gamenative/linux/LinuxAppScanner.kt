@@ -1,6 +1,8 @@
 package app.gamenative.linux
 
 import android.content.Context
+import android.os.Environment
+import android.system.Os
 import java.io.File
 import kotlin.math.abs
 import timber.log.Timber
@@ -11,7 +13,9 @@ import timber.log.Timber
  * Reads the same `.desktop` files a Linux desktop menu is built from, which is what makes
  * "install it with apt and it shows up" work without a package list of our own: anything
  * with a menu entry is an application, and anything without one is a library, a service or
- * a helper the user did not ask to see.
+ * a helper the user did not ask to see. `.AppImage` files dropped in the guest home or in
+ * Android's Download and Documents folders are listed too. FUSE is not available under
+ * PRoot, so those launch with `--appimage-extract-and-run`.
  *
  * Deliberately not a full freedesktop implementation. There is no XDG_DATA_DIRS to honour
  * (the rootfs layout is ours), no locale matching beyond the plain keys, and no support for
@@ -28,6 +32,18 @@ object LinuxAppScanner {
         "usr/local/share/applications",
         "root/.local/share/applications",
     )
+
+    /** Real directories walked for AppImages. Symlinks (the storage shortcuts) are not followed. */
+    private val APPIMAGE_ROOTFS_DIRS = listOf(
+        "root",
+        "opt",
+        "usr/local",
+    )
+
+    private val APPIMAGE_STORAGE_DIRS = listOf("Download", "Documents")
+
+    private const val APPIMAGE_SCAN_DEPTH = 4
+    private const val APPIMAGE_EXTRACT_FLAG = "--appimage-extract-and-run"
 
     /** Icon theme directories, largest first: a scaled-down icon beats a scaled-up one. */
     private val ICON_DIRS = listOf(
@@ -100,6 +116,9 @@ object LinuxAppScanner {
                 if (file.name.startsWith("snap-") || file.name.startsWith("io.snapcraft.")) {
                     continue
                 }
+                // Written below for the panel launcher. Scanning them again would list each
+                // AppImage twice.
+                if (file.name.startsWith("gn-appimage-")) continue
                 val app = runCatching { parse(file.readText(), rootfs) }
                     .onFailure { Timber.w(it, "[LinuxAppScanner]: could not read %s", file.name) }
                             .getOrNull() ?: continue
@@ -111,9 +130,93 @@ object LinuxAppScanner {
             }
         }
 
+        scanAppImages(context, rootfs, found)
+
         Timber.i("[LinuxAppScanner]: found %d applications", found.size)
         return found.values.sortedBy { it.name.lowercase() }
     }
+
+    /**
+     * AppImages have no menu entry until they are run. FUSE cannot mount them under PRoot,
+     * so the command asks the runtime to unpack and execute instead.
+     */
+    private fun scanAppImages(context: Context, rootfs: File, found: MutableMap<String, LinuxApp>) {
+        for (dir in APPIMAGE_ROOTFS_DIRS) {
+            eachAppImage(File(rootfs, dir), 0) { file ->
+                val guestPath = "/" + file.relativeTo(rootfs).invariantSeparatorsPath
+                addAppImage(rootfs, found, guestPath, file.name)
+            }
+        }
+        val storageGranted = runCatching { LinuxStorage.isGranted(context) }.getOrDefault(false)
+        if (!storageGranted) return
+        val primary = Environment.getExternalStorageDirectory()
+        for (folder in APPIMAGE_STORAGE_DIRS) {
+            eachAppImage(File(primary, folder), 0) { file ->
+                val relative = file.relativeTo(File(primary, folder)).invariantSeparatorsPath
+                val guestPath = "${LinuxStorage.GUEST_PRIMARY}/$folder/$relative"
+                addAppImage(rootfs, found, guestPath, file.name)
+            }
+        }
+    }
+
+    private fun addAppImage(
+        rootfs: File,
+        found: MutableMap<String, LinuxApp>,
+        guestPath: String,
+        fileName: String,
+    ) {
+        val desktopName = "gn-appimage-${abs(guestPath.hashCode()).toString(16)}.desktop"
+        val desktopGuest = "/root/.local/share/applications/$desktopName"
+        val exec = "${escapeGuestWord(guestPath)} $APPIMAGE_EXTRACT_FLAG"
+        val name = fileName.substringBeforeLast('.').ifBlank { fileName }
+        writeAppImageDesktop(rootfs, desktopName, name, guestPath)
+        found[desktopName] = LinuxApp(
+            id = idFor(guestPath),
+            entryId = desktopName.removeSuffix(".desktop"),
+            desktopFile = desktopGuest,
+            name = name,
+            exec = exec,
+            comment = "AppImage",
+            categories = listOf("AppImage"),
+        )
+    }
+
+    private fun writeAppImageDesktop(rootfs: File, desktopName: String, name: String, guestPath: String) {
+        val dir = File(rootfs, "root/.local/share/applications").apply { mkdirs() }
+        val text = """
+            [Desktop Entry]
+            Type=Application
+            Name=$name
+            Exec=${escapeDesktopExec(guestPath)} $APPIMAGE_EXTRACT_FLAG
+            Comment=AppImage
+            Categories=AppImage;
+        """.trimIndent() + "\n"
+        val file = File(dir, desktopName)
+        if (runCatching { file.readText() }.getOrNull() == text) return
+        file.writeText(text)
+    }
+
+    /** ProcessHelper treats a backslash-space as one word. */
+    private fun escapeGuestWord(path: String): String = path.replace(" ", "\\ ")
+
+    private fun escapeDesktopExec(path: String): String =
+        "\"" + path.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    private fun eachAppImage(dir: File, depth: Int, visitor: (File) -> Unit) {
+        if (depth > APPIMAGE_SCAN_DEPTH || !dir.isDirectory || isSymlink(dir)) return
+        val children = dir.listFiles() ?: return
+        for (child in children) {
+            if (isSymlink(child)) continue
+            if (child.isDirectory) {
+                eachAppImage(child, depth + 1, visitor)
+            } else if (child.isFile && child.name.endsWith(".appimage", ignoreCase = true)) {
+                visitor(child)
+            }
+        }
+    }
+
+    private fun isSymlink(file: File): Boolean =
+        runCatching { Os.readlink(file.absolutePath) }.getOrNull() != null
 
     fun find(context: Context, id: Int): LinuxApp? = scan(context).firstOrNull { it.id == id }
 

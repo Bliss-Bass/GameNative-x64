@@ -46,6 +46,31 @@ class LinuxAppScannerTest {
     }
 
     @Test
+    fun `lists an AppImage and launches it without FUSE`() {
+        File(rootfs, "root/Tools/Sample App.AppImage").apply {
+            parentFile?.mkdirs()
+            writeText("elf")
+        }
+
+        val app = LinuxAppScanner.scan(context).single()
+
+        assertEquals("Sample App", app.name)
+        assertEquals("/root/Tools/Sample\\ App.AppImage --appimage-extract-and-run", app.exec)
+        assertEquals("AppImage", app.comment)
+        assertTrue(File(rootfs, "root/.local/share/applications/${app.entryId}.desktop").isFile)
+    }
+
+    @Test
+    fun `does not follow home storage symlinks when looking for AppImages`() {
+        val outside = File(rootfs, "outside").apply { mkdirs() }
+        File(outside, "Secret.AppImage").writeText("elf")
+        File(rootfs, "root").mkdirs()
+        android.system.Os.symlink(outside.absolutePath, File(rootfs, "root/Downloads").absolutePath)
+
+        assertTrue(LinuxAppScanner.scan(context).isEmpty())
+    }
+
+    @Test
     fun `reports an application with its command and icon`() {
         icon("usr/share/icons/hicolor/128x128/apps/gedit.png")
         desktopEntry(
