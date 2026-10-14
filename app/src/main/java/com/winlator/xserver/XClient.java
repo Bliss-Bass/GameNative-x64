@@ -46,6 +46,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
             xServer.pixmapManager.addOnResourceLifecycleListener(this);
             xServer.graphicsContextManager.addOnResourceLifecycleListener(this);
             xServer.cursorManager.addOnResourceLifecycleListener(this);
+            xServer.fontManager.addOnResourceLifecycleListener(this);
         }
     }
 
@@ -103,6 +104,11 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
                 else if (resource instanceof Cursor) {
                     xServer.cursorManager.freeCursor(resource.id);
                 }
+                else if (resource instanceof Font) {
+                    // Fonts are keyed by id server-wide; one left behind makes the next client
+                    // handed this id range fail its first OpenFont with BadIDChoice and exit.
+                    xServer.fontManager.freeFont(resource.id);
+                }
             }
 
             while (!eventListeners.isEmpty()) {
@@ -114,6 +120,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
             xServer.pixmapManager.removeOnResourceLifecycleListener(this);
             xServer.graphicsContextManager.removeOnResourceLifecycleListener(this);
             xServer.cursorManager.removeOnResourceLifecycleListener(this);
+            xServer.fontManager.removeOnResourceLifecycleListener(this);
             xServer.resourceIDs.free(resourceIDBase);
         }
 
