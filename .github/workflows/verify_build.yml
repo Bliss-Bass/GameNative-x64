@@ -50,4 +50,6 @@ jobs:
       run: ./gradlew --no-configuration-cache :app:assembleModernX64Debug
 
     - name: Run Unit Tests
+      # A healthy run takes about 6 minutes; fail fast if a test hangs.
+      timeout-minutes: 30
       run: ./gradlew --no-configuration-cache :app:testModernX64DebugUnitTest
