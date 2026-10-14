@@ -5,9 +5,8 @@ import java.io.File
 /**
  * GPU vendor of the host's DRM render node.
  *
- * Used to decide which Vulkan ICD payload to provision for the x86_64 guest. It is
- * deliberately not used to pick a driver at run time: each Mesa ICD probes DRM itself,
- * so the Khronos loader already resolves that when several manifests are staged.
+ * Used to decide which Vulkan ICD payload to provision for the x86_64 guest, and which
+ * staged manifests the guest loader sees ([vulkanIcdsFrom]).
  */
 enum class HostGpu {
     INTEL,
@@ -16,6 +15,23 @@ enum class HostGpu {
     VIRTIO,
     UNKNOWN,
     ;
+
+    /**
+     * The staged ICD manifests the guest should see on this GPU.
+     *
+     * Lavapipe always enumerates a device, so leaving it beside the hardware driver hands
+     * the guest a second, CPU-backed GPU. DXVK skips it, but native Vulkan games such as
+     * DOOM (2016) run their own device checks and quit on it. Every manifest is kept when
+     * the vendor is unknown or its driver is missing, so lavapipe remains the fallback.
+     */
+    fun vulkanIcdsFrom(manifests: List<File>): List<File> {
+        val prefix = when (this) {
+            INTEL -> "intel_icd"
+            AMD -> "radeon_icd"
+            else -> return manifests
+        }
+        return manifests.filter { it.name.startsWith(prefix) }.ifEmpty { manifests }
+    }
 
     companion object {
         private const val DRM_CLASS_DIR = "/sys/class/drm"
@@ -58,6 +74,14 @@ enum class HostGpu {
             PCI_AMD, PCI_AMD_ATI -> AMD
             PCI_NVIDIA -> NVIDIA
             PCI_VIRTIO, PCI_VIRTIO_REDHAT -> VIRTIO
+            else -> UNKNOWN
+        }
+
+        /** Maps `ro.hardware.vulkan`, which some builds publish when DRM sysfs is unreadable. */
+        @JvmStatic
+        fun fromVulkanHardware(name: String): HostGpu = when (name.trim().lowercase()) {
+            "intel" -> INTEL
+            "radeon", "amd", "amdgpu" -> AMD
             else -> UNKNOWN
         }
 

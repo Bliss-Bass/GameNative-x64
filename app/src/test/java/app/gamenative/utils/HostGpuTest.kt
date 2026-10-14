@@ -52,4 +52,36 @@ class HostGpuTest {
     fun unknownWhenDrmClassDirAbsent() {
         assertEquals(HostGpu.UNKNOWN, HostGpu.detectIn(File(temp.root, "missing")))
     }
+
+    private val icds = listOf("intel_icd.x86_64.json", "lvp_icd.x86_64.json", "radeon_icd.x86_64.json")
+        .map { File("/icd.d", it) }
+
+    @Test
+    fun intelSeesOnlyItsOwnIcd() {
+        assertEquals(listOf(icds[0]), HostGpu.INTEL.vulkanIcdsFrom(icds))
+    }
+
+    @Test
+    fun amdSeesOnlyRadv() {
+        assertEquals(listOf(icds[2]), HostGpu.AMD.vulkanIcdsFrom(icds))
+    }
+
+    @Test
+    fun unknownVendorKeepsEveryIcd() {
+        assertEquals(icds, HostGpu.UNKNOWN.vulkanIcdsFrom(icds))
+        assertEquals(icds, HostGpu.NVIDIA.vulkanIcdsFrom(icds))
+    }
+
+    @Test
+    fun missingHardwareIcdFallsBackToEveryIcd() {
+        val softwareOnly = listOf(icds[1])
+        assertEquals(softwareOnly, HostGpu.INTEL.vulkanIcdsFrom(softwareOnly))
+    }
+
+    @Test
+    fun mapsVulkanHardwareProperty() {
+        assertEquals(HostGpu.INTEL, HostGpu.fromVulkanHardware("intel"))
+        assertEquals(HostGpu.AMD, HostGpu.fromVulkanHardware("radeon"))
+        assertEquals(HostGpu.UNKNOWN, HostGpu.fromVulkanHardware(""))
+    }
 }

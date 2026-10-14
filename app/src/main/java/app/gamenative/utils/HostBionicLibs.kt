@@ -199,7 +199,9 @@ object HostBionicLibs {
 
         overrideGuestShmemLib(context)
         pointIcdsAtStagedLibs(context, manifests)
-        val value = manifests.joinToString(":") { it.absolutePath }
+        val gpu = HostGpu.current().takeIf { it != HostGpu.UNKNOWN }
+            ?: HostGpu.fromVulkanHardware(systemProperty("ro.hardware.vulkan"))
+        val value = gpu.vulkanIcdsFrom(manifests).joinToString(":") { it.absolutePath }
         envVars.put("VK_ICD_FILENAMES", value)
         envVars.put("VK_DRIVER_FILES", value)
 
