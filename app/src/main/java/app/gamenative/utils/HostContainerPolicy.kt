@@ -18,6 +18,8 @@ object HostContainerPolicy {
     const val PROTON_X86_64 = "proton-10.0-4-x86_64-1"
     const val PROTON_ARM64EC = "proton-10.0-arm64ec-2"
     const val GRAPHICS_SYSTEM = "System"
+    const val AUDIO_ALSA = "alsa"
+    const val AUDIO_PULSE = "pulseaudio"
 
     private val ARM64EC_TO_X86_64 = mapOf(
         // Proton 9 x86_64 aborts in ntdll alloc_pages_vprot on current Android 16
@@ -84,6 +86,17 @@ object HostContainerPolicy {
     }
 
     /**
+     * x86_64 Wine has no working ALSA backend (the bundled libasound is ARM only), so
+     * games see no audio device and XAudio2 callers such as Bink can crash. PulseAudio
+     * ships x86_64 libraries in the APK.
+     */
+    fun mapAudioDriverForHost(audioDriver: String): String =
+        mapAudioDriverForHost(audioDriver, HostCpu.current())
+
+    fun mapAudioDriverForHost(audioDriver: String, host: HostCpu): String =
+        if (host.isX86_64 && audioDriver.equals(AUDIO_ALSA, ignoreCase = true)) AUDIO_PULSE else audioDriver
+
+    /**
      * Rewrites ARM-first fields in a community / best-config JSON before it is
      * validated, applied, or used to enqueue Proton / FEX / Turnip downloads.
      */
@@ -110,6 +123,13 @@ object HostContainerPolicy {
                 kvs.put("version", GRAPHICS_SYSTEM)
                 json.put("graphicsDriverConfig", kvs.toString())
             }
+        }
+
+        val audio = json.optString("audioDriver", "")
+        val mappedAudio = mapAudioDriverForHost(audio)
+        if (audio.isNotEmpty() && mappedAudio != audio) {
+            Timber.i("HostContainerPolicy: config audioDriver %s -> %s", audio, mappedAudio)
+            json.put("audioDriver", mappedAudio)
         }
     }
 
@@ -140,6 +160,13 @@ object HostContainerPolicy {
             val kvs = KeyValueSet(container.graphicsDriverConfig)
             kvs.put("version", GRAPHICS_SYSTEM)
             container.graphicsDriverConfig = kvs.toString()
+            changed = true
+        }
+
+        val mappedAudio = mapAudioDriverForHost(container.audioDriver)
+        if (mappedAudio != container.audioDriver) {
+            Timber.i("HostContainerPolicy: audioDriver %s -> %s (x86_64 host)", container.audioDriver, mappedAudio)
+            container.audioDriver = mappedAudio
             changed = true
         }
 

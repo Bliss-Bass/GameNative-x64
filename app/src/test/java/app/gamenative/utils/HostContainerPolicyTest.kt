@@ -108,6 +108,37 @@ class HostContainerPolicyTest {
     }
 
     @Test
+    fun mapAudioDriverForHost_rewritesAlsaOnlyOnX86Host() {
+        assertEquals("pulseaudio", HostContainerPolicy.mapAudioDriverForHost("alsa", HostCpu.X86_64))
+        assertEquals("alsa", HostContainerPolicy.mapAudioDriverForHost("alsa", HostCpu.ARM64))
+        assertEquals("disabled", HostContainerPolicy.mapAudioDriverForHost("disabled", HostCpu.X86_64))
+    }
+
+    @Test
+    fun adaptContainerForHost_rewritesAlsaAudio() {
+        ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
+        val context: Context = RuntimeEnvironment.getApplication()
+        val container = Container("STEAM_379720").apply {
+            wineVersion = HostContainerPolicy.PROTON_X86_64
+            graphicsDriver = "System"
+            audioDriver = "alsa"
+        }
+
+        assertTrue(HostContainerPolicy.adaptContainerForHost(context, container))
+        assertEquals("pulseaudio", container.audioDriver)
+    }
+
+    @Test
+    fun adaptBestConfigJson_rewritesAlsaAudio() {
+        ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
+        val json = JSONObject().put("audioDriver", "alsa")
+
+        HostContainerPolicy.adaptBestConfigJson(json)
+
+        assertEquals("pulseaudio", json.getString("audioDriver"))
+    }
+
+    @Test
     fun adaptContainerForHost_noOpWhenAlreadyX86_64() {
         ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
         val context: Context = RuntimeEnvironment.getApplication()
