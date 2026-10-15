@@ -77,6 +77,9 @@ public class PresentExtension implements Extension {
     // its next frame into the buffer on screen, which shows up as black or half-drawn frames.
     private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> heldFlips =
             new java.util.concurrent.ConcurrentHashMap<>();
+    // The container's "quality" frame mode. Off, the client can render into a buffer the
+    // compositor is still sampling.
+    private volatile boolean holdFlips = true;
 
     private volatile android.view.Choreographer choreographer = null;
     private volatile boolean choreographerChecked = false;
@@ -221,6 +224,10 @@ public class PresentExtension implements Extension {
             }
             cpuQueue.offer(new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
         }
+    }
+
+    public void setHoldFlips(boolean hold) {
+        holdFlips = hold;
     }
 
     private void releaseIdle(PendingIdle p, int targetFps, VulkanRenderer renderer) {
@@ -404,7 +411,7 @@ public class PresentExtension implements Extension {
                     else asr.onUpdateWindowContent(window);
                 }
                 PendingIdle release = new PendingIdle(window, pixmap, serial, idleFence, 0, 0);
-                if (((com.winlator.renderer.GPUImage) pixmap.drawable.getTexture()).hasDmaBufFd()) {
+                if (holdFlips && ((com.winlator.renderer.GPUImage) pixmap.drawable.getTexture()).hasDmaBufFd()) {
                     replacedFlip = heldFlips.put(window.id, release);
                     heldNow = true;
                 } else {

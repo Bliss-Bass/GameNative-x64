@@ -128,6 +128,8 @@ object ContainerUtils {
             dxwrapperConfig = PrefManager.dxWrapperConfig,
             audioDriver = PrefManager.audioDriver,
             pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
+            framePresentMode = PrefManager.framePresentMode,
+            extraDebugLogging = PrefManager.extraDebugLogging,
             wincomponents = PrefManager.winComponents,
             drives = PrefManager.drives,
             execArgs = PrefManager.execArgs,
@@ -196,6 +198,8 @@ object ContainerUtils {
         PrefManager.dxWrapperConfig = containerData.dxwrapperConfig
         PrefManager.audioDriver = containerData.audioDriver
         PrefManager.pulseaudioLowLatency = containerData.pulseaudioLowLatency
+        PrefManager.framePresentMode = containerData.framePresentMode
+        PrefManager.extraDebugLogging = containerData.extraDebugLogging
         PrefManager.winComponents = containerData.wincomponents
         PrefManager.drives = containerData.drives
         PrefManager.execArgs = containerData.execArgs
@@ -319,6 +323,8 @@ object ContainerUtils {
             dxwrapperConfig = container.dxWrapperConfig,
             audioDriver = container.audioDriver,
             pulseaudioLowLatency = container.getPulseaudioLowLatency(),
+            framePresentMode = container.getFramePresentMode(),
+            extraDebugLogging = container.getExtraDebugLogging(),
             wincomponents = container.winComponents,
             drives = container.drives,
             execArgs = container.execArgs,
@@ -515,6 +521,8 @@ object ContainerUtils {
         container.dxWrapperConfig = containerData.dxwrapperConfig
         container.audioDriver = containerData.audioDriver
         container.setPulseaudioLowLatency(containerData.pulseaudioLowLatency)
+        container.setFramePresentMode(containerData.framePresentMode)
+        container.setExtraDebugLogging(containerData.extraDebugLogging)
         container.winComponents = containerData.wincomponents
         container.drives = containerData.drives
         container.execArgs = containerData.execArgs
@@ -918,6 +926,8 @@ object ContainerUtils {
                 dxwrapperConfig = PrefManager.dxWrapperConfig,
                 audioDriver = PrefManager.audioDriver,
                 pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
+                framePresentMode = PrefManager.framePresentMode,
+                extraDebugLogging = PrefManager.extraDebugLogging,
                 wincomponents = PrefManager.winComponents,
                 drives = drives,
                 execArgs = PrefManager.execArgs,

@@ -150,6 +150,7 @@ public:
     bool supportsDmaBufImport() const { return dmaBufImportSupported; }
     // Returns once no submitted or in-progress frame can still read a texture replaced earlier.
     void waitForSampling();
+    void setWaitForDmaBufWriter(bool wait) { waitForDmaBufWriter.store(wait); }
     void updateCursorImage(void* pixels, short w, short h, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys,
@@ -372,6 +373,7 @@ private:
     uint32_t                 currentFrame = 0;
     // Draw lists are numbered; each slot remembers the one its last submit sampled.
     uint64_t                 snapshotSeq = 0;
+    std::atomic<bool>        waitForDmaBufWriter{true};
     uint64_t                 slotSnapshot[MAX_FRAMES_IN_FLIGHT] = {};
     void retireWinTex(WinTex wt);
     uint32_t                 failedFrames = 0;

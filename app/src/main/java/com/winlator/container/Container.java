@@ -41,6 +41,11 @@ public class Container {
     public static final String DEFAULT_SCREEN_SIZE_4_3 = "1280x960";
     public static final String DEFAULT_GRAPHICS_DRIVER = DefaultVersion.DEFAULT_GRAPHICS_DRIVER;
     public static final String DEFAULT_AUDIO_DRIVER = "pulseaudio";
+    // "quality" waits so Intel Xe never shows a half-drawn or freed buffer. "performance" hands
+    // flipped frames straight back; Prodeus hung the Xe GPU at level load with it.
+    public static final String FRAME_PRESENT_PERFORMANCE = "performance";
+    public static final String FRAME_PRESENT_QUALITY = "quality";
+    public static final String DEFAULT_FRAME_PRESENT_MODE = FRAME_PRESENT_QUALITY;
     public static final String DEFAULT_EMULATOR = "FEXCore";
     public static final String DEFAULT_DXWRAPPER = "dxvk";
     public static final String DEFAULT_DISPLAY_RENDERER = "vulkan";
@@ -91,6 +96,8 @@ public class Container {
     private String wincomponents = DEFAULT_WINCOMPONENTS;
     private String audioDriver = DEFAULT_AUDIO_DRIVER;
     private boolean pulseaudioLowLatency = false;
+    private String framePresentMode = DEFAULT_FRAME_PRESENT_MODE;
+    private boolean extraDebugLogging = false;
     private String drives = DEFAULT_DRIVES;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
@@ -315,6 +322,22 @@ public class Container {
 
     public void setPulseaudioLowLatency(boolean pulseaudioLowLatency) {
         this.pulseaudioLowLatency = pulseaudioLowLatency;
+    }
+
+    public String getFramePresentMode() {
+        return framePresentMode;
+    }
+
+    public void setFramePresentMode(String framePresentMode) {
+        this.framePresentMode = framePresentMode;
+    }
+
+    public boolean getExtraDebugLogging() {
+        return extraDebugLogging;
+    }
+
+    public void setExtraDebugLogging(boolean extraDebugLogging) {
+        this.extraDebugLogging = extraDebugLogging;
     }
 
     public String getWinComponents() {
@@ -742,6 +765,8 @@ public class Container {
             if (!dxwrapperConfig.isEmpty()) data.put("dxwrapperConfig", dxwrapperConfig);
             data.put("audioDriver", audioDriver);
             data.put("pulseaudioLowLatency", pulseaudioLowLatency);
+            data.put("framePresentMode", framePresentMode);
+            data.put("extraDebugLogging", extraDebugLogging);
             data.put("wincomponents", wincomponents);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
@@ -967,6 +992,12 @@ public class Container {
                     break;
                 case "pulseaudioLowLatency" :
                     setPulseaudioLowLatency(data.getBoolean(key));
+                    break;
+                case "framePresentMode" :
+                    setFramePresentMode(data.getString(key));
+                    break;
+                case "extraDebugLogging" :
+                    setExtraDebugLogging(data.getBoolean(key));
                     break;
                 case "desktopTheme" :
                     setDesktopTheme(data.getString(key));

@@ -423,6 +423,32 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                 state.config.value = config.copy(useDRI3 = it)
             },
         )
+        if (config.useDRI3 && app.gamenative.utils.HostContainerPolicy.isX86Host()) {
+            val presentModes = listOf(Container.FRAME_PRESENT_PERFORMANCE, Container.FRAME_PRESENT_QUALITY)
+            SettingsListDropdown(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.frame_present_mode)) },
+                subtitle = {
+                    Text(
+                        text = stringResource(
+                            if (config.framePresentMode == Container.FRAME_PRESENT_QUALITY) {
+                                R.string.frame_present_mode_quality_description
+                            } else {
+                                R.string.frame_present_mode_performance_description
+                            },
+                        ),
+                    )
+                },
+                value = presentModes.indexOf(config.framePresentMode).coerceAtLeast(0),
+                items = listOf(
+                    stringResource(R.string.frame_present_mode_performance),
+                    stringResource(R.string.frame_present_mode_quality),
+                ),
+                onItemSelected = {
+                    state.config.value = config.copy(framePresentMode = presentModes[it])
+                },
+            )
+        }
     }
 }
 @Composable

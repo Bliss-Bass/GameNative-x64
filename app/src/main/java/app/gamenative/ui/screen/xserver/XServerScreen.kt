@@ -132,6 +132,7 @@ import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.DebugReportUtils
 import app.gamenative.utils.ExecutableSelectionUtils
 import app.gamenative.utils.HostBionicLibs
+import app.gamenative.utils.HostContainerPolicy
 import app.gamenative.utils.HostCpu
 import app.gamenative.utils.HostGraphicsEnv
 import app.gamenative.utils.HostDisplayEnv
@@ -625,6 +626,7 @@ fun XServerScreen(
     var detectedMaxRefreshRateHz by remember { mutableIntStateOf(detectMaxRefreshRateHz(context, null)) }
     var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
     var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
+    var framePresentMode by rememberSaveable(container.id) { mutableStateOf(container.framePresentMode) }
 
     val gyroOverlaySuppressed = showQuickMenu || keepPausedForEditor || showElementEditor ||
         showPhysicalControllerDialog || showTouchGestureDialog || showShooterModeDialog ||
@@ -714,6 +716,21 @@ fun XServerScreen(
             is VulkanRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
             is GLRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
         }
+    }
+
+    fun applyFramePresentModeToEngines(mode: String) {
+        val quality = mode == Container.FRAME_PRESENT_QUALITY
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setHoldFlips(quality)
+        (xServerView?.renderer as? VulkanRenderer)?.setWaitForDmaBufWriter(quality)
+    }
+
+    fun applyFramePresentMode(mode: String) {
+        framePresentMode = mode
+        applyFramePresentModeToEngines(mode)
+        container.framePresentMode = mode
+        container.saveData()
     }
 
     fun applyFpsLimiterToEngines(limit: Int) {
@@ -2017,6 +2034,7 @@ fun XServerScreen(
                     }
                     renderer.setVkPresentMode(vkMode)
                 }
+                applyFramePresentModeToEngines(framePresentMode)
                 if (renderer is ASurfaceRenderer) {
                     renderer.setSfCompatMode(container.sfCompatMode)
                 }
@@ -2911,6 +2929,8 @@ fun XServerScreen(
                 onHudConfigChanged = ::applyPerformanceHudConfig,
                 onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
                 onFpsLimiterChanged = ::applyFpsLimiterTarget,
+                framePresentMode = framePresentMode.takeIf { container.isUseDRI3 && HostContainerPolicy.isX86Host() },
+                onFramePresentModeChanged = ::applyFramePresentMode,
             ),
             hasPhysicalController = hasPhysicalController,
             isTouchscreenModeActive = isTouchscreenModeActive,
@@ -3926,7 +3946,7 @@ private fun setupXEnvironment(
     // capture debug output to file if either Wine or Box86/64 logging is enabled
     var logFile: File? = null
     val captureLogs = debugRun || enableWineDebug || enableBox86Logs
-    val forwardGuestLogs = BlissPortDebug.isActive(diagnostics) || diagnostics || captureLogs
+    val forwardGuestLogs = BlissPortDebug.isActive(container.extraDebugLogging, diagnostics) || diagnostics || captureLogs
     if (captureLogs) {
         val wineLogDir = File(context.getExternalFilesDir(null), "wine_logs")
         wineLogDir.mkdirs()
@@ -4077,7 +4097,7 @@ private fun setupXEnvironment(
             }
         }
 
-        BlissPortDebug.applyLaunchEnv(envVars, diagnostics)
+        BlissPortDebug.applyLaunchEnv(envVars, container.extraDebugLogging, diagnostics)
 
         val ffpGameDir = runCatching {
             Container.drivesIterator(container.drives).asSequence()

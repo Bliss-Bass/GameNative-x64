@@ -170,6 +170,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetPointerPos(long handle, short x, short y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
     private native void nativeWaitForSampling(long handle);
+    private native void nativeSetWaitForDmaBufWriter(long handle, boolean wait);
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
         short width, short height, short hotX, short hotY);
     private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys,
@@ -244,6 +245,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
+                    nativeSetWaitForDmaBufWriter(nativeHandle, pendingWaitForDmaBufWriter);
                     nativeSetClearColor(nativeHandle, pendingClearR, pendingClearG, pendingClearB, pendingClearA);
                     nativeSetEffect(nativeHandle, pendingEffectId, pendingSharpness,
                         pendingEffectMask, pendingBrightness, pendingContrast, pendingGamma);
@@ -935,6 +937,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
+    /** Wait for the client's GPU to finish a dma-buf frame before taking it; costs frame rate. */
+    public void setWaitForDmaBufWriter(boolean wait) {
+        pendingWaitForDmaBufWriter = wait;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetWaitForDmaBufWriter(nativeHandle, wait); }
+    }
+
     /**
      * Framebuffer clear color behind window textures. Linux freeform uses opaque white so
      * undersized GTK Present buffers letterbox as white gutters instead of black strips.
@@ -1051,6 +1059,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
+    private boolean pendingWaitForDmaBufWriter = true;
     private float   pendingClearR         = 0f;
     private float   pendingClearG         = 0f;
     private float   pendingClearB         = 0f;

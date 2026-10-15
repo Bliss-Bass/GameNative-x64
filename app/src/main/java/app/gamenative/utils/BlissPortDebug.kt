@@ -5,8 +5,9 @@ import com.winlator.core.envvars.EnvVars
 import timber.log.Timber
 
 /**
- * Extra launch-time diagnostics for ax86 [BuildConfig.BLISS_PORT_DEBUG] builds.
- * Does not run on upstream GameNative flavors or when Diagnostic Run is active.
+ * Extra launch-time diagnostics for ax86 [BuildConfig.BLISS_PORT_DEBUG] builds, behind the
+ * container's "Extra debug logging" switch. Does not run on upstream GameNative flavors or when
+ * Diagnostic Run is active.
  */
 object BlissPortDebug {
     // Per-call channels (+vulkan, +d3d9, +dxgi) trace every API call; every guest stdout line is
@@ -16,12 +17,12 @@ object BlissPortDebug {
     private const val WINE_DEBUG_PROP = "debug.gamenative.winedebug"
 
     @JvmStatic
-    fun isActive(diagnostics: Boolean): Boolean =
-        BuildConfig.BLISS_PORT_DEBUG && !diagnostics
+    fun isActive(enabled: Boolean, diagnostics: Boolean): Boolean =
+        BuildConfig.BLISS_PORT_DEBUG && enabled && !diagnostics
 
     @JvmStatic
-    fun applyLaunchEnv(envVars: EnvVars, diagnostics: Boolean) {
-        if (!isActive(diagnostics)) return
+    fun applyLaunchEnv(envVars: EnvVars, enabled: Boolean, diagnostics: Boolean) {
+        if (!isActive(enabled, diagnostics)) return
         envVars.put("WINEDEBUG", systemProperty(WINE_DEBUG_PROP).ifBlank { WINE_DEBUG_CHANNELS })
         envVars.put("PROTON_LOG", "1")
         // Our SysV shm broker is silent unless asked, and its handful of calls per swapchain are the

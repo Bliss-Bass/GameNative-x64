@@ -870,8 +870,10 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int fd, int w,
     if (fd < 0 || w <= 0 || h <= 0) return;
     // Mesa's X11 WSI sends no Present wait fence and relies on the dma-buf's implicit fence, which
     // Vulkan sampling ignores. POLLIN waits for the writer, so a frame is not shown half-drawn.
-    struct pollfd pfd{fd, POLLIN, 0};
-    poll(&pfd, 1, 100);
+    if (waitForDmaBufWriter.load()) {
+        struct pollfd pfd{fd, POLLIN, 0};
+        poll(&pfd, 1, 100);
+    }
     std::lock_guard<std::mutex> lk(renderMutex);
 
     WinTex& wt = texMap[id];

@@ -3,11 +3,14 @@ package app.gamenative.ui.component.dialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
+import app.gamenative.BuildConfig
 import app.gamenative.R
 import app.gamenative.ui.component.settings.SettingsCPUList
 import app.gamenative.ui.component.settings.SettingsListDropdown
 import app.gamenative.ui.theme.settingsTileColors
+import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.alorma.compose.settings.ui.SettingsGroup
+import com.alorma.compose.settings.ui.SettingsSwitch
 
 @Composable
 fun AdvancedTabContent(state: ContainerConfigState) {
@@ -37,5 +40,14 @@ fun AdvancedTabContent(state: ContainerConfigState) {
             value = config.cpuListWoW64,
             onValueChange = { state.config.value = config.copy(cpuListWoW64 = it) },
         )
+        if (BuildConfig.BLISS_PORT_DEBUG) {
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.extra_debug_logging)) },
+                subtitle = { Text(text = stringResource(R.string.extra_debug_logging_description)) },
+                state = config.extraDebugLogging,
+                onCheckedChange = { state.config.value = config.copy(extraDebugLogging = it) },
+            )
+        }
     }
 }

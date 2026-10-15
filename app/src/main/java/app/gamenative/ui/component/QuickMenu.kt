@@ -352,6 +352,9 @@ class PerformanceQuickMenuState(
     val onHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
     val onFpsLimiterEnabledChanged: (Boolean) -> Unit = {},
     val onFpsLimiterChanged: (Int) -> Unit = {},
+    /** Container frame presentation mode; null hides the section (only x86_64 DRI3 uses it). */
+    val framePresentMode: String? = null,
+    val onFramePresentModeChanged: (String) -> Unit = {},
 )
 
 /** LSFG hot-reload state/callbacks as one QuickMenu parameter instead of seven — same
@@ -958,6 +961,8 @@ fun QuickMenu(
                                             onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
                                             onFpsLimiterEnabledChanged = onFpsLimiterEnabledChanged,
                                             onFpsLimiterChanged = onFpsLimiterChanged,
+                                            framePresentMode = performance.framePresentMode,
+                                            onFramePresentModeChanged = performance.onFramePresentModeChanged,
                                             scrollState = hudScrollState,
                                             focusRequester = hudItemFocusRequester,
                                             modifier = Modifier.fillMaxSize(),
@@ -1293,6 +1298,8 @@ private fun PerformanceHudQuickMenuTab(
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit,
     onFpsLimiterEnabledChanged: (Boolean) -> Unit,
     onFpsLimiterChanged: (Int) -> Unit,
+    framePresentMode: String?,
+    onFramePresentModeChanged: (String) -> Unit,
     scrollState: ScrollState,
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -1344,6 +1351,43 @@ private fun PerformanceHudQuickMenuTab(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        if (framePresentMode != null) {
+            QuickMenuSectionHeader(
+                title = stringResource(R.string.frame_present_mode),
+            )
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .then(if (LocalImmersiveInputBypass.current.active) Modifier.focusGroup() else Modifier),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    Container.FRAME_PRESENT_PERFORMANCE to R.string.frame_present_mode_performance,
+                    Container.FRAME_PRESENT_QUALITY to R.string.frame_present_mode_quality,
+                ).forEach { (mode, labelResId) ->
+                    QuickMenuChoiceChip(
+                        text = stringResource(labelResId),
+                        selected = framePresentMode == mode,
+                        accentColor = accentColor,
+                        onClick = { onFramePresentModeChanged(mode) },
+                    )
+                }
+            }
+            Text(
+                text = stringResource(
+                    if (framePresentMode == Container.FRAME_PRESENT_QUALITY) {
+                        R.string.frame_present_mode_quality_description
+                    } else {
+                        R.string.frame_present_mode_performance_description
+                    },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // ── Performance HUD ──────────────────────────────────────────────
         QuickMenuToggleRow(

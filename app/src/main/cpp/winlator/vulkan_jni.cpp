@@ -178,6 +178,10 @@ Java_com_winlator_renderer_VulkanRenderer_nativeWaitForSampling(JNIEnv*, jobject
     auto* r=reinterpret_cast<VulkanRendererContext*>(handle); if (r) r->waitForSampling();
 }
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeSetWaitForDmaBufWriter(JNIEnv*, jobject, jlong handle, jboolean wait) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(handle); if (r) r->setWaitForDmaBufWriter(wait);
+}
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeUpdateCursorImage(
     JNIEnv* env, jobject, jlong handle, jobject buf, jshort w, jshort h, jshort hotX, jshort hotY)
 {

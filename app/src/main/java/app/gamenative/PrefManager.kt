@@ -345,6 +345,20 @@ object PrefManager {
             setPref(PULSEAUDIO_LOW_LATENCY, value)
         }
 
+    private val FRAME_PRESENT_MODE = stringPreferencesKey("frame_present_mode")
+    var framePresentMode: String
+        get() = getPref(FRAME_PRESENT_MODE, Container.DEFAULT_FRAME_PRESENT_MODE)
+        set(value) {
+            setPref(FRAME_PRESENT_MODE, value)
+        }
+
+    private val EXTRA_DEBUG_LOGGING = booleanPreferencesKey("extra_debug_logging")
+    var extraDebugLogging: Boolean
+        get() = getPref(EXTRA_DEBUG_LOGGING, false)
+        set(value) {
+            setPref(EXTRA_DEBUG_LOGGING, value)
+        }
+
     private val WIN_COMPONENTS = stringPreferencesKey("wincomponents")
     var winComponents: String
         get() = getPref(WIN_COMPONENTS, Container.DEFAULT_WINCOMPONENTS)
