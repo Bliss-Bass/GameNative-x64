@@ -719,11 +719,18 @@ fun XServerScreen(
     }
 
     fun applyFramePresentModeToEngines(mode: String) {
-        val quality = mode == Container.FRAME_PRESENT_QUALITY
+        val balanced = mode == Container.FRAME_PRESENT_BALANCED
+        val hold = balanced || mode == Container.FRAME_PRESENT_QUALITY
         xServerView?.getxServer()
             ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-            ?.setHoldFlips(quality)
-        (xServerView?.renderer as? VulkanRenderer)?.setWaitForDmaBufWriter(quality)
+            ?.setHoldFlips(hold, balanced)
+        (xServerView?.renderer as? VulkanRenderer)?.setDmaBufWriterWait(
+            when {
+                balanced -> VulkanRenderer.DMABUF_WAIT_GPU
+                hold -> VulkanRenderer.DMABUF_WAIT_CPU
+                else -> VulkanRenderer.DMABUF_WAIT_NONE
+            },
+        )
     }
 
     fun applyFramePresentMode(mode: String) {

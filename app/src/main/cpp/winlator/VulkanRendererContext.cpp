@@ -10,6 +10,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/dma-buf.h>
 #include <chrono>
 #include <sys/system_properties.h>
 #include "window_vert.h"
@@ -51,6 +54,11 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DeviceWaitIdle(device);
     for (auto& [id, wt] : texMap) destroyWinTex(wt);
     texMap.clear();
+    flushAllDmaBufCaches();
+    for (auto& [id, sf] : pendingWriterSync) close(sf);
+    pendingWriterSync.clear();
+    for (auto& pool : writerSems)
+        for (VkSemaphore s : pool) vk_.DestroySemaphore(device, s, nullptr);
     
     for (auto& wt : deleteQueue) {
         if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
@@ -176,6 +184,8 @@ void VulkanRendererContext::loadDeviceDispatch() {
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)d("vkGetAndroidHardwareBufferPropertiesANDROID");
     vk_.GetMemoryFdPropertiesKHR =
         (PFN_vkGetMemoryFdPropertiesKHR)d("vkGetMemoryFdPropertiesKHR");
+    vk_.ImportSemaphoreFdKHR =
+        (PFN_vkImportSemaphoreFdKHR)d("vkImportSemaphoreFdKHR");
 }
 
 void VulkanRendererContext::createInstance() {
@@ -238,7 +248,7 @@ void VulkanRendererContext::createLogicalDevice() {
 
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
-    bool hasAhb = false, hasExtMemFd = false, hasDmaBuf = false, hasDrmMod = false;
+    bool hasAhb = false, hasExtMemFd = false, hasDmaBuf = false, hasDrmMod = false, hasExtSemFd = false;
     { uint32_t n=0; if(enumDevExts) enumDevExts(physicalDevice,nullptr,&n,nullptr);
       std::vector<VkExtensionProperties> av(n);
       if(enumDevExts) enumDevExts(physicalDevice,nullptr,&n,av.data());
@@ -253,6 +263,8 @@ void VulkanRendererContext::createLogicalDevice() {
               hasDmaBuf = true;
           if (strcmp(e.extensionName, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME)==0)
               hasDrmMod = true;
+          if (strcmp(e.extensionName, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME)==0)
+              hasExtSemFd = true;
       } }
     std::vector<const char*> extList = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -261,6 +273,7 @@ void VulkanRendererContext::createLogicalDevice() {
     if (hasExtMemFd) extList.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
     if (hasDmaBuf) extList.push_back(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
     if (hasDrmMod) extList.push_back(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
+    if (hasExtSemFd) extList.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
     if (cubicSupported) extList.push_back("VK_EXT_filter_cubic");
     dmaBufImportSupported = hasExtMemFd && hasDmaBuf && hasDrmMod;
     RLOG("createLogicalDevice: ahb=%d dmaBufImport=%d", hasAhb?1:0, dmaBufImportSupported?1:0);
@@ -271,6 +284,8 @@ void VulkanRendererContext::createLogicalDevice() {
     if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS) throw std::runtime_error("device");
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
+    writerSyncSupported.store(hasExtSemFd && vk_.ImportSemaphoreFdKHR != nullptr);
+    RLOG("createLogicalDevice: writerSync=%d", writerSyncSupported.load()?1:0);
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
 
     vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
@@ -869,14 +884,65 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int fd, int w,
                                                       uint64_t modifier, int, int) {
     if (fd < 0 || w <= 0 || h <= 0) return;
     // Mesa's X11 WSI sends no Present wait fence and relies on the dma-buf's implicit fence, which
-    // Vulkan sampling ignores. POLLIN waits for the writer, so a frame is not shown half-drawn.
-    if (waitForDmaBufWriter.load()) {
+    // Vulkan sampling ignores. Either block here until the writer is done (POLLIN), or export the
+    // pending write as a sync file for the compositor's GPU submit to wait on.
+    const int writerWait = dmaBufWriterWait.load();
+    int writerSync = -1;
+    if (writerWait == DMABUF_WAIT_GPU && writerSyncSupported.load()) {
+        struct dma_buf_export_sync_file ex{};
+        ex.flags = DMA_BUF_SYNC_READ;
+        ex.fd = -1;
+        if (ioctl(fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &ex) == 0) writerSync = ex.fd;
+    }
+    if (writerWait == DMABUF_WAIT_CPU || (writerWait == DMABUF_WAIT_GPU && writerSync < 0)) {
         struct pollfd pfd{fd, POLLIN, 0};
         poll(&pfd, 1, 100);
     }
+    struct stat st{};
+    const bool haveIdentity = fstat(fd, &st) == 0;
     std::lock_guard<std::mutex> lk(renderMutex);
+    setPendingWriterSync(id, writerSync);
 
     WinTex& wt = texMap[id];
+    if (haveIdentity) {
+        auto& imports = dmaBufCache[id];
+        if (!imports.empty() && (imports.front().tex.w != w || imports.front().tex.h != h)) {
+            if (wt.cached) wt = {};
+            flushDmaBufCache(id);
+        }
+        for (auto& e : imports) {
+            if (e.dev == st.st_dev && e.ino == st.st_ino) {
+                if (wt.isAHB) wt = {};
+                else if (!wt.cached) destroyWinTex(wt);
+                wt = e.tex;
+                wt.needsTransition = true;
+                needsRender.store(true);
+                dirtyCV.notify_one();
+                return;
+            }
+        }
+        WinTex imported{};
+        if (!importDmaBufToWinTex(imported, fd, w, h, strideBytes, drmFormat, modifier)) {
+            RLOG_E("updateWindowContentDmaBuf: import failed id=%" PRId64, id);
+            return;
+        }
+        imported.cached = true;
+        if (imports.size() >= MAX_DMABUF_IMPORTS_PER_WINDOW) {
+            WinTex evicted = imports.front().tex;
+            imports.erase(imports.begin());
+            if (wt.cached && wt.img == evicted.img) wt = {};
+            evicted.cached = false;
+            retireWinTex(evicted);
+        }
+        imports.push_back({st.st_dev, st.st_ino, imported});
+        if (wt.isAHB) wt = {};
+        else if (!wt.cached) destroyWinTex(wt);
+        wt = imported;
+        needsRender.store(true);
+        dirtyCV.notify_one();
+        return;
+    }
+
     // Re-import when size changes or slot empty; Present flips replace the fd each frame.
     if (wt.img == VK_NULL_HANDLE || wt.w != w || wt.h != h || wt.isAHB) {
         if (wt.img != VK_NULL_HANDLE) {
@@ -904,7 +970,35 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int fd, int w,
     dirtyCV.notify_one();
 }
 
+void VulkanRendererContext::setPendingWriterSync(int64_t id, int syncFd) {
+    auto it = pendingWriterSync.find(id);
+    if (it != pendingWriterSync.end()) {
+        close(it->second);
+        pendingWriterSync.erase(it);
+    }
+    if (syncFd >= 0) pendingWriterSync[id] = syncFd;
+}
+
+void VulkanRendererContext::flushDmaBufCache(int64_t id) {
+    auto it = dmaBufCache.find(id);
+    if (it == dmaBufCache.end()) return;
+    for (auto& e : it->second) {
+        WinTex retired = e.tex;
+        retired.cached = false;
+        retireWinTex(retired);
+    }
+    dmaBufCache.erase(it);
+}
+
+void VulkanRendererContext::flushAllDmaBufCaches() {
+    while (!dmaBufCache.empty()) flushDmaBufCache(dmaBufCache.begin()->first);
+}
+
 void VulkanRendererContext::destroyWinTex(WinTex& wt) {
+    if (wt.cached) {
+        wt = {};
+        return;
+    }
     if (wt.isAHB) {
 
 
@@ -1398,11 +1492,17 @@ ok=true;}catch(...){}
         curVis=cursorVisible.load();
 
         frameDraws.clear();
+        frameWriterFds.clear();
         for (auto& re:renderList) {
             auto it=texMap.find(re.id);
             if (it==texMap.end()) continue;
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
+            auto sit=pendingWriterSync.find(re.id);
+            if (sit!=pendingWriterSync.end()) {
+                frameWriterFds.push_back(sit->second);
+                pendingWriterSync.erase(sit);
+            }
             DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,
                          re.w > 0 ? re.w : wt.w, re.h > 0 ? re.h : wt.h};
             de.isAHB=wt.isAHB;
@@ -1451,11 +1551,47 @@ ok=true;}catch(...){}
         curUpload,hasCurUpload,
         ox,oy,sx,sy,cw,ch,ptrX,ptrY,curHotX,curHotY,curW,curH,effectiveCurVis);
 
-    VkSemaphore wSem[]={imgAvailSems[currentFrame]}, sSem[]={renderDoneSems[currentFrame]};
-    VkPipelineStageFlags wStage[]={VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSemaphore sSem[]={renderDoneSems[currentFrame]};
+    frameWaitSems.clear(); frameWaitStages.clear();
     if (!toXr) {
-        si.waitSemaphoreCount=1; si.pWaitSemaphores=wSem; si.pWaitDstStageMask=wStage;
+        frameWaitSems.push_back(imgAvailSems[currentFrame]);
+        frameWaitStages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    }
+    // This slot's fence has signaled, so its writer semaphores have no pending wait left.
+    auto& writerPool = writerSems[currentFrame];
+    size_t writerUsed = 0;
+    for (int sf : frameWriterFds) {
+        if (writerUsed == writerPool.size()) {
+            VkSemaphoreCreateInfo sci{}; sci.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            VkSemaphore s=VK_NULL_HANDLE;
+            if (vk_.CreateSemaphore(device,&sci,nullptr,&s)==VK_SUCCESS) writerPool.push_back(s);
+        }
+        VkResult ir=VK_ERROR_UNKNOWN;
+        if (writerUsed < writerPool.size()) {
+            VkImportSemaphoreFdInfoKHR ii{}; ii.sType=VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;
+            ii.semaphore=writerPool[writerUsed];
+            ii.flags=VK_SEMAPHORE_IMPORT_TEMPORARY_BIT;
+            ii.handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+            ii.fd=sf;
+            ir=vk_.ImportSemaphoreFdKHR(device,&ii);
+        }
+        if (ir==VK_SUCCESS) {
+            frameWaitSems.push_back(writerPool[writerUsed++]);
+            frameWaitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        } else {
+            RLOG_E("renderFrame: writer sync import failed (%d); waiting on the CPU", (int)ir);
+            writerSyncSupported.store(false);
+            struct pollfd pfd{sf, POLLIN, 0};
+            poll(&pfd, 1, 100);
+            close(sf);
+        }
+    }
+    frameWriterFds.clear();
+    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.waitSemaphoreCount=(uint32_t)frameWaitSems.size();
+    si.pWaitSemaphores=frameWaitSems.empty() ? nullptr : frameWaitSems.data();
+    si.pWaitDstStageMask=frameWaitStages.empty() ? nullptr : frameWaitStages.data();
+    if (!toXr) {
         si.signalSemaphoreCount=1; si.pSignalSemaphores=sSem;
     }
     si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
@@ -1465,12 +1601,17 @@ ok=true;}catch(...){}
     if (sres!=VK_SUCCESS) {
         logFrameFailure("submit", sres);
         for (auto& f:imgInFlight) if (f==inFlightFences[currentFrame]) f=VK_NULL_HANDLE;
-        vk_.DestroyFence(device,inFlightFences[currentFrame],nullptr);
-        VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
-        vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
+        {
+            std::lock_guard<std::mutex> fl(fenceMutex);
+            vk_.DestroyFence(device,inFlightFences[currentFrame],nullptr);
+            VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
+            vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
+        }
+        submittedSeq.store(frameSnapshot);
         return;
     }
     if (currentFrame < MAX_FRAMES_IN_FLIGHT) slotSnapshot[currentFrame] = frameSnapshot;
+    submittedSeq.store(frameSnapshot);
     if (!toXr) {
         VkSwapchainKHR scs[]={swapchain};
         VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1568,18 +1709,32 @@ void VulkanRendererContext::setCursorVisible(bool v) {
     cursorVisible.store(v); cursorMoved.store(true); dirtyCV.notify_one();
 }
 
-void VulkanRendererContext::waitForSampling() {
-    // renderFrame holds frameMutex shared from building its draw list until submit. It can sit in
-    // acquire while SurfaceFlinger withholds buffers, so give up rather than stall the X server.
-    std::unique_lock<std::shared_mutex> fl(frameMutex, std::defer_lock);
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
-    while (!fl.try_lock()) {
-        if (std::chrono::steady_clock::now() >= deadline) return;
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
+uint64_t VulkanRendererContext::sampleSeq() {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    return snapshotSeq;
+}
+
+void VulkanRendererContext::waitForSnapshot(uint64_t seq) {
+    // A slot whose frame is newer than seq never saw the replaced texture, and a slot reused by
+    // a newer frame had its older fence waited on first, so only these fences matter.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    while (device != VK_NULL_HANDLE && std::chrono::steady_clock::now() < deadline) {
+        if (submittedSeq.load() < seq) {
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+            continue;
+        }
+        std::lock_guard<std::mutex> fl(fenceMutex);
+        VkFence pending = VK_NULL_HANDLE;
+        for (uint32_t s = 0; s < MAX_FRAMES_IN_FLIGHT && s < inFlightFences.size(); s++) {
+            uint64_t snap = slotSnapshot[s].load();
+            if (snap == 0 || snap > seq) continue;
+            VkResult st = vk_.GetFenceStatus ? vk_.GetFenceStatus(device, inFlightFences[s])
+                                             : vk_.WaitForFences(device, 1, &inFlightFences[s], VK_TRUE, 0);
+            if (st != VK_SUCCESS) { pending = inFlightFences[s]; break; }
+        }
+        if (pending == VK_NULL_HANDLE) return;
+        vk_.WaitForFences(device, 1, &pending, VK_TRUE, 1'000'000);
     }
-    if (device == VK_NULL_HANDLE) return;
-    // Bounded: a frame that bailed out after resetting its fence never signals it.
-    for (auto& f : inFlightFences) vk_.WaitForFences(device, 1, &f, VK_TRUE, 50'000'000);
 }
 
 void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short hotX, short hotY) {
@@ -1725,6 +1880,8 @@ void VulkanRendererContext::removeWindow(int64_t id) {
         else it->second = {};
         texMap.erase(it);
     }
+    flushDmaBufCache(id);
+    setPendingWriterSync(id, -1);
     {
         std::lock_guard<std::mutex> ul(uploadMutex);
         pendingUploads.erase(id);
@@ -1810,6 +1967,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
     for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
 
     for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
+    for (auto& [id,imports]:dmaBufCache) for (auto& e:imports) updateDS(e.tex.ds, e.tex.view);
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
     needsRender.store(true); dirtyCV.notify_one();
 }
@@ -1825,6 +1983,11 @@ void VulkanRendererContext::setSwapRB(bool enabled) {
     // with and the output is a mix of both.
     vk_.DeviceWaitIdle(device);
 
+    // Cached dma-buf imports are re-imported on the next present, like the AHB cache below.
+    for (auto it = texMap.begin(); it != texMap.end(); ) {
+        if (it->second.cached) it = texMap.erase(it); else ++it;
+    }
+    flushAllDmaBufCaches();
     for (auto& [id,wt] : texMap) {
         if (wt.isAHB) continue;
         if (!recreateWinTexView(wt))

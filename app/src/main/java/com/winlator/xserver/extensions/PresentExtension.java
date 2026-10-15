@@ -77,9 +77,13 @@ public class PresentExtension implements Extension {
     // its next frame into the buffer on screen, which shows up as black or half-drawn frames.
     private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> heldFlips =
             new java.util.concurrent.ConcurrentHashMap<>();
-    // The container's "quality" frame mode. Off, the client can render into a buffer the
-    // compositor is still sampling.
+    // The container's "quality" and "balanced" frame modes. Off, the client can render into a
+    // buffer the compositor is still sampling.
     private volatile boolean holdFlips = true;
+    // "balanced": a replaced flip waits for the compositor on this thread instead of the X
+    // server's, so the next request is not stalled behind a whole compositor frame.
+    private volatile boolean asyncFlipRelease = false;
+    private java.util.concurrent.ExecutorService flipReleaser = null;
 
     private volatile android.view.Choreographer choreographer = null;
     private volatile boolean choreographerChecked = false;
@@ -101,6 +105,24 @@ public class PresentExtension implements Extension {
             cpuPacerThread.interrupt();
             cpuPacerThread = null;
         }
+        synchronized (this) {
+            if (flipReleaser != null) {
+                flipReleaser.shutdownNow();
+                flipReleaser = null;
+            }
+        }
+    }
+
+    private synchronized java.util.concurrent.ExecutorService flipReleaser() {
+        if (flipReleaser == null) {
+            flipReleaser = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "PresentFlipRelease");
+                t.setDaemon(true);
+                t.setPriority(Thread.MAX_PRIORITY);
+                return t;
+            });
+        }
+        return flipReleaser;
     }
 
     private android.view.Choreographer tryGetChoreographer(VulkanRenderer renderer) {
@@ -226,8 +248,9 @@ public class PresentExtension implements Extension {
         }
     }
 
-    public void setHoldFlips(boolean hold) {
+    public void setHoldFlips(boolean hold, boolean releaseAsync) {
         holdFlips = hold;
+        asyncFlipRelease = hold && releaseAsync;
     }
 
     private void releaseIdle(PendingIdle p, int targetFps, VulkanRenderer renderer) {
@@ -441,10 +464,23 @@ public class PresentExtension implements Extension {
         }
         if (!heldNow && replacedFlip == null) replacedFlip = heldFlips.remove(window.id);
         if (replacedFlip != null) {
-            // The compositor may still be drawing the replaced buffer; the client clears it
-            // for its next frame as soon as it is idle.
-            if (vr != null) vr.waitForSampling();
-            releaseIdle(replacedFlip, targetFps, vr);
+            // Composited frames up to this one may still be drawing the replaced buffer; the
+            // client clears it for its next frame as soon as it is idle. Later frames sample
+            // the new buffer, so waiting on them would hold the old one a whole frame longer.
+            final PendingIdle released = replacedFlip;
+            final long sampledThrough = vr != null ? vr.sampleSeq() : 0;
+            if (asyncFlipRelease) {
+                try {
+                    flipReleaser().execute(() -> {
+                        if (vr != null) vr.waitForSnapshot(sampledThrough);
+                        releaseIdle(released, targetFps, vr);
+                    });
+                    return;
+                } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                }
+            }
+            if (vr != null) vr.waitForSnapshot(sampledThrough);
+            releaseIdle(released, targetFps, vr);
         }
     }
 

@@ -44,6 +44,7 @@ public class Container {
     // "quality" waits so Intel Xe never shows a half-drawn or freed buffer. "performance" hands
     // flipped frames straight back; Prodeus hung the Xe GPU at level load with it.
     public static final String FRAME_PRESENT_PERFORMANCE = "performance";
+    public static final String FRAME_PRESENT_BALANCED = "balanced";
     public static final String FRAME_PRESENT_QUALITY = "quality";
     public static final String DEFAULT_FRAME_PRESENT_MODE = FRAME_PRESENT_QUALITY;
     public static final String DEFAULT_EMULATOR = "FEXCore";

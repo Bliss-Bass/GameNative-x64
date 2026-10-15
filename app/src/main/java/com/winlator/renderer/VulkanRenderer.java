@@ -169,8 +169,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetClearColor(long handle, float r, float g, float b, float a);
     private native void nativeSetPointerPos(long handle, short x, short y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
-    private native void nativeWaitForSampling(long handle);
-    private native void nativeSetWaitForDmaBufWriter(long handle, boolean wait);
+    private native long nativeSampleSeq(long handle);
+    private native void nativeWaitForSnapshot(long handle, long seq);
+    private native void nativeSetDmaBufWriterWait(long handle, int mode);
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
         short width, short height, short hotX, short hotY);
     private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys,
@@ -245,7 +246,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
-                    nativeSetWaitForDmaBufWriter(nativeHandle, pendingWaitForDmaBufWriter);
+                    nativeSetDmaBufWriterWait(nativeHandle, pendingDmaBufWriterWait);
                     nativeSetClearColor(nativeHandle, pendingClearR, pendingClearG, pendingClearB, pendingClearA);
                     nativeSetEffect(nativeHandle, pendingEffectId, pendingSharpness,
                         pendingEffectMask, pendingBrightness, pendingContrast, pendingGamma);
@@ -787,11 +788,18 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
-    /** Blocks until no composited frame can still be reading a window texture that was replaced. */
-    public void waitForSampling() {
+    /** Newest composited frame that may still read a window texture replaced before this call. */
+    public long sampleSeq() {
         final long handle;
         synchronized (lock) { handle = nativeHandle; }
-        if (handle != 0) nativeWaitForSampling(handle);
+        return handle != 0 ? nativeSampleSeq(handle) : 0;
+    }
+
+    /** Blocks (bounded) until every composited frame up to {@code seq} has finished on the GPU. */
+    public void waitForSnapshot(long seq) {
+        final long handle;
+        synchronized (lock) { handle = nativeHandle; }
+        if (handle != 0) nativeWaitForSnapshot(handle, seq);
     }
 
     public void setCursorVisible(boolean visible) {
@@ -937,10 +945,16 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
-    /** Wait for the client's GPU to finish a dma-buf frame before taking it; costs frame rate. */
-    public void setWaitForDmaBufWriter(boolean wait) {
-        pendingWaitForDmaBufWriter = wait;
-        synchronized (lock) { if (nativeHandle != 0) nativeSetWaitForDmaBufWriter(nativeHandle, wait); }
+    // How the compositor waits for the client's GPU to finish a flipped dma-buf frame.
+    public static final int DMABUF_WAIT_NONE = 0;
+    /** Blocks the X server until the frame is drawn; costs frame rate. */
+    public static final int DMABUF_WAIT_CPU = 1;
+    /** Makes the compositor's GPU submit wait instead; falls back to CPU when unsupported. */
+    public static final int DMABUF_WAIT_GPU = 2;
+
+    public void setDmaBufWriterWait(int mode) {
+        pendingDmaBufWriterWait = mode;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetDmaBufWriterWait(nativeHandle, mode); }
     }
 
     /**
@@ -1059,7 +1073,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
-    private boolean pendingWaitForDmaBufWriter = true;
+    private int pendingDmaBufWriterWait = DMABUF_WAIT_CPU;
     private float   pendingClearR         = 0f;
     private float   pendingClearG         = 0f;
     private float   pendingClearB         = 0f;

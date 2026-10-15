@@ -90,6 +90,7 @@ struct VkTable {
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
     PFN_vkGetMemoryFdPropertiesKHR GetMemoryFdPropertiesKHR;
+    PFN_vkImportSemaphoreFdKHR ImportSemaphoreFdKHR;
 };
 
 #include <android/log.h>
@@ -149,8 +150,15 @@ public:
                                    int drmFormat, uint64_t modifier, int x, int y);
     bool supportsDmaBufImport() const { return dmaBufImportSupported; }
     // Returns once no submitted or in-progress frame can still read a texture replaced earlier.
-    void waitForSampling();
-    void setWaitForDmaBufWriter(bool wait) { waitForDmaBufWriter.store(wait); }
+    // Newest compositor frame that may sample a window texture replaced before this call.
+    uint64_t sampleSeq();
+    // Waits (bounded) until every compositor frame up to seq has finished on the GPU.
+    void waitForSnapshot(uint64_t seq);
+    // How a flipped dma-buf's pending guest write is awaited before it is sampled.
+    static constexpr int DMABUF_WAIT_NONE = 0;
+    static constexpr int DMABUF_WAIT_CPU  = 1;
+    static constexpr int DMABUF_WAIT_GPU  = 2;
+    void setDmaBufWriterWait(int mode) { dmaBufWriterWait.store(mode); }
     void updateCursorImage(void* pixels, short w, short h, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys,
@@ -215,7 +223,21 @@ private:
         int                  stgSlot        = -1;
         // Newest frame snapshot that may still sample this texture once it is retired.
         uint64_t             retiredAfter   = 0;
+        // Owned by dmaBufCache; texMap only aliases it, so destroyWinTex must not free it.
+        bool                 cached         = false;
     };
+
+    // Imports of a window's flipped dma-bufs, keyed by the buffer's inode. Present cycles the
+    // same few swapchain buffers, and importing each one per frame churns GPU mappings.
+    struct DmaBufImport {
+        dev_t  dev = 0;
+        ino_t  ino = 0;
+        WinTex tex;
+    };
+    static constexpr size_t MAX_DMABUF_IMPORTS_PER_WINDOW = 4;
+    std::unordered_map<int64_t, std::vector<DmaBufImport>> dmaBufCache;
+    void flushDmaBufCache(int64_t id);
+    void flushAllDmaBufCaches();
 
     // Latest complete CPU frame per window. The X thread only ever writes here; the render
     // thread moves it into the staging buffer once no in-flight GPU copy still reads it, so
@@ -373,8 +395,20 @@ private:
     uint32_t                 currentFrame = 0;
     // Draw lists are numbered; each slot remembers the one its last submit sampled.
     uint64_t                 snapshotSeq = 0;
-    std::atomic<bool>        waitForDmaBufWriter{true};
-    uint64_t                 slotSnapshot[MAX_FRAMES_IN_FLIGHT] = {};
+    std::atomic<int>         dmaBufWriterWait{DMABUF_WAIT_CPU};
+    std::atomic<bool>        writerSyncSupported{false};
+    // Sync files for guest writes each window's newest dma-buf still has pending; the next
+    // frame that draws the window waits on them on the GPU. Guarded by renderMutex.
+    std::unordered_map<int64_t, int> pendingWriterSync;
+    std::vector<int>         frameWriterFds;
+    std::vector<VkSemaphore> writerSems[MAX_FRAMES_IN_FLIGHT];
+    std::vector<VkSemaphore> frameWaitSems;
+    std::vector<VkPipelineStageFlags> frameWaitStages;
+    void setPendingWriterSync(int64_t id, int syncFd);
+    std::atomic<uint64_t>    slotSnapshot[MAX_FRAMES_IN_FLIGHT] = {};
+    std::atomic<uint64_t>    submittedSeq{0};
+    // Held while another thread polls inFlightFences, so a failed submit cannot destroy one under it.
+    std::mutex               fenceMutex;
     void retireWinTex(WinTex wt);
     uint32_t                 failedFrames = 0;
     std::chrono::steady_clock::time_point lastFailureLog{};

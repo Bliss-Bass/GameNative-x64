@@ -424,17 +424,21 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
             },
         )
         if (config.useDRI3 && app.gamenative.utils.HostContainerPolicy.isX86Host()) {
-            val presentModes = listOf(Container.FRAME_PRESENT_PERFORMANCE, Container.FRAME_PRESENT_QUALITY)
+            val presentModes = listOf(
+                Container.FRAME_PRESENT_PERFORMANCE,
+                Container.FRAME_PRESENT_BALANCED,
+                Container.FRAME_PRESENT_QUALITY,
+            )
             SettingsListDropdown(
                 colors = settingsTileColorsAlt(),
                 title = { Text(text = stringResource(R.string.frame_present_mode)) },
                 subtitle = {
                     Text(
                         text = stringResource(
-                            if (config.framePresentMode == Container.FRAME_PRESENT_QUALITY) {
-                                R.string.frame_present_mode_quality_description
-                            } else {
-                                R.string.frame_present_mode_performance_description
+                            when (config.framePresentMode) {
+                                Container.FRAME_PRESENT_QUALITY -> R.string.frame_present_mode_quality_description
+                                Container.FRAME_PRESENT_BALANCED -> R.string.frame_present_mode_balanced_description
+                                else -> R.string.frame_present_mode_performance_description
                             },
                         ),
                     )
@@ -442,6 +446,7 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                 value = presentModes.indexOf(config.framePresentMode).coerceAtLeast(0),
                 items = listOf(
                     stringResource(R.string.frame_present_mode_performance),
+                    stringResource(R.string.frame_present_mode_balanced),
                     stringResource(R.string.frame_present_mode_quality),
                 ),
                 onItemSelected = {

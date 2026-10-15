@@ -1364,6 +1364,7 @@ private fun PerformanceHudQuickMenuTab(
             ) {
                 listOf(
                     Container.FRAME_PRESENT_PERFORMANCE to R.string.frame_present_mode_performance,
+                    Container.FRAME_PRESENT_BALANCED to R.string.frame_present_mode_balanced,
                     Container.FRAME_PRESENT_QUALITY to R.string.frame_present_mode_quality,
                 ).forEach { (mode, labelResId) ->
                     QuickMenuChoiceChip(
@@ -1376,10 +1377,10 @@ private fun PerformanceHudQuickMenuTab(
             }
             Text(
                 text = stringResource(
-                    if (framePresentMode == Container.FRAME_PRESENT_QUALITY) {
-                        R.string.frame_present_mode_quality_description
-                    } else {
-                        R.string.frame_present_mode_performance_description
+                    when (framePresentMode) {
+                        Container.FRAME_PRESENT_QUALITY -> R.string.frame_present_mode_quality_description
+                        Container.FRAME_PRESENT_BALANCED -> R.string.frame_present_mode_balanced_description
+                        else -> R.string.frame_present_mode_performance_description
                     },
                 ),
                 style = MaterialTheme.typography.bodySmall,
