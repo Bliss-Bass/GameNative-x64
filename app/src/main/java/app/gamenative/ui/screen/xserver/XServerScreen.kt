@@ -139,6 +139,7 @@ import app.gamenative.utils.HostDisplayEnv
 import app.gamenative.utils.NativePresentTest
 import app.gamenative.utils.PointerCaptureCompat
 import app.gamenative.utils.BlissPortDebug
+import app.gamenative.utils.GpuUsageSampler
 import app.gamenative.utils.GameSessionMemory
 import app.gamenative.utils.LsfgQuickMenuHelper
 import app.gamenative.utils.LsfgVkManager
@@ -4105,6 +4106,7 @@ private fun setupXEnvironment(
         }
 
         BlissPortDebug.applyLaunchEnv(envVars, container.extraDebugLogging, diagnostics)
+        GpuUsageSampler.start(BlissPortDebug.isActive(container.extraDebugLogging, diagnostics))
 
         val ffpGameDir = runCatching {
             Container.drivesIterator(container.drives).asSequence()
