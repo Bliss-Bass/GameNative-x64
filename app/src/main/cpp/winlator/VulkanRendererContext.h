@@ -381,6 +381,8 @@ private:
     void destroyXrTargetResources();
 
     VkRenderPass          renderPass  = VK_NULL_HANDLE;
+    // Same as renderPass but leaves the target uncleared, for frames an opaque window covers.
+    VkRenderPass          renderPassNoClear = VK_NULL_HANDLE;
     VkDescriptorSetLayout dsLayout    = VK_NULL_HANDLE;
     VkPipelineLayout      pipeLayout  = VK_NULL_HANDLE;
 

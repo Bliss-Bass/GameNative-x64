@@ -83,6 +83,7 @@ VulkanRendererContext::~VulkanRendererContext() {
     }
     vk_.DestroyCommandPool(device, cmdPool, nullptr);
     vk_.DestroyRenderPass(device, renderPass, nullptr);
+    if (renderPassNoClear!=VK_NULL_HANDLE) vk_.DestroyRenderPass(device, renderPassNoClear, nullptr);
     vk_.DestroyDevice(device, nullptr);
     vk_.DestroySurfaceKHR(instance, surface, nullptr);
     vk_.DestroyInstance(instance, nullptr);
@@ -382,6 +383,8 @@ void VulkanRendererContext::createRenderPass() {
     ci.attachmentCount=1; ci.pAttachments=&att; ci.subpassCount=1; ci.pSubpasses=&sub;
     ci.dependencyCount=1; ci.pDependencies=&dep;
     if (vk_.CreateRenderPass(device,&ci,nullptr,&renderPass)!=VK_SUCCESS) throw std::runtime_error("renderpass");
+    att.loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    if (vk_.CreateRenderPass(device,&ci,nullptr,&renderPassNoClear)!=VK_SUCCESS) renderPassNoClear=VK_NULL_HANDLE;
 }
 
 void VulkanRendererContext::createDSLayout() {
@@ -1149,8 +1152,21 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 
     bool toXr = xrTargetActive.load() && xrFb!=VK_NULL_HANDLE;
     VkExtent2D tgtExt = toXr ? xrExt : swapchainExt;
+    // Windows draw opaque (alpha forced to 1), so one that spans the whole target replaces
+    // every pixel and clearing first is a wasted full-screen write.
+    bool covered = false;
+    if (!toXr && renderPassNoClear!=VK_NULL_HANDLE) {
+        for (auto& d : draws) {
+            if (d.ds==VK_NULL_HANDLE) continue;
+            if ((ox+(float)d.x*sx)/cw*2.f-1.f <= -1.f && (oy+(float)d.y*sy)/ch*2.f-1.f <= -1.f &&
+                (ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f >= 1.f && (oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f >= 1.f) {
+                covered = true;
+                break;
+            }
+        }
+    }
     VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpi.renderPass = toXr ? xrRp : renderPass;
+    rpi.renderPass = toXr ? xrRp : (covered ? renderPassNoClear : renderPass);
     rpi.framebuffer = toXr ? xrFb : swapchainFBs[imgIdx];
     rpi.renderArea={{0,0},tgtExt};
     VkClearValue clr={{{clearR,clearG,clearB,clearA}}}; rpi.clearValueCount=1; rpi.pClearValues=&clr;
