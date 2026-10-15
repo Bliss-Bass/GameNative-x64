@@ -299,6 +299,17 @@ void VulkanRendererContext::createSwapchain() {
     VkSurfaceCapabilitiesKHR caps;
     vk_.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,surface,&caps);
     swapchainExt=(caps.currentExtent.width!=0xFFFFFFFF)?caps.currentExtent:VkExtent2D{(uint32_t)surfaceWidth,(uint32_t)surfaceHeight};
+    // SurfaceHolder.setFixedSize reaches surfaceChanged before the window reports the new
+    // default size. Android's swapchain takes any extent, and a stale one hands SurfaceFlinger
+    // buffers that do not match the surface, which it rescales and paces badly.
+    if (surfaceSizeReported && surfaceWidth > 0 && surfaceHeight > 0 &&
+        ((uint32_t)surfaceWidth != swapchainExt.width || (uint32_t)surfaceHeight != swapchainExt.height)) {
+        RLOG("createSwapchain: using reported surface %dx%d over currentExtent %ux%u",
+            surfaceWidth, surfaceHeight, swapchainExt.width, swapchainExt.height);
+        swapchainExt = VkExtent2D{
+            std::clamp((uint32_t)surfaceWidth, caps.minImageExtent.width, caps.maxImageExtent.width),
+            std::clamp((uint32_t)surfaceHeight, caps.minImageExtent.height, caps.maxImageExtent.height)};
+    }
     uint32_t fmtN=0; vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,nullptr);
     std::vector<VkSurfaceFormatKHR> fmts(fmtN); vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,fmts.data());
     swapchainFmt = VK_FORMAT_R8G8B8A8_UNORM;
@@ -1631,7 +1642,7 @@ ok=true;}catch(...){}
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
     std::lock_guard<std::mutex> lk(renderMutex);
     if (w==0||h==0) return;
-    surfaceWidth=w; surfaceHeight=h; fbResized.store(true); dirtyCV.notify_one();
+    surfaceWidth=w; surfaceHeight=h; surfaceSizeReported=true; fbResized.store(true); dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::setContainerSize(int w, int h) {

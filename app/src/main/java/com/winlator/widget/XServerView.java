@@ -23,6 +23,8 @@ public class XServerView extends SurfaceView implements SurfaceHolder.Callback, 
     private final XServer xServer;
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private int frameRateLimit = 0;
+    private boolean nativeResolutionSurface = false;
+    private boolean fixedSizeApplied = false;
 
     public XServerView(Context context, XServer xServer, String selectedRenderer) {
         super(context);
@@ -74,6 +76,40 @@ public class XServerView extends SurfaceView implements SurfaceHolder.Callback, 
         if (renderer instanceof ASurfaceRenderer aRenderer) {
             aRenderer.onSurfaceDestroyed();
         }
+    }
+
+    /**
+     * Sizes the surface's buffers to about the X screen, keeping the view's aspect, so the
+     * compositor writes far fewer pixels and SurfaceFlinger scales the result to the view.
+     */
+    public void setNativeResolutionSurface(boolean enabled) {
+        nativeResolutionSurface = enabled;
+        applySurfaceSize();
+    }
+
+    public void applySurfaceSize() {
+        post(() -> {
+            int viewW = getWidth(), viewH = getHeight();
+            if (!nativeResolutionSurface || viewW <= 0 || viewH <= 0) {
+                if (fixedSizeApplied) {
+                    getHolder().setSizeFromLayout();
+                    fixedSizeApplied = false;
+                }
+                return;
+            }
+            float scale = Math.min(1f, Math.max(
+                    (float) xServer.screenInfo.width / viewW,
+                    (float) xServer.screenInfo.height / viewH));
+            getHolder().setFixedSize(Math.max(1, Math.round(viewW * scale)),
+                    Math.max(1, Math.round(viewH * scale)));
+            fixedSizeApplied = true;
+        });
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (nativeResolutionSurface) applySurfaceSize();
     }
 
     public void queueEvent(Runnable r) {

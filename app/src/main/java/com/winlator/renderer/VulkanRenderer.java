@@ -332,6 +332,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 updateTransform();
             }
         }
+        xServerView.applySurfaceSize();
         queueSceneUpdate();
     }
 

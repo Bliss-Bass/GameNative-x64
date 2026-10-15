@@ -1364,6 +1364,7 @@ private fun PerformanceHudQuickMenuTab(
             ) {
                 listOf(
                     Container.FRAME_PRESENT_PERFORMANCE to R.string.frame_present_mode_performance,
+                    Container.FRAME_PRESENT_LEAN to R.string.frame_present_mode_lean,
                     Container.FRAME_PRESENT_BALANCED to R.string.frame_present_mode_balanced,
                     Container.FRAME_PRESENT_QUALITY to R.string.frame_present_mode_quality,
                 ).forEach { (mode, labelResId) ->
@@ -1380,6 +1381,7 @@ private fun PerformanceHudQuickMenuTab(
                     when (framePresentMode) {
                         Container.FRAME_PRESENT_QUALITY -> R.string.frame_present_mode_quality_description
                         Container.FRAME_PRESENT_BALANCED -> R.string.frame_present_mode_balanced_description
+                        Container.FRAME_PRESENT_LEAN -> R.string.frame_present_mode_lean_description
                         else -> R.string.frame_present_mode_performance_description
                     },
                 ),

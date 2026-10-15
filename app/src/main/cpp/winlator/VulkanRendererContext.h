@@ -266,6 +266,7 @@ private:
     void* adrenotoolsHandle = nullptr;
     int filterMode = 0;
     bool swapRB = false;
+    bool surfaceSizeReported = false;
     int activeEffectId = 0;
     float activeSharpness = 1.0f;
     int activeEffectMask = 0;

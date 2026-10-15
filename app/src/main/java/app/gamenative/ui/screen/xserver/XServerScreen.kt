@@ -720,8 +720,10 @@ fun XServerScreen(
     }
 
     fun applyFramePresentModeToEngines(mode: String) {
-        val balanced = mode == Container.FRAME_PRESENT_BALANCED
+        val lean = mode == Container.FRAME_PRESENT_LEAN
+        val balanced = lean || mode == Container.FRAME_PRESENT_BALANCED
         val hold = balanced || mode == Container.FRAME_PRESENT_QUALITY
+        (xServerView as? XServerView)?.setNativeResolutionSurface(lean)
         xServerView?.getxServer()
             ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
             ?.setHoldFlips(hold, balanced)

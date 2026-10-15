@@ -897,9 +897,11 @@
     <string name="use_dri3_description">Disabling may fix graphical glitches on some devices</string>
     <string name="frame_present_mode">Frame presentation</string>
     <string name="frame_present_mode_performance">Performance</string>
+    <string name="frame_present_mode_lean">Lean</string>
     <string name="frame_present_mode_balanced">Balanced</string>
     <string name="frame_present_mode_quality">Quality</string>
     <string name="frame_present_mode_performance_description">Hands each frame straight back to the game. Faster, but Intel GPUs may show black or torn frames, and some games can hang the GPU.</string>
+    <string name="frame_present_mode_lean_description">Experimental. Like Balanced, but draws the screen at the game\'s resolution and lets Android scale it up. Saves GPU memory bandwidth on integrated GPUs; the cursor and overlays look softer.</string>
     <string name="frame_present_mode_balanced_description">Keeps each frame safe like Quality, but waits for it on the GPU and in the background instead of stalling the game.</string>
     <string name="frame_present_mode_quality_description">Waits for each frame to finish drawing and leave the screen. Fixes black or torn frames on Intel GPUs, but can halve the frame rate.</string>
     <string name="extra_debug_logging">Extra debug logging</string>
