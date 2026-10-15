@@ -101,6 +101,10 @@ class PluviaApp : SplitCompatApplication() {
         // Init our custom crash handler.
         CrashHandler.initialize(this)
 
+        // libevshim maps its gamepad memory when it loads and otherwise falls back to user 0's
+        // /data/data path, which secondary Android users cannot open.
+        android.system.Os.setenv("EVSHIM_BASE_PATH", filesDir.absolutePath, true)
+
         // Init our datastore preferences.
         PrefManager.init(this)
         NexusAuthManager.initialize(this)

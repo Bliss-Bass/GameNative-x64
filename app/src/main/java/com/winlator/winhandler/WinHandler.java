@@ -797,6 +797,9 @@ public class WinHandler {
                         curSeq = WinHandler.waitForRumble(sl, lastSeq);
                         if (!running) break;
                         if (curSeq == lastSeq) {
+                            // waitForRumble returns at once when the slot has no shared memory;
+                            // without a pause this loop takes a whole core per slot.
+                            Thread.sleep(50);
                             continue;
                         }
 
