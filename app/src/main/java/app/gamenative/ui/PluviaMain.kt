@@ -2121,9 +2121,9 @@ fun preLaunchApp(
                 MessageDialogState(
                     visible = true,
                     type = DialogType.LAUNCH_ARG_CONFLICT,
-                    title = context.getString(R.string.launch_arg_conflict_title),
+                    title = context.getString(argConflict.titleRes),
                     message = context.getString(
-                        R.string.launch_arg_conflict_message,
+                        argConflict.messageRes,
                         argConflict.found,
                         argConflict.replacement,
                     ),

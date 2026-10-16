@@ -1788,6 +1788,8 @@
     <string name="launch_arg_conflict_message">This container\'s launch options include \"%1$s\", which this game cannot start with here. Switch it to \"%2$s\"?</string>
     <string name="launch_arg_conflict_switch">Switch</string>
     <string name="launch_arg_conflict_keep">Keep mine</string>
+    <string name="dx_wrapper_conflict_title">Graphics backend cannot start this game</string>
+    <string name="dx_wrapper_conflict_message">This container uses %1$s. This game opens a DirectX 12 viewport, and %1$s cannot create that swapchain on Vulkan. Switch to %2$s, the Vulkan DirectX 12 backend?</string>
     <string name="workshop_downloading">Downloading Workshop Mods (%1$d/%2$d)</string>
     <string name="workshop_processing">Processing mods…</string>
     <string name="workshop_failed_count">%1$d workshop mod(s) failed to update</string>

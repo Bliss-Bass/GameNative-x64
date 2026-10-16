@@ -53,6 +53,7 @@ object GameFixesRegistry {
         EPIC_Fix_e345fdb9186645a48d30c3f85a8951dc,
         EPIC_Fix_59a0c86d02da42e8ba6444cb171e61bf,
         EPIC_Fix_864c7bc2c2394f7dbd1b534aa068ff56,
+        EPIC_Fix_4c2659cf3411441dbc02ffc965643e47,
     ).associateBy { it.gameSource to it.gameId }
 
     private var fixesProvider: () -> Map<Pair<GameSource, String>, GameFix> = { fixes }

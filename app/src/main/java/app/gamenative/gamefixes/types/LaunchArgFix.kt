@@ -1,12 +1,22 @@
 package app.gamenative.gamefixes
 
 import android.content.Context
+import androidx.annotation.StringRes
+import app.gamenative.R
 import app.gamenative.data.GameSource
 import timber.log.Timber
 import com.winlator.container.Container
 
-/** A user launch option that keeps the game from starting, and the option the fix uses instead. */
-data class LaunchArgConflict(val found: String, val replacement: String)
+/**
+ * Something in the container that keeps the game from starting, and the value to offer instead.
+ * [titleRes] and [messageRes] are the dialog. [messageRes] takes the found value, then the replacement.
+ */
+data class LaunchArgConflict(
+    val found: String,
+    val replacement: String,
+    @StringRes val titleRes: Int = R.string.launch_arg_conflict_title,
+    @StringRes val messageRes: Int = R.string.launch_arg_conflict_message,
+)
 
 /** A fix that can spot user launch options it conflicts with, so the user can be asked to switch. */
 interface LaunchArgConflictFix {
