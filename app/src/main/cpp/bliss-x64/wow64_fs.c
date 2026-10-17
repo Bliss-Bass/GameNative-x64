@@ -65,12 +65,15 @@ __asm__(".pushsection .rodata\n"
         ".popsection\n");
 extern const uint8_t wow64_fs_base_start[], wow64_fs_base_end[];
 
-enum site_kind { SITE_COPY, SITE_RIP_LOAD };
+enum site_kind { SITE_COPY, SITE_RIP_LOAD, SITE_TEST_FS };
 
 struct site {
     uint8_t *at;
     size_t len;
     enum site_kind kind;
+    /* SITE_TEST_FS: modrm of movw disp(%r13),%ax/%dx and that displacement. */
+    uint8_t reg;
+    uint32_t disp;
 };
 
 struct text_range {
@@ -180,7 +183,32 @@ static bool skipped_by_je(const uint8_t *at, size_t len, const struct text_range
 static bool add_site(struct site *sites, int *n, uint8_t *at, size_t len, enum site_kind kind)
 {
     if (*n >= MAX_SITES) return false;
-    sites[(*n)++] = (struct site){ at, len, kind };
+    sites[(*n)++] = (struct site){ at, len, kind, 0, 0 };
+    return true;
+}
+
+/*
+ * Proton 11 loads the selector, tests it, and only then writes %fs:
+ *   movw disp(%r13), %ax/%dx; testw; jz +2; mov %ax/%dx, %fs
+ * disp is 0x338 there, and 0x330 in the Valve layout that moved amd64_thread_data.fs.
+ * The write is 2 bytes, too short for a detour, so the whole 19-byte sequence is one site.
+ */
+static bool match_test_fs(const uint8_t *p, const struct text_range *text, uint8_t *reg, uint32_t *disp)
+{
+    if (p + 19 > text->end || p[0] != 0x66 || p[1] != 0x41 || p[2] != 0x8b) return false;
+    if (p[3] != 0x85 && p[3] != 0x95) return false;
+    uint32_t d;
+    memcpy(&d, p + 4, 4);
+    if (d != 0x338 && d != 0x330) return false;
+    uint8_t test_rm = p[3] == 0x85 ? 0xc0 : 0xd2;
+    uint8_t mov_fs = p[3] == 0x85 ? 0xe0 : 0xe2;
+    if (p[8] != 0x66 || p[9] != 0x85 || p[10] != test_rm) return false;
+    if (p[11] != 0x0f || p[12] != 0x84) return false;
+    int32_t jdisp;
+    memcpy(&jdisp, p + 13, 4);
+    if (jdisp != 2 || p[17] != 0x8e || p[18] != mov_fs) return false;
+    *reg = p[3];
+    *disp = d;
     return true;
 }
 
@@ -188,9 +216,18 @@ static uint8_t *scan(const struct text_range *text, uint8_t **alloc_call, struct
 {
     static const uint8_t set_thread_area[] = { 0xb8, 0xf3, 0x00, 0x00, 0x00, 0xcd, 0x80 };
     static const uint8_t gs_load[] = { 0x65, 0x8e, 0x24, 0x25, 0x38, 0x03, 0x00, 0x00 };
-    int alloc_hits = 0, gs_hits = 0, reg_hits = 0, rip_hits = 0;
+    int alloc_hits = 0, gs_hits = 0, reg_hits = 0, rip_hits = 0, test_hits = 0;
     *n_sites = 0;
     for (uint8_t *p = text->start; p + 9 <= text->end; p++) {
+        uint8_t reg;
+        uint32_t disp;
+        if (match_test_fs(p, text, &reg, &disp)) {
+            if (!add_site(sites, n_sites, p, 19, SITE_TEST_FS)) return NULL;
+            sites[*n_sites - 1].reg = reg;
+            sites[*n_sites - 1].disp = disp;
+            test_hits++;
+            continue;
+        }
         if (!memcmp(p, set_thread_area, sizeof(set_thread_area))) {
             *alloc_call = p;
             alloc_hits++;
@@ -210,10 +247,14 @@ static uint8_t *scan(const struct text_range *text, uint8_t **alloc_call, struct
             if (add_site(sites, n_sites, p, 9, SITE_RIP_LOAD)) rip_hits++;
         }
     }
-    if (alloc_hits != 1 || gs_hits != 2 || reg_hits != 1 || rip_hits != 1) {
+    /* Proton 10 and earlier: two %gs:0x338 loads, one (%reg) load, one signal exit.
+       Proton 11: the three loads are movw/test/jz/mov-%fs sequences instead. */
+    bool old_layout = alloc_hits == 1 && gs_hits == 2 && reg_hits == 1 && rip_hits == 1 && test_hits == 0;
+    bool new_layout = alloc_hits == 1 && gs_hits == 0 && reg_hits == 0 && rip_hits == 1 && test_hits == 3;
+    if (!old_layout && !new_layout) {
         __android_log_print(ANDROID_LOG_ERROR, TAG,
-                            "unrecognised ntdll.so (alloc %d, gs %d, reg %d, signal %d)",
-                            alloc_hits, gs_hits, reg_hits, rip_hits);
+                            "unrecognised ntdll.so (alloc %d, gs %d, reg %d, signal %d, test %d)",
+                            alloc_hits, gs_hits, reg_hits, rip_hits, test_hits);
         return NULL;
     }
     return *alloc_call;
@@ -250,6 +291,27 @@ static uint8_t *emit_jmp(uint8_t *at, const uint8_t *target)
 
 static uint8_t *emit_detour(uint8_t *out, const struct site *site)
 {
+    if (site->kind == SITE_TEST_FS) {
+        uint8_t test_rm = site->reg == 0x85 ? 0xc0 : 0xd2;
+        uint8_t mov_fs = site->reg == 0x85 ? 0xe0 : 0xe2;
+        out[0] = 0x66; out[1] = 0x41; out[2] = 0x8b; out[3] = site->reg;
+        memcpy(out + 4, &site->disp, 4);
+        out += 8;
+        out[0] = 0x66; out[1] = 0x85; out[2] = test_rm;
+        out += 3;
+        uint8_t *jz = out;
+        out[0] = 0x0f; out[1] = 0x84;
+        out += 6;
+        out[0] = 0x8e; out[1] = mov_fs;
+        out += 2;
+        size_t body = (size_t)(wow64_fs_base_end - wow64_fs_base_start);
+        memcpy(out, wow64_fs_base_start, body);
+        out += body;
+        /* Selector 0 skips both the %fs write and the fs-base write. */
+        int32_t rel = (int32_t)(out - (jz + 6));
+        memcpy(jz + 2, &rel, 4);
+        return emit_jmp(out, site->at + site->len);
+    }
     if (site->kind == SITE_RIP_LOAD) {
         int32_t disp;
         memcpy(&disp, site->at + 3, 4);
@@ -354,7 +416,7 @@ static void patch_ntdll(void)
     static const uint8_t report_entry[] = { 0xc7, 0x04, 0x24, USER_DS_ENTRY, 0x00, 0x00, 0x00 };
     bool ok = write_text(alloc_call, report_entry, sizeof(report_entry));
     for (int i = 0; ok && i < n_sites; i++) {
-        uint8_t jmp[16];
+        uint8_t jmp[32];
         int32_t rel = (int32_t)(entries[i] - (sites[i].at + JMP_LEN));
         jmp[0] = 0xe9;
         memcpy(jmp + 1, &rel, 4);
