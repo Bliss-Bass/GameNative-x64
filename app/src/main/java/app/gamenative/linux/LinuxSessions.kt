@@ -108,11 +108,13 @@ object LinuxSessions {
         height: Int,
         densityDpi: Int,
     ): Result<LinuxSession> = openMutex.withLock {
+        val reuse = synchronized(held) { held[key]?.takeIf { it.session.isRunning } }
+        if (reuse != null) {
+            Timber.i("[LinuxSessions]: reusing display :%d for %s", reuse.session.display, key)
+            deliver(reuse, argv)
+            return@withLock Result.success(reuse.session)
+        }
         synchronized(held) {
-            held[key]?.takeIf { it.session.isRunning }?.let {
-                Timber.i("[LinuxSessions]: reusing display :%d for %s", it.session.display, key)
-                return@withLock Result.success(it.session)
-            }
             // A session that is present but no longer running is a failed teardown or a crashed
             // server; drop it rather than hand it back.
             held.remove(key)?.also { Timber.w("[LinuxSessions]: %s was registered but not running", key) }
@@ -140,6 +142,24 @@ object LinuxSessions {
                 LinuxSessionService.ensureRunning(context)
             }
             .onFailure { Timber.e(it, "[LinuxSessions]: could not open %s", key) }
+    }
+
+    /**
+     * Gives a callback URL to an application that is already running.
+     *
+     * Bringing its window forward is not enough: Cursor's sign-in token arrives as the
+     * arguments of a second launch, and the first process only hears about it if that
+     * second process actually starts.
+     */
+    suspend fun deliverToRunning(key: String, argv: String?) {
+        val reuse = synchronized(held) { held[key]?.takeIf { it.session.isRunning } } ?: return
+        deliver(reuse, argv)
+    }
+
+    private suspend fun deliver(reuse: Held, argv: String?) {
+        val command = LinuxSchemeHandler.forwardArgv(reuse.argv, argv) ?: return
+        Timber.i("[LinuxSessions]: delivering to running %s: %s", reuse.key, command)
+        withContext(Dispatchers.IO) { reuse.session.run(command) }
     }
 
     /** Notes that a window is showing [key], so closing it can be told from leaving it running. */

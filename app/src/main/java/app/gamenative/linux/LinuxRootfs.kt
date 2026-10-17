@@ -461,6 +461,7 @@ object LinuxRootfs {
         ensureFirefoxSandboxNotice(rootfs)
         ensureOpenshotLaunchWrapper(rootfs)
         ensureFirefoxLaunchWrapper(rootfs)
+        LinuxSchemeHandler.install(rootfs)
     }
 
     /**
@@ -519,6 +520,13 @@ object LinuxRootfs {
             } catch (e) {
               Components.utils.reportError(e);
             }
+            // GameNative: sign-in redirects (cursor://, vscode://) go to the running app.
+            pref("network.protocol-handler.external.cursor", true);
+            pref("network.protocol-handler.external.vscode", true);
+            pref("network.protocol-handler.warn-external.cursor", false);
+            pref("network.protocol-handler.warn-external.vscode", false);
+            pref("network.protocol-handler.expose.cursor", false);
+            pref("network.protocol-handler.expose.vscode", false);
             """.trimIndent() + "\n"
         for (dirName in listOf("usr/lib/firefox", "usr/lib/firefox-beta")) {
             val appDir = File(rootfs, dirName)

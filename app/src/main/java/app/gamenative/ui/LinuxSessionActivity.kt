@@ -12,12 +12,14 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
+import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxXServerView
 import app.gamenative.stubs.StubIcons
 import app.gamenative.stubs.Stubs
@@ -27,6 +29,7 @@ import app.gamenative.ui.screen.linux.toggleLinuxMenu
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.AppUiScale
 import app.gamenative.ui.util.ProvideAppUiScale
+import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
@@ -99,10 +102,11 @@ class LinuxSessionActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        applySessionCaption(
-            intent.getStringExtra(EXTRA_LABEL),
-            intent.data?.lastPathSegment,
-        )
+        val argv = intent.getStringExtra(EXTRA_ARGV)
+        val entryId = intent.data?.lastPathSegment
+        applySessionCaption(intent.getStringExtra(EXTRA_LABEL), entryId)
+        val key = LinuxSessions.keyFor(entryId, argv)
+        lifecycleScope.launch { LinuxSessions.deliverToRunning(key, argv) }
     }
 
     /**
