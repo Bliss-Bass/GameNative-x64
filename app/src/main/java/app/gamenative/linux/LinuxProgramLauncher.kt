@@ -29,6 +29,10 @@ object LinuxProgramLauncher {
     // vendored under app/src/main/cpp/proot, which cannot fake root and so cannot run apt.
     private const val PROOT = "libproot-linux.so"
     private const val PROOT_LOADER = "libproot-linux-loader.so"
+    private val WHITESPACE = Regex("\\s+")
+
+    /** Electron/Chromium binaries that refuse to start as root. */
+    private val ROOT_SANDBOX_BINS = setOf("cursor", "code", "code-oss", "electron")
 
     private fun nativeLibraryDir(context: Context): String = context.applicationInfo.nativeLibraryDir
 
@@ -179,6 +183,20 @@ object LinuxProgramLauncher {
     }
 
     /**
+     * Chromium and Electron abort when the guest is root unless `--no-sandbox` is set.
+     * PRoot's `--root-id` makes every guest process root, so those binaries never get past
+     * startup. The flag is added only for those programs, and only when it is not already there.
+     */
+    internal fun argvForRootGuest(argv: String): String {
+        val tokens = argv.trim().split(WHITESPACE).filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) return argv
+        val name = tokens.first().substringAfterLast('/')
+        if (name !in ROOT_SANDBOX_BINS) return argv
+        if (tokens.any { it == "--no-sandbox" }) return argv
+        return argv.trim() + " --no-sandbox"
+    }
+
+    /**
      * Starts [argv] and returns the process, with its output logged under [tag].
      *
      * Unlike [exec] this keeps reading the child's pipes, which a long-lived process needs:
@@ -194,8 +212,9 @@ object LinuxProgramLauncher {
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
     ): Process? {
-        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir, extraBinds)
-        Timber.i("[LinuxProgramLauncher]: start %s", argv)
+        val guestArgv = argvForRootGuest(argv)
+        val command = buildCommand(context, guestArgv, cwd, extraEnv, displaySocketDir, extraBinds)
+        Timber.i("[LinuxProgramLauncher]: start %s", guestArgv)
 
         val process = ProcessHelper.startProcess(
             command,
