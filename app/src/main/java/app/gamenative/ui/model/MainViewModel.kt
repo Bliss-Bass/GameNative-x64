@@ -664,6 +664,9 @@ class MainViewModel @Inject constructor(
                         } else {
                             SteamUtils.replaceSteamclientDll(context, appId, offline)
                         }
+                        // The DLL swap is skipped once its marker is set, so the
+                        // shared Source library has to be linked on every launch.
+                        SteamUtils.refreshSourceEngineLibrary(context, appId)
                     }
                 }
                 container

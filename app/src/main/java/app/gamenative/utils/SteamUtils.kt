@@ -32,6 +32,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -1158,6 +1159,143 @@ object SteamUtils {
     }
 
     /**
+     * App 215 is the Source SDK license. On SteamOS the real client answers
+     * ISteamApps::BIsSubscribedApp(215) from the account, and Valve grants that
+     * license to anyone who owns a Source engine game. Source then allows an
+     * unknown mod directory (Black Mesa's "bms") to start. Goldberg only
+     * reports that ownership for the running app and for [app::dlcs] entries.
+     */
+    private const val SOURCE_SDK_APP_ID = 215
+
+    /** Games whose ownership is what Steam uses to grant app 215. */
+    private val SOURCE_ENGINE_APP_IDS = intArrayOf(
+        218, // Source SDK Base 2007
+        220, // Half-Life 2
+        240, // Counter-Strike: Source
+        280, // Half-Life: Source
+        300, // Day of Defeat: Source
+        320, // Half-Life 2: Deathmatch
+        340, // Half-Life 2: Lost Coast
+        380, // Half-Life 2: Episode One
+        400, // Portal
+        420, // Half-Life 2: Episode Two
+        500, // Left 4 Dead
+        550, // Left 4 Dead 2
+        620, // Portal 2
+        243730, // Source SDK Base 2013 Singleplayer
+        243750, // Source SDK Base 2013 Multiplayer
+    )
+
+    private data class LinkedSteamApp(val appId: Int, val installDir: File, val name: String)
+
+    /** Installed Source engine games, the ones Proton would already have in steamapps. */
+    private fun installedSourceEngineApps(): List<LinkedSteamApp> {
+        val linked = ArrayList<LinkedSteamApp>()
+        for (id in SOURCE_ENGINE_APP_IDS) {
+            val dir = runCatching { File(SteamService.getAppDirPath(id)) }.getOrNull() ?: continue
+            if (!dir.isDirectory || dir.list().isNullOrEmpty()) continue
+            val name = getAppInfoOf(id)?.name?.ifBlank { null } ?: dir.name
+            linked.add(LinkedSteamApp(id, dir, name))
+        }
+        return linked
+    }
+
+    /**
+     * Goldberg only rewrites steam_settings when the Steam DLL marker is clear,
+     * so a later install of Half-Life 2 would stay invisible. Do the Source
+     * library link on every launch instead.
+     */
+    fun refreshSourceEngineLibrary(context: Context, appId: String) {
+        val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
+        val sourceApps = installedSourceEngineApps()
+        android.util.Log.i(
+            "SteamUtils",
+            "Source library for $steamAppId: ${sourceApps.joinToString { "${it.appId}:${it.installDir.name}" }.ifEmpty { "none installed" }}",
+        )
+        if (sourceApps.isEmpty()) return
+
+        val container = ContainerUtils.getOrCreateContainer(context, appId)
+        val steamDir = File(container.rootDir, ".wine/drive_c/Program Files (x86)/Steam").toPath()
+        linkSourceEngineLibrary(steamDir, sourceApps.filter { it.appId != steamAppId })
+
+        val settingsDirs = ArrayList<Path>()
+        val prefixSettings = steamDir.resolve("steam_settings")
+        if (Files.isDirectory(prefixSettings)) settingsDirs.add(prefixSettings)
+        val appDir = File(SteamService.getAppDirPath(steamAppId))
+        val gameSettings = appDir.toPath().resolve("steam_settings")
+        if (Files.isDirectory(gameSettings)) settingsDirs.add(gameSettings)
+        val orig = File(appDir, "orig_dll_path.txt")
+        if (orig.isFile) {
+            orig.readLines().forEach { rel ->
+                val parent = File(appDir, rel.trim()).parentFile ?: return@forEach
+                val settings = File(parent, "steam_settings").toPath()
+                if (Files.isDirectory(settings)) settingsDirs.add(settings)
+            }
+        }
+        settingsDirs.distinct().forEach { dir ->
+            patchSourceLicense(dir.resolve("configs.app.ini"), steamAppId, sourceApps)
+        }
+    }
+
+    private fun patchSourceLicense(ini: Path, steamAppId: Int, apps: List<LinkedSteamApp>) {
+        if (Files.notExists(ini)) return
+        var text = ini.toFile().readText()
+        if (steamAppId != SOURCE_SDK_APP_ID && !Regex("(?m)^215=").containsMatchIn(text)) {
+            text = text.replaceFirst("[app::dlcs]\r\n", "[app::dlcs]\r\n215=Source SDK\r\n")
+            if (!text.contains("215=Source SDK")) {
+                text = text.replaceFirst("[app::dlcs]\n", "[app::dlcs]\n215=Source SDK\n")
+            }
+        }
+        apps.forEach { app ->
+            if (app.appId == steamAppId) return@forEach
+            val line = "${app.appId}=./steamapps/common/${app.installDir.name}"
+            if (text.contains(line)) return@forEach
+            val updated = text.replaceFirst("[app::paths]\r\n", "[app::paths]\r\n$line\r\n")
+                .let { if (it.contains(line)) it else it.replaceFirst("[app::paths]\n", "[app::paths]\n$line\n") }
+            text = updated
+        }
+        ini.toFile().writeText(text)
+        android.util.Log.i("SteamUtils", "Updated ${ini.toAbsolutePath()} with the Source SDK license")
+    }
+
+    /**
+     * Put each installed Source game where the container's Steam client looks:
+     * a steamapps/common symlink (the shared library Proton mounts) and an
+     * appmanifest so the library lists it. Skips anything already linked.
+     */
+    private fun linkSourceEngineLibrary(steamDir: Path, apps: List<LinkedSteamApp>) {
+        if (apps.isEmpty()) return
+        val steamapps = steamDir.resolve("steamapps")
+        val common = steamapps.resolve("common")
+        runCatching { Files.createDirectories(common) }.onFailure {
+            Timber.w(it, "Could not create the container Steam library")
+            return
+        }
+        apps.forEach { app ->
+            val link = common.resolve(app.installDir.name)
+            if (!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+                runCatching { Files.createSymbolicLink(link, app.installDir.toPath()) }
+                    .onFailure { Timber.w(it, "Could not link ${app.name} into the container Steam library") }
+            }
+            val manifest = steamapps.resolve("appmanifest_${app.appId}.acf")
+            if (Files.notExists(manifest)) {
+                val acf = buildString {
+                    appendLine("\"AppState\"")
+                    appendLine("{")
+                    appendLine("\t\"appid\"\t\t\"${app.appId}\"")
+                    appendLine("\t\"Universe\"\t\t\"1\"")
+                    appendLine("\t\"name\"\t\t\"${escapeString(app.name)}\"")
+                    appendLine("\t\"StateFlags\"\t\t\"4\"")
+                    appendLine("\t\"installdir\"\t\t\"${escapeString(app.installDir.name)}\"")
+                    appendLine("}")
+                }
+                runCatching { manifest.toFile().writeText(acf) }
+                    .onFailure { Timber.w(it, "Could not write the appmanifest for ${app.name}") }
+            }
+        }
+    }
+
+    /**
      * Sibling folder "steam_settings" + empty "offline.txt" file, no-ops if they already exist.
      */
     private fun ensureSteamSettings(context: Context, dllPath: Path, appId: String, ticketBase64: String? = null, isOffline: Boolean = false) {
@@ -1235,6 +1373,7 @@ object SteamUtils {
         val appendedDlcIds = mutableListOf<Int>()
 
         val forceDlc = container.isForceDlc()
+        val sourceApps = installedSourceEngineApps()
         val appIniContent = buildString {
             appendLine("[app::dlcs]")
             appendLine("unlock_all=${if (forceDlc) 1 else 0}")
@@ -1260,6 +1399,15 @@ object SteamUtils {
                 }
             }
 
+            // Goldberg's BIsSubscribedApp is true for [app::dlcs] ids. That is
+            // the answer Proton's steamclient gives for the Source SDK license.
+            if (sourceApps.isNotEmpty() &&
+                steamAppId != SOURCE_SDK_APP_ID &&
+                !appendedDlcIds.contains(SOURCE_SDK_APP_ID)
+            ) {
+                appendLine("$SOURCE_SDK_APP_ID=Source SDK")
+            }
+
             // Add app paths and cloud save config sections if appInfo exists
             if (appInfo != null) {
                 // Some games required this path to be setup for detecting dlc, e.g. Vampire Survivors
@@ -1269,6 +1417,11 @@ object SteamUtils {
                 appendLine()
                 appendLine("[app::paths]")
                 appendLine("$steamAppId=./steamapps/common/$actualInstallDir")
+                sourceApps.forEach { linked ->
+                    if (linked.appId != steamAppId) {
+                        appendLine("${linked.appId}=./steamapps/common/${linked.installDir.name}")
+                    }
+                }
 
                 // Setup for cloud save
                 appendLine()
@@ -1278,6 +1431,7 @@ object SteamUtils {
 
         if (Files.notExists(appIni)) Files.createFile(appIni)
         appIni.toFile().writeText(appIniContent)
+        linkSourceEngineLibrary(steamDir, sourceApps)
 
         val mainIni = settingsDir.resolve("configs.main.ini")
 
