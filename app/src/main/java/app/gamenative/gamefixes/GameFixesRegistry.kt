@@ -63,9 +63,17 @@ object GameFixesRegistry {
         val gameId = ContainerUtils.extractGameIdFromContainerId(appId)?.toString() ?: return
         val catalogId = catalogIdFor(source, gameId) ?: return
         Timber.i("GameFixesRegistry: Applying fixes for game: $source $catalogId if available")
-        val fix = fixesProvider()[source to catalogId] ?: return
         val (installPath, installPathWindows) = resolvePaths(context, source, gameId) ?: return
-        fix.apply(context, catalogId, installPath, installPathWindows, container)
+        fixesProvider()[source to catalogId]?.apply(
+            context,
+            catalogId,
+            installPath,
+            installPathWindows,
+            container,
+        )
+        // -safe is not a per-title fix. Any Source install that still has it
+        // starts windowed, which is the dialog-beside-the-game case.
+        SourceSafeModeFix.apply(context, catalogId, installPath, installPathWindows, container)
     }
 
     /** Returns the user launch option that keeps this game from starting, if the fix knows one. */
