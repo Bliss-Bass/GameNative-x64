@@ -274,6 +274,10 @@ class LinuxXServerView(
         ) {
             post { ensureTypingFocus() }
         }
+        // Uncaptured mouse buttons never reach TouchpadView.onCapturedPointer, and it does
+        // not handle them on the generic-motion path. Without this, a click moves the
+        // cursor and then does nothing — including the buttons on a frozen-window dialog.
+        if (touchpadView.handleUncapturedMouseButton(event)) return true
         // TouchpadView only sees ACTION_SCROLL under pointer capture; uncaptured wheels land here.
         if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
             emitScrollFromDelta(

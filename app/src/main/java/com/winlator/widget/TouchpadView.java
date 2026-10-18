@@ -2356,6 +2356,25 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         }
     }
 
+    /**
+     * Mouse buttons that never entered pointer capture. Hover already tracks the cursor,
+     * but a click with no preceding hover (and any click while capture is off) is only
+     * delivered as a generic motion event, which this view otherwise ignores. Place the
+     * pointer on the click, then press or release.
+     */
+    public boolean handleUncapturedMouseButton(MotionEvent event) {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) return false;
+        int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_BUTTON_PRESS && action != MotionEvent.ACTION_BUTTON_RELEASE) {
+            return false;
+        }
+        if (!xServer.isRelativeMouseMovement()) {
+            float[] pt = XForm.transformPoint(xform, event.getX(), event.getY());
+            xServer.injectPointerMove((int) pt[0], (int) pt[1]);
+        }
+        return onExternalMouseEvent(event);
+    }
+
     public boolean onExternalMouseEvent(MotionEvent event) {
         boolean handled = false;
         if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {

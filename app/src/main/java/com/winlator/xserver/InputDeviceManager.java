@@ -17,6 +17,7 @@ import com.winlator.xserver.events.LeaveNotify;
 import com.winlator.xserver.events.MappingNotify;
 import com.winlator.xserver.events.MotionNotify;
 import com.winlator.xserver.events.PointerWindowEvent;
+import com.winlator.xserver.extensions.XInput2Extension;
 
 public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyboard.OnKeyboardListener, WindowManager.OnWindowModificationListener, XResourceManager.OnResourceLifecycleListener {
     private static final byte MOUSE_WHEEL_DELTA = 120;
@@ -172,6 +173,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
                 Window child = grabWindow.isAncestorOf(pointWindow) ? pointWindow : null;
                 grabWindow.sendEvent(Event.BUTTON_PRESS, new ButtonPress(button.code(), xServer.windowManager.rootWindow, grabWindow, child, x, y, localPoint[0], localPoint[1], eventMask));
             }
+            emitXiPointer(XInput2Extension.XI_BUTTON_PRESS, button.code());
         }
     }
 
@@ -217,6 +219,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             if (xServer.pointer.getButtonMask().isEmpty() && xServer.grabManager.isReleaseWithButtons()) {
                 xServer.grabManager.deactivatePointerGrab();
             }
+            emitXiPointer(XInput2Extension.XI_BUTTON_RELEASE, button.code());
         }
     }
 
@@ -234,6 +237,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             Window child = eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;
             sendEvent(window, eventMask, new MotionNotify(false, xServer.windowManager.rootWindow, eventWindow, child, x, y, localPoint[0], localPoint[1], getKeyButMask()));
         }
+        emitXiPointer(XInput2Extension.XI_MOTION, 0);
     }
 
     @Override
@@ -365,6 +369,19 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             }
         }
         return eventMask;
+    }
+
+    /** XI2 pointer event for clients that selected it and ignore core clicks. */
+    private void emitXiPointer(int evtype, int detail) {
+        if (xServer.isRelativeMouseMovement() || pointWindow == null) return;
+        XInput2Extension xi = xServer.getExtension(XInput2Extension.MAJOR_OPCODE);
+        if (xi == null) return;
+        int bits = 0;
+        for (Pointer.Button button : Pointer.Button.values()) {
+            if (xServer.pointer.isButtonPressed(button)) bits |= 1 << (button.code() - 1);
+        }
+        xi.emitDevicePointer(evtype, pointWindow, detail & 0xff,
+                xServer.pointer.getX(), xServer.pointer.getY(), bits);
     }
 
     public Bitmask getKeyButMask() {
