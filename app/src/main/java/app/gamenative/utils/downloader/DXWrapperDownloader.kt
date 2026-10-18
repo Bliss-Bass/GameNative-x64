@@ -107,6 +107,14 @@ object DXWrapperDownloader {
     /**
      * Loads the dxwrapper manifest from assets.
      */
+    fun availableComponentIds(context: Context): Set<String> {
+        return try {
+            loadDXWrapperManifest(context).components.map { it.id }.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
     private fun loadDXWrapperManifest(context: Context): DXWrapperManifest {
         return try {
             val manifestJson = context.assets.open(DXWRAPPER_MANIFEST_FILE).bufferedReader().use { it.readText() }

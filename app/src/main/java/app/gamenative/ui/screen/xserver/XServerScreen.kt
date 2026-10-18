@@ -5625,8 +5625,18 @@ private suspend fun extractDXWrapperFiles(
             } else {
                 dxvkMinVersion
             }
-            Timber.i("Extracting VKD3D DX version for dxwrapper: $dxvkVersionForVkd3d")
-            extractDXWrapperComponent(context, "dxvk-$dxvkVersionForVkd3d", windowsDir, onExtractFileListener)
+            val requestedDxvk = "dxvk-$dxvkVersionForVkd3d"
+            val fallbackDxvk = "dxvk-$dxvkMinVersion"
+            val dxvkComponent = ManifestComponentHelper.selectAvailableComponent(
+                requestedDxvk,
+                fallbackDxvk,
+                DXWrapperDownloader.availableComponentIds(context),
+            )
+            if (dxvkComponent != requestedDxvk) {
+                Timber.i("DXVK build $requestedDxvk is not installable, using $dxvkComponent")
+            }
+            Timber.i("Extracting VKD3D DX version for dxwrapper: $dxvkComponent")
+            extractDXWrapperComponent(context, dxvkComponent, windowsDir, onExtractFileListener)
 
             if (profile != null) {
                 Timber.d("Applying user-defined VKD3D content profile: " + dxwrapper)
@@ -5646,7 +5656,20 @@ private suspend fun extractDXWrapperFiles(
                 Timber.d("Applying user-defined DXVK content profile: " + dxwrapper)
                 contentsManager.applyContent(profile);
             } else {
-                extractDXWrapperComponent(context, dxwrapper, windowsDir, onExtractFileListener)
+                val fallbackDxvk = "dxvk-${DefaultVersion.DXVK}"
+                val dxvkComponent = if (dxwrapper.startsWith("dxvk")) {
+                    ManifestComponentHelper.selectAvailableComponent(
+                        dxwrapper,
+                        fallbackDxvk,
+                        DXWrapperDownloader.availableComponentIds(context),
+                    )
+                } else {
+                    dxwrapper
+                }
+                if (dxvkComponent != dxwrapper) {
+                    Timber.i("DXVK build $dxwrapper is not installable, using $dxvkComponent")
+                }
+                extractDXWrapperComponent(context, dxvkComponent, windowsDir, onExtractFileListener)
             }
             extractDXWrapperComponent(context, "d8vk-${DefaultVersion.D8VK}", windowsDir, onExtractFileListener)
         }

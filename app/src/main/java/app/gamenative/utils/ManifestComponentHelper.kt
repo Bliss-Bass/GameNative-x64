@@ -30,6 +30,17 @@ object ManifestComponentHelper {
         }
     }
 
+    /**
+     * A container can name a DXVK build that is only a content-profile id
+     * (for example `dxvk-2.7.1-1-gplasync-0`). That id is not in the wrapper
+     * manifest, so extraction writes nothing and D3D11 stays on Wine's builtin,
+     * which cannot report feature level 11.0. Use the requested id when it can
+     * be installed, otherwise the known fallback.
+     */
+    fun selectAvailableComponent(requestedId: String, fallbackId: String, availableIds: Set<String>): String {
+        return if (requestedId in availableIds) requestedId else fallbackId
+    }
+
     data class InstalledContentLists(
         val dxvk: List<String>,
         val vkd3d: List<String>,
