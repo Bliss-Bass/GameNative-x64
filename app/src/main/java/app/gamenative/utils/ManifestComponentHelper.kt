@@ -41,6 +41,34 @@ object ManifestComponentHelper {
         return if (requestedId in availableIds) requestedId else fallbackId
     }
 
+    /**
+     * Version string to store so the container matches the DXVK build that
+     * will actually be extracted. Null means leave the current value alone.
+     *
+     * A 2.x id that is in the manifest is kept. A content-profile id that was
+     * never installed, and a pre-2.1 id on a host that extracts the modern
+     * fallback instead, are both rewritten. An empty [availableIds] means the
+     * manifest could not be read, so nothing is rewritten. [forceLegacy]
+     * keeps the 1.10.3 build used when an older Vulkan device cannot run it.
+     */
+    fun replacementDxvkVersion(
+        version: String,
+        availableIds: Set<String>,
+        installedProfile: Boolean = false,
+        fallbackVersion: String = "2.6.1-gplasync",
+        forceLegacy: Boolean = false,
+    ): String? {
+        val trimmed = version.trim().removePrefix("dxvk-")
+        if (trimmed.isEmpty() || availableIds.isEmpty() || installedProfile) return null
+        val target = when {
+            forceLegacy && "dxvk-1.10.3" in availableIds -> "1.10.3"
+            isAtLeastVersion(trimmed, 2, 1, 0) && "dxvk-$trimmed" in availableIds -> return null
+            "dxvk-$fallbackVersion" in availableIds -> fallbackVersion
+            else -> return null
+        }
+        return if (target == trimmed) null else target
+    }
+
     data class InstalledContentLists(
         val dxvk: List<String>,
         val vkd3d: List<String>,

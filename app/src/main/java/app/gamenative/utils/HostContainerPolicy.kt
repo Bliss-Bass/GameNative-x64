@@ -1,7 +1,9 @@
 package app.gamenative.utils
 
 import android.content.Context
+import app.gamenative.utils.downloader.DXWrapperDownloader
 import com.winlator.container.Container
+import com.winlator.contents.ContentsManager
 import com.winlator.core.KeyValueSet
 import org.json.JSONObject
 import timber.log.Timber
@@ -134,13 +136,17 @@ object HostContainerPolicy {
     }
 
     /**
-     * Rewrites arm64ec-oriented container fields on x86_64 hosts.
+     * Rewrites container fields the host cannot actually run.
      * Returns true when the container was mutated (caller should persist).
      */
     fun adaptContainerForHost(context: Context, container: Container): Boolean {
-        if (!isX86Host()) return false
-
         var changed = false
+
+        if (replaceUninstallableDxvk(context, container)) {
+            changed = true
+        }
+
+        if (!isX86Host()) return changed
 
         val mappedWine = mapWineVersionForHost(container.wineVersion)
         if (mappedWine != container.wineVersion) {
@@ -171,5 +177,66 @@ object HostContainerPolicy {
         }
 
         return changed
+    }
+
+    /**
+     * A saved DXVK version that is only a content-profile id never gets
+     * extracted, so D3D11 stays on Wine and games such as Boltgun quit with
+     * the feature-level 11.0 dialog. Write an installable version into the
+     * container. An installed profile for that id is left in place.
+     */
+    private fun replaceUninstallableDxvk(context: Context, container: Container): Boolean {
+        val available = DXWrapperDownloader.availableComponentIds(context)
+        val config = KeyValueSet(container.dxWrapperConfig)
+        var changed = false
+        val forceLegacy = container.graphicsDriver == "vortek" ||
+            container.graphicsDriver == "adreno" ||
+            container.graphicsDriver == "sd-8-elite"
+
+        val version = config.get("version")
+        val versionReplacement = ManifestComponentHelper.replacementDxvkVersion(
+            version,
+            available,
+            installedProfile = dxvkProfileInstalled(context, version, available),
+            forceLegacy = forceLegacy,
+        )
+        if (versionReplacement != null) {
+            Timber.i("HostContainerPolicy: DXVK %s cannot be installed, saving %s", version, versionReplacement)
+            config.put("version", versionReplacement)
+            container.dxWrapperConfig = config.toString()
+            changed = true
+        }
+
+        val wrapper = container.dxWrapper.orEmpty()
+        if (wrapper.startsWith("dxvk-")) {
+            val wrapperReplacement = ManifestComponentHelper.replacementDxvkVersion(
+                wrapper,
+                available,
+                installedProfile = dxvkProfileInstalled(context, wrapper, available),
+                forceLegacy = forceLegacy,
+            )
+            if (wrapperReplacement != null) {
+                Timber.i("HostContainerPolicy: DX wrapper %s cannot be installed, using dxvk", wrapper)
+                container.dxWrapper = "dxvk"
+                if (config.get("version") != wrapperReplacement) {
+                    config.put("version", wrapperReplacement)
+                    container.dxWrapperConfig = config.toString()
+                }
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    private fun dxvkProfileInstalled(context: Context, version: String, availableIds: Set<String>): Boolean {
+        val trimmed = version.trim()
+        if (trimmed.isEmpty() || availableIds.isEmpty()) return false
+        val componentId = if (trimmed.startsWith("dxvk-")) trimmed else "dxvk-$trimmed"
+        if (componentId in availableIds) return false
+        return try {
+            ContentsManager(context).getProfileByEntryName(componentId) != null
+        } catch (_: Exception) {
+            false
+        }
     }
 }

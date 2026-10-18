@@ -139,6 +139,24 @@ class HostContainerPolicyTest {
     }
 
     @Test
+    fun adaptContainerForHost_rewritesDxvkVersionThatCannotBeInstalled() {
+        ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
+        val context: Context = RuntimeEnvironment.getApplication()
+        val container = Container("STEAM_2005010").apply {
+            wineVersion = HostContainerPolicy.PROTON_X86_64
+            graphicsDriver = "System"
+            dxWrapper = "vkd3d"
+            dxWrapperConfig = "version=2.7.1-1-gplasync-0,vkd3dVersion=3.0b"
+        }
+
+        assertTrue(HostContainerPolicy.adaptContainerForHost(context, container))
+        assertEquals("vkd3d", container.dxWrapper)
+        assertTrue(container.dxWrapperConfig.contains("version=2.6.1-gplasync"))
+        assertTrue(container.dxWrapperConfig.contains("vkd3dVersion=3.0b"))
+        assertFalse(container.dxWrapperConfig.contains("2.7.1-1-gplasync-0"))
+    }
+
+    @Test
     fun adaptContainerForHost_noOpWhenAlreadyX86_64() {
         ShadowBuild.setSupportedAbis(arrayOf("x86_64", "arm64-v8a", "x86"))
         val context: Context = RuntimeEnvironment.getApplication()

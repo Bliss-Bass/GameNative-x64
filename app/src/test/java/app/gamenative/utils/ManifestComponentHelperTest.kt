@@ -28,4 +28,33 @@ class ManifestComponentHelperTest {
             ),
         )
     }
+
+    @Test
+    fun replacementKeepsAnInstallableVersionAndAnInstalledProfile() {
+        assertEquals(null, ManifestComponentHelper.replacementDxvkVersion("2.7.1", listed))
+        assertEquals(
+            null,
+            ManifestComponentHelper.replacementDxvkVersion(
+                "2.7.1-1-gplasync-0",
+                listed,
+                installedProfile = true,
+            ),
+        )
+    }
+
+    @Test
+    fun replacementRewritesAVersionThatCannotBeInstalled() {
+        assertEquals(
+            "2.6.1-gplasync",
+            ManifestComponentHelper.replacementDxvkVersion("2.7.1-1-gplasync-0", listed),
+        )
+        assertEquals(
+            "2.6.1-gplasync",
+            ManifestComponentHelper.replacementDxvkVersion("dxvk-2.7.1-1-gplasync-0", listed),
+        )
+        assertEquals(
+            "2.6.1-gplasync",
+            ManifestComponentHelper.replacementDxvkVersion("async-1.10.3", listed),
+        )
+    }
 }
