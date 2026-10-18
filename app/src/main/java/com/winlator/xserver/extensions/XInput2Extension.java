@@ -14,6 +14,7 @@ import com.winlator.xserver.errors.BadImplementation;
 import com.winlator.xserver.errors.BadValue;
 import com.winlator.xserver.errors.BadWindow;
 import com.winlator.xserver.errors.XRequestError;
+import com.winlator.xserver.events.XIDeviceEvent;
 import com.winlator.xserver.events.XIRawButtonPressNotify;
 import com.winlator.xserver.events.XIRawButtonReleaseNotify;
 import com.winlator.xserver.events.XIRawMotionNotify;
@@ -37,6 +38,9 @@ public class XInput2Extension implements Extension {
     private static final int MASTER_KEYBOARD_ID = 3;
     private static final int XI_BUTTON_CLASS = 1;
     private static final int XI_VALUATOR_CLASS = 2;
+    public static final int XI_BUTTON_PRESS = 4;
+    public static final int XI_BUTTON_RELEASE = 5;
+    public static final int XI_MOTION = 6;
     private static final int XI_RawButtonPress_MASK = 1 << 15;
     private static final int XI_RawButtonRelease_MASK = 1 << 16;
     private static final int XI_RawMotion_MASK  = 1 << 17;
@@ -45,9 +49,13 @@ public class XInput2Extension implements Extension {
     private static final int POINTER_BUTTON_COUNT = 7;
 
     private final List<Selection> selections = new CopyOnWriteArrayList<>();
+    /** The active XI2 device grab. Chromium grabs on click and drops the button if this fails. */
+    private Selection grab;
 
     private static abstract class ClientOpcodes {
         private static final byte GET_EXTENSION_VERSION = 1;  // X_GetExtensionVersion (XI 1.x)
+        private static final byte GRAB_DEVICE           = 51; // X_XIGrabDevice
+        private static final byte UNGRAB_DEVICE         = 52; // X_XIUngrabDevice
         private static final byte GET_CLIENT_POINTER    = 45; // X_XIGetClientPointer (XI 2.x)
         private static final byte SELECT_EVENTS         = 46; // X_XISelectEvents (XI 2.x)
         private static final byte QUERY_VERSION         = 47; // X_XIQueryVersion (XI 2.x)
@@ -412,6 +420,16 @@ public class XInput2Extension implements Extension {
             case ClientOpcodes.GET_EXTENSION_VERSION:
                 getExtensionVersion(client, inputStream, outputStream);
                 break;
+            // ListInputDevices and XIQueryPointer are answered with BadImplementation
+            // below. A short reply here makes Cursor parse it as a device list, fail an
+            // internal size check, and exit on SIGTRAP before the window is mapped.
+            case ClientOpcodes.GRAB_DEVICE:
+                grabDevice(client, inputStream, outputStream);
+                break;
+            case ClientOpcodes.UNGRAB_DEVICE:
+                inputStream.skip(client.getRemainingRequestLength());
+                grab = null;
+                break;
             case ClientOpcodes.GET_CLIENT_POINTER:
                 getClientPointer(client, inputStream, outputStream);
                 break;
@@ -436,6 +454,80 @@ public class XInput2Extension implements Extension {
 
     public void onClientDisconnected(XClient client) {
         selections.removeIf(sel -> sel.client == client);
+        if (grab != null && grab.client == client) grab = null;
+    }
+
+    /**
+     * Deliver an XI2 pointer event to every client that selected it on
+     * [source] or an ancestor. Core ButtonPress is not enough: a client that
+     * selected XI_ButtonPress never sees the core event.
+     */
+    public void emitDevicePointer(int evtype, Window source, int detail, int rootX, int rootY, int buttonBits) {
+        if (source == null) return;
+        int maskBit = 1 << evtype;
+        if (grab != null && grab.client != null && grab.window != null
+                && matchesSelection(grab, MASTER_POINTER_ID) && grab.mask.isSet(maskBit)) {
+            sendDevicePointer(grab, evtype, source, detail, rootX, rootY, buttonBits);
+            return;
+        }
+        for (Selection sel : selections) {
+            if (!matchesSelection(sel, MASTER_POINTER_ID)) continue;
+            if (sel.window == null || sel.client == null || !sel.mask.isSet(maskBit)) continue;
+            if (sel.window != source && !sel.window.isAncestorOf(source)) continue;
+            sendDevicePointer(sel, evtype, source, detail, rootX, rootY, buttonBits);
+        }
+    }
+
+    private void sendDevicePointer(Selection sel, int evtype, Window source, int detail,
+                                   int rootX, int rootY, int buttonBits) {
+        int childId = 0;
+        if (sel.window != source) {
+            Window cursor = source;
+            while (cursor.getParent() != null && cursor.getParent() != sel.window) cursor = cursor.getParent();
+            if (cursor.getParent() == sel.window) childId = cursor.id;
+        }
+        short[] local = sel.window.rootPointToLocal((short) rootX, (short) rootY);
+        Window root = sel.client.xServer.windowManager.rootWindow;
+        sel.client.sendEvent(new XIDeviceEvent(
+                getMajorOpcode(), evtype, MASTER_POINTER_ID, detail,
+                root != null ? root.id : 0, sel.window.id, childId,
+                rootX, rootY, local[0], local[1], buttonBits));
+    }
+
+    private void grabDevice(XClient client, XInputStream inputStream, XOutputStream outputStream)
+            throws IOException, XRequestError {
+        int windowId = inputStream.readInt();
+        inputStream.readInt(); // time
+        inputStream.readInt(); // cursor
+        int deviceId = inputStream.readShort() & 0xFFFF;
+        inputStream.readByte(); // grab mode
+        inputStream.readByte(); // paired device mode
+        inputStream.readByte(); // owner events
+        inputStream.readByte(); // pad
+        int maskLen = inputStream.readShort() & 0xFFFF;
+        Bitmask mask = new Bitmask(0);
+        for (int word = 0; word < maskLen; word++) {
+            mask.set(inputStream.readUnsignedInt() << (word * 32));
+        }
+        inputStream.skip(client.getRemainingRequestLength());
+        Window window = client.xServer.windowManager.getWindow(windowId);
+        if (window == null) throw new BadWindow(windowId);
+        Selection held = new Selection();
+        held.client = client;
+        held.window = window;
+        held.deviceId = deviceId;
+        held.mask = mask;
+        held.id = windowId;
+        grab = held;
+
+        try (XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte) 0);
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt(0);
+            outputStream.writeByte((byte) 0); // GrabSuccess
+            outputStream.writePad(23);
+        }
     }
 
     public void emitRawMotion(int deviceId, double deltaX, double deltaY) {
