@@ -57,4 +57,9 @@ class ManifestComponentHelperTest {
             ManifestComponentHelper.replacementDxvkVersion("async-1.10.3", listed),
         )
     }
+
+    @Test
+    fun replacementLeavesAPlainVersionTheUserSaved() {
+        assertEquals(null, ManifestComponentHelper.replacementDxvkVersion("2.14.1", listed))
+    }
 }

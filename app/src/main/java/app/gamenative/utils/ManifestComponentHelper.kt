@@ -45,11 +45,13 @@ object ManifestComponentHelper {
      * Version string to store so the container matches the DXVK build that
      * will actually be extracted. Null means leave the current value alone.
      *
-     * A 2.x id that is in the manifest is kept. A content-profile id that was
-     * never installed, and a pre-2.1 id on a host that extracts the modern
-     * fallback instead, are both rewritten. An empty [availableIds] means the
-     * manifest could not be read, so nothing is rewritten. [forceLegacy]
-     * keeps the 1.10.3 build used when an older Vulkan device cannot run it.
+     * A 2.x id is kept when it is in the manifest or is a plain version the
+     * user saved (for example the vkd3d slot `2.14.1`). A content-profile id
+     * that was never installed, such as `2.7.1-1-gplasync-0`, and a pre-2.1
+     * id on a host that extracts the modern fallback instead, are rewritten.
+     * An empty [availableIds] means the manifest could not be read, so
+     * nothing is rewritten. [forceLegacy] keeps the 1.10.3 build used when
+     * an older Vulkan device cannot run the modern one.
      */
     fun replacementDxvkVersion(
         version: String,
@@ -60,13 +62,20 @@ object ManifestComponentHelper {
     ): String? {
         val trimmed = version.trim().removePrefix("dxvk-")
         if (trimmed.isEmpty() || availableIds.isEmpty() || installedProfile) return null
+        val listed = "dxvk-$trimmed" in availableIds
+        if (isAtLeastVersion(trimmed, 2, 1, 0) && (listed || !isContentProfileId(trimmed))) return null
         val target = when {
             forceLegacy && "dxvk-1.10.3" in availableIds -> "1.10.3"
-            isAtLeastVersion(trimmed, 2, 1, 0) && "dxvk-$trimmed" in availableIds -> return null
             "dxvk-$fallbackVersion" in availableIds -> fallbackVersion
             else -> return null
         }
         return if (target == trimmed) null else target
+    }
+
+    /** Winlator content packs are `{version}-{name}-{verCode}`, and verCode is numeric. */
+    internal fun isContentProfileId(version: String): Boolean {
+        val bare = version.trim().removePrefix("dxvk-")
+        return bare.endsWith("-0") && bare.count { it == '-' } >= 2
     }
 
     data class InstalledContentLists(
