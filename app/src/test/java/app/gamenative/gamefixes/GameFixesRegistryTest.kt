@@ -14,6 +14,7 @@ import io.mockk.unmockkAll
 import io.mockk.verify
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -108,5 +109,23 @@ class GameFixesRegistryTest {
         verify(exactly = 0) { container.execArgs = "-lang=eng" }
         verify(exactly = 0) { container.saveData() }
         assertEquals("-novid", container.execArgs)
+    }
+
+    @Test
+    fun findLaunchArgConflict_offersVkd3dForBountyHunterWhileOnDxvk() {
+        every { container.dxWrapper } returns "dxvk"
+        every { container.getExtra(any()) } returns ""
+
+        val conflict = GameFixesRegistry.findLaunchArgConflict("GOG_1158717618", container)
+
+        assertEquals("DXVK", conflict?.found)
+        assertEquals("VKD3D", conflict?.replacement)
+    }
+
+    @Test
+    fun findLaunchArgConflict_staysQuietForBountyHunterOnceWrapperIsVkd3d() {
+        every { container.dxWrapper } returns "vkd3d"
+
+        assertNull(GameFixesRegistry.findLaunchArgConflict("GOG_1158717618", container))
     }
 }

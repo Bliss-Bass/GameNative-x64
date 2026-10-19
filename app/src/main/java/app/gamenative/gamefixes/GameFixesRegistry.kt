@@ -19,6 +19,7 @@ object GameFixesRegistry {
     private val fixes: Map<Pair<GameSource, String>, GameFix> = listOf(
         GOG_Fix_1129934535,
         GOG_Fix_1141086411,
+        GOG_Fix_1158717618,
         GOG_Fix_1177610018,
         GOG_Fix_1453375253,
         GOG_Fix_1454315831,

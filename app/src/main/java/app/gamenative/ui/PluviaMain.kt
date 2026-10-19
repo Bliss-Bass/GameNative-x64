@@ -839,6 +839,15 @@ fun PluviaMain(
     }
 
     // TODO merge to VM?
+    LaunchedEffect(msgDialogState.visible, msgDialogState.type, state.currentScreen) {
+        val launchPrompt = msgDialogState.visible && msgDialogState.type == DialogType.LAUNCH_ARG_CONFLICT
+        val nobodyWaiting = launchArgConflictDeferred == null
+        val gameAlreadyShowing = state.currentScreen == PluviaScreen.XServer
+        if (launchPrompt && (nobodyWaiting || gameAlreadyShowing)) {
+            msgDialogState = MessageDialogState(false)
+        }
+    }
+
     LaunchedEffect(state.currentScreen) {
         // do the following each time we navigate to a new screen
         if (state.resettedScreen != state.currentScreen) {
@@ -1323,13 +1332,19 @@ fun PluviaMain(
         }
 
         DialogType.LAUNCH_ARG_CONFLICT -> {
+            // Hide on the main thread here. The waiter also clears the dialog, but that
+            // write runs off the main thread and is dropped when the game screen takes over,
+            // leaving this prompt up with no one left to receive the next click.
             onConfirmClick = {
+                setMessageDialogState(MessageDialogState(false))
                 launchArgConflictDeferred?.complete(true)
             }
             onDismissClick = {
+                setMessageDialogState(MessageDialogState(false))
                 launchArgConflictDeferred?.complete(false)
             }
             onDismissRequest = {
+                setMessageDialogState(MessageDialogState(false))
                 launchArgConflictDeferred?.complete(false)
             }
         }
@@ -2116,25 +2131,28 @@ fun preLaunchApp(
         if (argConflict != null) {
             setLoadingDialogVisible(false)
             val userChoice = CompletableDeferred<Boolean>()
-            launchArgConflictDeferred = userChoice
-            setMessageDialogState(
-                MessageDialogState(
-                    visible = true,
-                    type = DialogType.LAUNCH_ARG_CONFLICT,
-                    title = context.getString(argConflict.titleRes),
-                    message = context.getString(
-                        argConflict.messageRes,
-                        argConflict.found,
-                        argConflict.replacement,
-                    ),
-                    confirmBtnText = context.getString(R.string.launch_arg_conflict_switch),
-                    dismissBtnText = context.getString(R.string.launch_arg_conflict_keep),
+            val prompt = MessageDialogState(
+                visible = true,
+                type = DialogType.LAUNCH_ARG_CONFLICT,
+                title = context.getString(argConflict.titleRes),
+                message = context.getString(
+                    argConflict.messageRes,
+                    argConflict.found,
+                    argConflict.replacement,
                 ),
+                confirmBtnText = context.getString(R.string.launch_arg_conflict_switch),
+                dismissBtnText = context.getString(R.string.launch_arg_conflict_keep),
             )
+            withContext(Dispatchers.Main) {
+                launchArgConflictDeferred = userChoice
+                setMessageDialogState(prompt)
+            }
             val accept = userChoice.await()
-            launchArgConflictDeferred = null
-            setMessageDialogState(MessageDialogState(false))
-            setLoadingDialogVisible(true)
+            withContext(Dispatchers.Main) {
+                launchArgConflictDeferred = null
+                setMessageDialogState(MessageDialogState(false))
+                setLoadingDialogVisible(true)
+            }
             GameFixesRegistry.resolveLaunchArgConflict(appId, container, argConflict, accept)
         }
 
