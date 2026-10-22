@@ -14,6 +14,7 @@ import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.events.EventDispatcher
 import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxRootfs
+import app.gamenative.service.LinuxVtService
 import app.gamenative.mods.NexusAuthManager
 import app.gamenative.powercontrol.PowerManager
 import app.gamenative.utils.GameSessionMemory
@@ -139,6 +140,7 @@ class PluviaApp : SplitCompatApplication() {
             if (LinuxRootfs.isInstalled(applicationContext)) {
                 LinuxAppReconciler.request(applicationContext)
             }
+            LinuxVtService.startIfSupported(applicationContext)
         }
 
         // Clear any stale temporary config overrides from previous app sessions

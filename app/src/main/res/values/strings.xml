@@ -2521,6 +2521,8 @@
     <string name="linux_desktop_title">Linux Session</string>
     <string name="linux_desktop_starting">Starting the Linux session…</string>
     <string name="linux_apps_title">Linux Apps</string>
+    <string name="linux_vt_notification_title">Linux consoles</string>
+    <string name="linux_vt_notification_text">Ctrl+Alt+F4 to F6 open Linux shells; Ctrl+Alt+F7 returns to Android.</string>
     <string name="linux_apps_unsupported">Linux apps require an x86_64 device.</string>
     <string name="linux_apps_not_installed">A Linux userland is needed before apps can be installed. Set it up in the Linux terminal, then install apps with apt.</string>
     <string name="linux_apps_open_terminal">Open terminal</string>

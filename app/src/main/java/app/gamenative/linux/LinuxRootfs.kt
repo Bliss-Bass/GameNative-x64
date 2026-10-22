@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.system.ErrnoException
 import android.system.Os
+import app.gamenative.service.LinuxVtService
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -246,6 +247,8 @@ object LinuxRootfs {
 
                 stampFile(context).writeText(LAYOUT_VERSION.toString())
                 Timber.i("[LinuxRootfs]: installed to %s", rootfs)
+                // The Ctrl+Alt+F4-F6 consoles had nothing to run until now (Bass OS only).
+                LinuxVtService.startIfSupported(context)
             }
         }
 

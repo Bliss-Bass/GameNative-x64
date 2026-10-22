@@ -102,3 +102,9 @@ add_library(android-shmem SHARED
 set_target_properties(android-shmem PROPERTIES OUTPUT_NAME "android-shmem")
 target_link_libraries(android-shmem log android)
 target_link_options(android-shmem PRIVATE -Wl,-z,max-page-size=16384)
+
+# Starts GameNative's Linux shells on Ctrl+Alt+F4-F6 as session leaders of their console. An
+# executable named like a library: Android only lets an app exec files from its native lib dir.
+add_executable(vtexec ${GN_CPP}/vt_exec/vt_exec.c)
+set_target_properties(vtexec PROPERTIES OUTPUT_NAME "libvtexec.so" SUFFIX "")
+target_link_options(vtexec PRIVATE -s -Wl,-z,max-page-size=16384)

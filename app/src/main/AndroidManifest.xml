@@ -40,6 +40,11 @@
       wrong for a session the user asked to keep running.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Starts the Linux consoles after boot; LinuxVtBootReceiver does nothing off Bass OS. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Bass OS only: the group on /dev/tty4-6 for the Ctrl+Alt+F4-F6 Linux consoles. Does not
+         exist elsewhere, so it is simply never granted there. -->
+    <uses-permission android:name="bass.permission.LINUX_VT" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -278,6 +283,26 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs a Linux userland session — an X server and the applications in it — for as long as the user keeps it open" />
         </service>
+
+        <!-- Login shells on the Ctrl+Alt+F4-F6 text consoles, on Bass OS builds that provide them. -->
+        <service
+            android:name=".service.LinuxVtService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|dataSync">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs Linux login shells on the device's text consoles (Ctrl+Alt+F4 to F6), like getty on a Linux desktop" />
+        </service>
+
+        <receiver
+            android:name=".service.LinuxVtBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!--
             The Linux Services job engine. Exported with no permission because the check is in

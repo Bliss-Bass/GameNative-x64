@@ -29,6 +29,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         const val NOTIFICATION_ID_AMAZON = 4
         const val NOTIFICATION_ID_LINUX = 5
         const val NOTIFICATION_ID_LINUX_JOBS = 6
+        const val NOTIFICATION_ID_LINUX_VT = 7
         private const val NOTIFICATION_ID_SUMMARY = 100
 
         const val ACTION_EXIT = "com.oxgames.pluvia.EXIT"
@@ -58,6 +59,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         NOTIFICATION_ID_AMAZON -> "Amazon Games"
         NOTIFICATION_ID_LINUX -> context.getString(R.string.linux_session_notification_title)
         NOTIFICATION_ID_LINUX_JOBS -> context.getString(R.string.linux_jobs_notification_title)
+        NOTIFICATION_ID_LINUX_VT -> context.getString(R.string.linux_vt_notification_title)
         else -> context.getString(R.string.app_name)
     }
 
@@ -145,6 +147,15 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         buildNotification(
             title = serviceNameFor(NOTIFICATION_ID_LINUX_JOBS),
             content = content,
+            isSummary = false,
+            action = null,
+        )
+
+    /** The Linux consoles notification (Ctrl+Alt+F4 to F6). No action: the consoles are always on. */
+    fun createLinuxVtNotification(): Notification =
+        buildNotification(
+            title = serviceNameFor(NOTIFICATION_ID_LINUX_VT),
+            content = context.getString(R.string.linux_vt_notification_text),
             isSummary = false,
             action = null,
         )
