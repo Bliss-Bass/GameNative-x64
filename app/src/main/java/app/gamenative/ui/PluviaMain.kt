@@ -1993,9 +1993,7 @@ fun PluviaMain(
                         // the window cannot be opened at all.
                         onLaunch = { app ->
                             val opened = runCatching {
-                                context.startActivity(
-                                    LinuxSessionActivity.intent(context, app.launchArgv, app.entryId, app.name),
-                                )
+                                LinuxSessionActivity.open(context, app.launchArgv, app.entryId, app.name)
                             }.onFailure { Timber.w(it, "[PluviaMain]: no session window for %s", app.name) }
 
                             if (opened.isSuccess) {

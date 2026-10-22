@@ -1,8 +1,11 @@
 package app.gamenative.ui
 
+import android.app.Activity
 import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -19,6 +22,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
+import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxXServerView
 import app.gamenative.stubs.StubIcons
@@ -41,9 +45,11 @@ import timber.log.Timber
  * side. The session behind it is [app.gamenative.linux.LinuxSessions]', so closing this window
  * does not necessarily end the application -- that is what the lifetime mode decides.
  *
- * `documentLaunchMode="intoExisting"` in the manifest, plus a per-application [android.net.Uri]
- * as the intent's data, is what makes the task-per-application split happen: Android treats
- * distinct data as distinct documents, and relaunching the same one brings its window forward.
+ * [FLAG_ACTIVITY_NEW_DOCUMENT][Intent.FLAG_ACTIVITY_NEW_DOCUMENT] plus a per-application
+ * [android.net.Uri] as the intent's data is what makes the task-per-application split happen:
+ * Android treats distinct data as distinct documents, and relaunching the same one brings its
+ * window forward. An application with an all-apps stub opens through [open] instead, in the
+ * stub's task, so the frame and taskbar show the application rather than GameNative.
  */
 class LinuxSessionActivity : ComponentActivity() {
 
@@ -219,6 +225,38 @@ class LinuxSessionActivity : ComponentActivity() {
 
         private const val EXTRA_ARGV = "linux_argv"
         private const val EXTRA_LABEL = "linux_label"
+
+        /**
+         * Opens [argv]'s window: through the application's all-apps stub when it has one that
+         * roots the window's task, so the frame shows the application, and directly otherwise.
+         */
+        fun open(context: Context, argv: String, entryId: String?, label: String?) {
+            val stub = entryId?.let { stubLaunchIntent(context, it) }
+            if (stub != null && runCatching { context.startActivity(stub) }.isSuccess) return
+            context.startActivity(
+                intent(context, argv, entryId, label).apply {
+                    if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+        }
+
+        /**
+         * The launch the drawer would make for [entryId]'s stub, so an open window is brought
+         * forward rather than a second one started. Null for a stub built before stubs rooted
+         * the task: it would hand the launch straight back to MainActivity.
+         */
+        private fun stubLaunchIntent(context: Context, entryId: String): Intent? {
+            val component = ComponentName(Stubs.packageNameFor(entryId), Stubs.TRAMPOLINE_CLASS)
+            val format = runCatching {
+                context.packageManager.getActivityInfo(component, PackageManager.GET_META_DATA)
+                    .metaData?.getString(LinuxAppStubs.META_FORMAT)?.toIntOrNull()
+            }.getOrNull() ?: 0
+            if (format < LinuxAppStubs.STUB_FORMAT) return null
+            return Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(component)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
 
         /**
          * An intent opening [argv]'s own window.

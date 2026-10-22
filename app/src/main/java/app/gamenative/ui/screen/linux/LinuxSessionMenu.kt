@@ -344,9 +344,7 @@ private fun AppsTab(sessionKey: String, onOpened: () -> Unit) {
                     highlighted = key == sessionKey || key in runningKeys,
                     onClick = {
                         if (key != sessionKey) {
-                            context.startActivity(
-                                LinuxSessionActivity.intent(context, app.launchArgv, app.entryId, app.name),
-                            )
+                            LinuxSessionActivity.open(context, app.launchArgv, app.entryId, app.name)
                         }
                         onOpened()
                     },

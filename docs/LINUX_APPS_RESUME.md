@@ -92,6 +92,12 @@ Android's title bar).
   layer aborted. Bisecting PRoot options with a small Python memfd test found it in
   minutes; release Chromium prints nothing, and the PPA's `chromium-dbgsym` gave the
   stack. Fixed in `scripts/patches/proot-linux/0002`.
+- **The freeform frame ignores `setTaskDescription`.** WM Shell's header
+  (`WindowDecorTaskResourceLoaderImpl`) labels a task from its base activity's package and
+  caches it, so every Linux window said GameNativeX64. A Linux app's stub now stays underneath as
+  the task's root (`stub/LaunchActivity.java`, stub format 2), opening the window through
+  `LinuxWindowEntryActivity`, which only lets in the stub registered for the entry. Older stubs
+  hand back to MainActivity, so `LinuxSessionActivity.open` only routes through format 2 ones.
 
 ## Testing notes
 

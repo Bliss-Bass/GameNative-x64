@@ -464,7 +464,7 @@ class MainActivity : ComponentActivity() {
             // fail. A bare desktop request is a screen of this app and stays put.
             if (!terminal && !argv.isNullOrBlank()) {
                 val opened = runCatching {
-                    startActivity(LinuxSessionActivity.intent(this, argv, entryId, label))
+                    LinuxSessionActivity.open(this, argv, entryId, label)
                 }.onFailure { Timber.w(it, "[IntentLaunch]: no session window, falling back in-app") }
 
                 if (opened.isSuccess) {

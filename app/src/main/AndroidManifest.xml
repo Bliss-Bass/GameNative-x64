@@ -20,6 +20,11 @@
     <queries>
         <package android:name="app.gamenative.stubinstaller" />
         <package android:name="org.ax86.linuxservices" />
+        <!-- Linux app stubs are launcher entries; GameNative opens windows through them. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -148,12 +153,19 @@
         <activity
             android:name=".ui.LinuxSessionActivity"
             android:exported="false"
-            android:documentLaunchMode="intoExisting"
             android:label="@string/linux_session_notification_title"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustNothing|stateHidden"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode"
             android:theme="@style/Theme.Pluvia" />
+
+        <!-- Exported only so a Linux app's stub can open its window in the stub's own task; it
+             checks the caller against the stubs this app registered. -->
+        <activity
+            android:name=".ui.LinuxWindowEntryActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <!-- Nexus OAuth uses an external browser and returns only through this exact native redirect. -->
         <activity

@@ -28,6 +28,14 @@ object LinuxAppStubs {
      */
     private const val META_ENTRY_ID = "app.gamenative.stub.ENTRY_ID"
 
+    /**
+     * Which trampoline behaviour a stub was built for. From [STUB_FORMAT] 2 a stub stays as the
+     * root of its window's task, so GameNative launches through it; an older one hands straight
+     * back to MainActivity, and launching through it would loop.
+     */
+    const val META_FORMAT = "app.gamenative.stub.FORMAT"
+    const val STUB_FORMAT = 2
+
     fun packageNameFor(app: LinuxAppScanner.LinuxApp): String = Stubs.packageNameFor(app.entryId)
 
     /** Whether a stub can be built at all, which needs a userland as well as the trampoline. */
@@ -50,6 +58,8 @@ object LinuxAppStubs {
             // Carried in the stub's meta-data, so a stub built before it was is out of date and
             // republishes itself through the reconcile pass rather than needing a migration.
             app.entryId,
+            // Republishes every stub built for an older trampoline behaviour.
+            STUB_FORMAT.toString(),
             app.iconPath.orEmpty(),
             icon?.length()?.toString().orEmpty(),
             icon?.lastModified()?.toString().orEmpty(),
@@ -77,7 +87,11 @@ object LinuxAppStubs {
                 packageName = packageName,
                 label = app.name,
                 versionCode = versionCode,
-                metadata = mapOf(META_ARGV to app.launchArgv, META_ENTRY_ID to app.entryId),
+                metadata = mapOf(
+                    META_ARGV to app.launchArgv,
+                    META_ENTRY_ID to app.entryId,
+                    META_FORMAT to STUB_FORMAT.toString(),
+                ),
                 iconPng = iconPng(context, app),
             ).getOrThrow()
         }

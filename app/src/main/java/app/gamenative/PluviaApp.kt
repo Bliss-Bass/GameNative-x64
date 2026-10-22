@@ -12,6 +12,8 @@ import androidx.navigation.NavController
 import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.events.EventDispatcher
+import app.gamenative.linux.LinuxAppReconciler
+import app.gamenative.linux.LinuxRootfs
 import app.gamenative.mods.NexusAuthManager
 import app.gamenative.powercontrol.PowerManager
 import app.gamenative.utils.GameSessionMemory
@@ -131,6 +133,11 @@ class PluviaApp : SplitCompatApplication() {
         if (Build.FINGERPRINT != "robolectric") {
             appScope.launch {
                 ContainerFilesDownloader.preloadAllContainerFiles(applicationContext)
+            }
+            // An update can change what a Linux app's stub must contain (LinuxAppStubs.STUB_FORMAT);
+            // otherwise installed stubs would wait for a Linux session to close before republishing.
+            if (LinuxRootfs.isInstalled(applicationContext)) {
+                LinuxAppReconciler.request(applicationContext)
             }
         }
 

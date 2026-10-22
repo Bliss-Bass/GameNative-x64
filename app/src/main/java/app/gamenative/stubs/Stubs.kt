@@ -33,7 +33,7 @@ object Stubs {
     const val PACKAGE_PREFIX = "app.gamenative.stub."
 
     /** The only activity a stub declares, and the one the installer will accept. */
-    private const val TRAMPOLINE_CLASS = "app.gamenative.stub.LaunchActivity"
+    const val TRAMPOLINE_CLASS = "app.gamenative.stub.LaunchActivity"
 
     /** Where the trampoline dex is packaged, built by the stubTrampolineDex task. */
     private const val TRAMPOLINE_ASSET = "stub/trampoline.dex"
