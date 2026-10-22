@@ -655,6 +655,8 @@ class MainActivity : ComponentActivity() {
         PluviaApp.isActivityInForeground = true
 
         lifecycleScope.launch { app.gamenative.launch.LaunchReadiness.refresh() }
+        // Bass-only options follow what the platform provides now, e.g. after an OTA added it.
+        app.gamenative.platform.PlatformCapabilities.refresh(this)
         // Re-apply immersive mode to ensure fullscreen persists
         if (!desiredSystemUiVisible) {
             applyImmersiveMode()
