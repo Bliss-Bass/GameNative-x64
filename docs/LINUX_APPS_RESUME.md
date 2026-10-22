@@ -85,6 +85,13 @@ Android's title bar).
   already noted under Testing, hit again while driving HL2's menu. Taps land silently
   nowhere and read as the app ignoring input. Multiply by 2.109 on this panel, or read
   bounds straight out of `uiautomator dump`.
+- **Chromium closing at once had two causes, and only the first was visible.** As fake root
+  it refuses to start without `--no-sandbox`. With that, it still died with SIGTRAP and no
+  message: PRoot's fake_id0 turned `openat("/proc/self/fd/N", O_RDONLY)` into `dup(N)`, so
+  the read-only shared memory Chromium makes from a memfd came back writable and its IPC
+  layer aborted. Bisecting PRoot options with a small Python memfd test found it in
+  minutes; release Chromium prints nothing, and the PPA's `chromium-dbgsym` gave the
+  stack. Fixed in `scripts/patches/proot-linux/0002`.
 
 ## Testing notes
 

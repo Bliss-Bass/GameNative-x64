@@ -1,0 +1,39 @@
+From 4421d666d50b1e4a335a0731cbcb3c26d38b2467 Mon Sep 17 00:00:00 2001
+From: Jon West <electrikjesus@gmail.com>
+Date: Wed, 21 Oct 2026 21:53:33 -0400
+Subject: [PATCH] fake_id0: keep read-only reopens of /proc/self/fd read-only
+
+The /proc/<pid>/fd/N shortcut turns openat into dup(N), and dup keeps the
+existing access mode. A read-only reopen of a writable fd therefore came back
+writable. Chromium makes its read-only shared memory that way from a memfd,
+checks the result, and aborts the browser when it is still writable.
+
+Leave read-only reopens of writable fds to the kernel, which honours the
+requested mode. Write reopens keep using dup as before.
+---
+ src/extension/fake_id0/fake_id0.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/extension/fake_id0/fake_id0.c b/src/extension/fake_id0/fake_id0.c
+index 9bd8dad..c2eb5c6 100644
+--- a/src/extension/fake_id0/fake_id0.c
++++ b/src/extension/fake_id0/fake_id0.c
+@@ -808,6 +808,15 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
+ 			}
+ 			if (existing_flags & O_PATH)
+ 				return 0;
++
++			/* dup() keeps the existing access mode, so a read-only
++			 * reopen of a writable fd would hand back a writable
++			 * one.  Chromium reopens a memfd read-only this way and
++			 * aborts when the result is still writable; let the
++			 * kernel do the real reopen instead.  */
++			if ((peek_reg(tracee, CURRENT, SYSARG_3) & O_ACCMODE) == O_RDONLY
++			    && (existing_flags & O_ACCMODE) != O_RDONLY)
++				return 0;
+ 		}
+ 
+ 		set_sysnum(tracee, PR_dup);
+-- 
+2.43.0
+

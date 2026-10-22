@@ -47,6 +47,34 @@ object LinuxRootfs {
     private const val NOSNAP_PIN_PATH = "etc/apt/preferences.d/nosnap"
 
     /**
+     * Bump when the default browser sources below change. Kept apart from
+     * [APT_POLICY_VERSION], whose bump also purges and reinstalls Firefox.
+     */
+    private const val BROWSER_SOURCES_VERSION = 1
+
+    // Chromium as a real deb: Ubuntu only ships it as a snap stub, which cannot run here.
+    private const val XTRADEB_KEY_URL =
+        "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x5301FA4FD93244FBC6F6149982BB6851C64F6880"
+    private const val XTRADEB_KEY_PATH = "etc/apt/keyrings/xtradeb-apps.asc"
+    // add-apt-repository's own file name, so adding the PPA by hand replaces this rather than
+    // listing the same source twice.
+    private const val XTRADEB_SOURCES_PATH = "etc/apt/sources.list.d/xtradeb-ubuntu-apps-noble.sources"
+    private const val XTRADEB_PIN_PATH = "etc/apt/preferences.d/xtradeb"
+
+    private const val GOOGLE_KEY_URL = "https://dl.google.com/linux/linux_signing_key.pub"
+    private const val GOOGLE_KEY_PATH = "etc/apt/keyrings/google-chrome.asc"
+    // The name Chrome's own postinst writes, so it replaces this file instead of adding a
+    // second entry for the same repository with a different Signed-By, which apt rejects.
+    private const val GOOGLE_SOURCES_PATH = "etc/apt/sources.list.d/google-chrome.sources"
+
+    // Sourced by Debian's /usr/bin/chromium launcher, which the PPA build ships.
+    private const val CHROMIUM_FLAGS_PATH = "etc/chromium.d/gamenative"
+    private const val CHROME_LAUNCHER = "/opt/google/chrome/google-chrome"
+    // Ending a session stops the guest from outside, which Chromium records as a crash; without
+    // the last flag every launch opens with a "Restore pages?" bubble.
+    private const val CHROMIUM_FAMILY_FLAGS = "--no-sandbox --test-type --hide-crash-restore-bubble"
+
+    /**
      * What the graphical session is built from. All of it comes from apt, which is the
      * point of running a glibc userland: none of it has to be cross-compiled for bionic.
      *
@@ -150,6 +178,9 @@ object LinuxRootfs {
     private fun aptPolicyStampFile(context: Context): File =
         File(rootDir(context), ".apt_policy_version")
 
+    private fun browserSourcesStampFile(context: Context): File =
+        File(rootDir(context), ".browser_sources_version")
+
     fun isSupported(): Boolean = Build.SUPPORTED_ABIS.contains("x86_64")
 
     fun isInstalled(context: Context): Boolean =
@@ -239,6 +270,7 @@ object LinuxRootfs {
                 // otherwise complete.
                 configureSession(context, rootfs)
                 ensureAptPolicy(context, rootfs, onProgress)
+                ensureBrowserSources(context, rootfs, onProgress)
             } else {
                 Timber.i("[LinuxRootfs]: completing the graphical session install")
                 installDisplaySession(context, rootfs, onProgress)
@@ -258,6 +290,7 @@ object LinuxRootfs {
 
         stampFile(context).delete()
         aptPolicyStampFile(context).delete()
+        browserSourcesStampFile(context).delete()
         rootfsDir(context).deleteRecursively()
     }
 
@@ -438,6 +471,7 @@ object LinuxRootfs {
 
         applyAptPolicyPackages(context, rootfs, onProgress)
         aptPolicyStampFile(context).writeText(APT_POLICY_VERSION.toString())
+        ensureBrowserSources(context, rootfs, onProgress)
 
         // The .debs are no use once unpacked, and this reclaims a hundred megabytes or so
         // of the app's storage.
@@ -462,6 +496,167 @@ object LinuxRootfs {
         ensureOpenshotLaunchWrapper(rootfs)
         ensureFirefoxLaunchWrapper(rootfs)
         LinuxSchemeHandler.install(rootfs)
+        ensureChromiumFlags(rootfs)
+        ensureChromeLaunchWrapper(rootfs)
+    }
+
+    /**
+     * Starts Chromium without its sandbox. The guest runs as PRoot's fake root, and Chromium
+     * exits at once as root unless told `--no-sandbox`; its namespace sandbox could not work
+     * under PRoot anyway (see `MOZ_DISABLE_CONTENT_SANDBOX` in [LinuxProgramLauncher]).
+     * `--test-type` drops the "unsupported command-line flag" bar that would otherwise sit
+     * over every window, as the Firefox sandbox notice is hidden in [ensureFirefoxSandboxNotice].
+     * Written whether or not Chromium is installed yet: the launcher reads it on each start.
+     */
+    private fun ensureChromiumFlags(rootfs: File) {
+        val flags = File(rootfs, CHROMIUM_FLAGS_PATH)
+        flags.parentFile?.mkdirs()
+        flags.writeText(
+            """|# Written by GameNative. See LinuxRootfs.ensureChromiumFlags.
+            |export CHROMIUM_FLAGS="${'$'}CHROMIUM_FLAGS $CHROMIUM_FAMILY_FLAGS"
+            |""".trimMargin(),
+        )
+    }
+
+    /**
+     * The same for Google Chrome, whose launcher takes no flags from the environment. Chrome's
+     * own script is diverted to `.real` by [registerChromeDiversion]; this wrapper takes its
+     * place. Written only once the diversion exists, or it would overwrite Chrome's script.
+     */
+    private fun ensureChromeLaunchWrapper(rootfs: File) {
+        if (!isChromeDiverted(rootfs)) return
+        val wrapper = File(rootfs, CHROME_LAUNCHER.removePrefix("/"))
+        wrapper.parentFile?.mkdirs()
+        wrapper.writeText(
+            """|#!/bin/sh
+            |# Written by GameNative. See LinuxRootfs.ensureChromeLaunchWrapper.
+            |exec $CHROME_LAUNCHER.real $CHROMIUM_FAMILY_FLAGS "${'$'}@"
+            |""".trimMargin(),
+        )
+        wrapper.setExecutable(true, false)
+    }
+
+    /** dpkg keeps diversions as (path, diverted-to, package) line triples. */
+    private fun isChromeDiverted(rootfs: File): Boolean {
+        val lines = File(rootfs, "var/lib/dpkg/diversions").takeIf { it.isFile }
+            ?.readLines() ?: return false
+        return lines.chunked(3).any { it.size >= 2 && it[0] == CHROME_LAUNCHER && it[1] == "$CHROME_LAUNCHER.real" }
+    }
+
+    private fun registerChromeDiversion(context: Context, rootfs: File) {
+        if (isChromeDiverted(rootfs)) return
+        val divert = LinuxProgramLauncher.runWithOutput(
+            context,
+            "dpkg-divert --local --rename --divert $CHROME_LAUNCHER.real --add $CHROME_LAUNCHER",
+            extraEnv = APT_ENV,
+            timeoutSeconds = 60,
+        )
+        Timber.i("[LinuxRootfs]: chrome diversion: %s", divert.trim())
+        // --rename moved an installed Chrome's script aside; put the wrapper in its place now
+        // rather than at the next session start.
+        ensureChromeLaunchWrapper(rootfs)
+    }
+
+    /**
+     * Adds the xtradeb PPA (Chromium) and Google's Chrome repository, so `apt install chromium`
+     * or `apt install google-chrome-stable` works without setting either up by hand.
+     *
+     * A source already configured by the user or by Chrome's own postinst is left as it is.
+     * Only runs once per [BROWSER_SOURCES_VERSION]; a failed key download leaves the stamp
+     * unwritten so the next session tries again.
+     */
+    private fun ensureBrowserSources(context: Context, rootfs: File, onProgress: (Progress) -> Unit) {
+        val stamp = browserSourcesStampFile(context)
+        if (stamp.takeIf { it.isFile }?.readText()?.trim() == BROWSER_SOURCES_VERSION.toString()) return
+        // Both are HTTPS sources; ensureAptPolicy installs the CA bundle first.
+        if (!File(rootfs, "etc/ssl/certs/ca-certificates.crt").isFile) return
+
+        onProgress(Progress("Adding browser package sources", -1f))
+        writeXtradebPin(rootfs)
+        val xtradeb = ensureAptSource(
+            rootfs,
+            existing = "ppa.launchpadcontent.net/xtradeb/apps",
+            sourcesPath = XTRADEB_SOURCES_PATH,
+            keyPath = XTRADEB_KEY_PATH,
+            keyUrl = XTRADEB_KEY_URL,
+            sources = """
+                Types: deb
+                URIs: https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/
+                Suites: noble
+                Components: main
+                Signed-By: /$XTRADEB_KEY_PATH
+                """.trimIndent() + "\n",
+        )
+        val chrome = ensureAptSource(
+            rootfs,
+            existing = "dl.google.com/linux/chrome",
+            sourcesPath = GOOGLE_SOURCES_PATH,
+            keyPath = GOOGLE_KEY_PATH,
+            keyUrl = GOOGLE_KEY_URL,
+            sources = """
+                Types: deb
+                URIs: https://dl.google.com/linux/chrome-stable/deb/
+                Suites: stable
+                Components: main
+                Architectures: amd64
+                Signed-By: /$GOOGLE_KEY_PATH
+                """.trimIndent() + "\n",
+        )
+        registerChromeDiversion(context, rootfs)
+
+        if (xtradeb == SourceState.ADDED || chrome == SourceState.ADDED) {
+            onProgress(Progress("Fetching browser package lists", -1f))
+            val update = LinuxProgramLauncher.runWithOutput(
+                context,
+                "apt-get update",
+                extraEnv = APT_ENV,
+                timeoutSeconds = 600,
+            )
+            Timber.i("[LinuxRootfs]: browser sources apt-get update:\n%s", update.takeLast(2000))
+        }
+        if (xtradeb != SourceState.FAILED && chrome != SourceState.FAILED) {
+            stamp.writeText(BROWSER_SOURCES_VERSION.toString())
+        }
+    }
+
+    private enum class SourceState { PRESENT, ADDED, FAILED }
+
+    /** Writes [sources] unless any apt source already points at [existing]. */
+    private fun ensureAptSource(
+        rootfs: File,
+        existing: String,
+        sourcesPath: String,
+        keyPath: String,
+        keyUrl: String,
+        sources: String,
+    ): SourceState {
+        val configured = listOf(File(rootfs, "etc/apt/sources.list")) +
+            (File(rootfs, "etc/apt/sources.list.d").listFiles()?.toList() ?: emptyList())
+        if (configured.any { it.isFile && runCatching { it.readText() }.getOrDefault("").contains(existing) }) {
+            return SourceState.PRESENT
+        }
+        return runCatching {
+            ensureAptKey(rootfs, keyPath, keyUrl)
+            File(rootfs, sourcesPath).apply { parentFile?.mkdirs() }.writeText(sources)
+            SourceState.ADDED
+        }.getOrElse {
+            Timber.w(it, "[LinuxRootfs]: could not add apt source %s", sourcesPath)
+            SourceState.FAILED
+        }
+    }
+
+    /**
+     * Keeps the PPA below Ubuntu, so it only supplies packages Ubuntu does not have (Chromium)
+     * and never replaces Ubuntu's own on upgrade.
+     */
+    private fun writeXtradebPin(rootfs: File) {
+        File(rootfs, XTRADEB_PIN_PATH).apply { parentFile?.mkdirs() }.writeText(
+            """
+            Package: *
+            Pin: release o=LP-PPA-xtradeb-apps
+            Pin-Priority: 100
+            """.trimIndent() + "\n",
+        )
     }
 
     /**
@@ -936,19 +1131,28 @@ object LinuxRootfs {
     }
 
     /** Fetches Mozilla's APT signing key into the rootfs when missing or empty. */
-    private fun ensureMozillaKey(rootfs: File) {
-        val key = File(rootfs, MOZILLA_KEY_PATH)
+    private fun ensureMozillaKey(rootfs: File) = ensureAptKey(rootfs, MOZILLA_KEY_PATH, MOZILLA_KEY_URL)
+
+    /** Fetches an armored APT signing key to [keyPath] when missing or empty. */
+    private fun ensureAptKey(rootfs: File, keyPath: String, url: String) {
+        val key = File(rootfs, keyPath)
         if (key.isFile && key.length() > 0L) return
         key.parentFile?.mkdirs()
         val client = OkHttpClient()
-        val response = client.newCall(Request.Builder().url(MOZILLA_KEY_URL).build()).execute()
+        val response = client.newCall(Request.Builder().url(url).build()).execute()
         response.use {
             if (!it.isSuccessful) {
-                throw IOException("Mozilla APT key download failed: HTTP ${it.code}")
+                throw IOException("APT key download failed for $keyPath: HTTP ${it.code}")
             }
-            key.outputStream().use { out -> it.body.byteStream().copyTo(out) }
+            val body = it.body.string()
+            // apt reads a .asc keyring only if it really is armored; an HTML error page
+            // would make every later apt-get update fail on this source.
+            if (!body.contains("-----BEGIN PGP PUBLIC KEY BLOCK-----")) {
+                throw IOException("APT key download for $keyPath returned no key")
+            }
+            key.writeText(body)
         }
         chmod(key, 420) // 0644
-        Timber.i("[LinuxRootfs]: wrote Mozilla APT key (%d bytes)", key.length())
+        Timber.i("[LinuxRootfs]: wrote APT key %s (%d bytes)", keyPath, key.length())
     }
 }
