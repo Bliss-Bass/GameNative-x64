@@ -13,6 +13,7 @@ import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.events.EventDispatcher
 import app.gamenative.linux.LinuxAppReconciler
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.service.LinuxVtService
 import app.gamenative.mods.NexusAuthManager
@@ -119,6 +120,9 @@ class PluviaApp : SplitCompatApplication() {
         DownloadService.populateDownloadService(this)
 
         migrateGogAmazonPaths()
+
+        // Before any Linux code opens the rootfs; a rename, so it costs nothing after the first run.
+        LinuxDistros.migrateLegacyLayout(applicationContext)
 
         appScope.launch {
             ContainerMigrator.migrateLegacyContainersIfNeeded(

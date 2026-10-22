@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
@@ -599,6 +600,15 @@ fun SystemMenu(
                                 icon = Icons.Default.Terminal,
                                 onClick = {
                                     onNavigateRoute(PluviaScreen.Terminal.route)
+                                    onDismiss()
+                                },
+                            )
+
+                            SystemMenuItem(
+                                text = stringResource(R.string.linux_distros_title),
+                                icon = Icons.Default.Layers,
+                                onClick = {
+                                    onNavigateRoute(PluviaScreen.LinuxDistros.route)
                                     onDismiss()
                                 },
                             )

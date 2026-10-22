@@ -19,15 +19,19 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.linux.LinuxAppReconciler
+import app.gamenative.linux.LinuxDistroCatalog
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxShellSession
 import app.gamenative.ui.theme.PluviaTheme
@@ -51,6 +57,7 @@ import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -68,18 +75,25 @@ fun TerminalScreen(onBack: () -> Unit) {
     var installing by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<LinuxRootfs.Progress?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var installed by remember { mutableStateOf(LinuxRootfs.isInstalled(context)) }
+    var distroId by remember { mutableStateOf(LinuxDistros.defaultId(context)) }
+    var shell by remember { mutableStateOf<String?>(null) }
+    var installed by remember { mutableStateOf(LinuxDistros.isInstalled(context, distroId)) }
     // False until ensureDisplaySession finishes so Terminal never mounts in the gap between
     // installed=true and preparing=true (that gap disposed the shell and called onBack).
     var sessionReady by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(installed) }
 
     // Existing userlands skip install(), so Mozilla/nosnap apt policy would never land unless
-    // we run the same ensure path the graphical session uses.
-    LaunchedEffect(installed) {
+    // we run the same ensure path the graphical session uses. Other distros have no such session.
+    LaunchedEffect(installed, distroId) {
         if (!installed || !LinuxRootfs.isSupported()) {
             sessionReady = false
             preparing = false
+            return@LaunchedEffect
+        }
+        if (distroId != LinuxDistroCatalog.UBUNTU) {
+            preparing = false
+            sessionReady = true
             return@LaunchedEffect
         }
         preparing = true
@@ -102,7 +116,17 @@ fun TerminalScreen(onBack: () -> Unit) {
             .imePadding()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        TerminalHeader(onBack = onBack)
+        TerminalHeader(
+            onBack = onBack,
+            distroId = distroId,
+            shell = shell,
+            enabled = installed && sessionReady,
+            onDistro = {
+                distroId = it
+                shell = null
+            },
+            onShell = { shell = it },
+        )
 
         Box(modifier = Modifier.fillMaxSize()) {
             when {
@@ -112,7 +136,11 @@ fun TerminalScreen(onBack: () -> Unit) {
 
                 error != null -> Message(error!!)
 
-                installed && sessionReady -> Terminal(onSessionEnded = onBack)
+                // Keyed so picking another distro or shell replaces the session rather than
+                // leaving the old shell attached to the view.
+                installed && sessionReady -> key(distroId, shell) {
+                    Terminal(distroId = distroId, shell = shell, onSessionEnded = onBack)
+                }
 
                 else -> InstallPrompt(
                     onInstall = {
@@ -138,15 +166,19 @@ fun TerminalScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun Terminal(onSessionEnded: () -> Unit) {
+private fun Terminal(distroId: String, shell: String?, onSessionEnded: () -> Unit) {
     val context = LocalContext.current
     // Held across recompositions: recreating it would restart the shell and lose the
     // scrollback, and a long apt run with it.
     val session = remember { mutableStateOf<TerminalSession?>(null) }
     val terminalView = remember { mutableStateOf<TerminalView?>(null) }
+    // A shell this composable ended itself, by leaving or by switching distro, is not the user
+    // exiting it, and must not close the screen.
+    val disposed = remember { AtomicBoolean(false) }
 
     DisposableEffect(Unit) {
         onDispose {
+            disposed.set(true)
             session.value?.finishIfRunning()
             session.value = null
             terminalView.value = null
@@ -172,9 +204,9 @@ private fun Terminal(onSessionEnded: () -> Unit) {
 
                     val client = GameNativeTerminalSessionClient(
                         view = this,
-                        onFinished = onSessionEnded,
+                        onFinished = { if (!disposed.get()) onSessionEnded() },
                     )
-                    val newSession = LinuxShellSession.create(viewContext, client)
+                    val newSession = LinuxShellSession.create(viewContext, client, distroId, shell)
                     session.value = newSession
                     terminalView.value = this
                     attachSession(newSession)
@@ -207,7 +239,15 @@ private fun showKeyboard(view: TerminalView) {
 }
 
 @Composable
-private fun TerminalHeader(onBack: () -> Unit) {
+private fun TerminalHeader(
+    onBack: () -> Unit,
+    distroId: String,
+    shell: String?,
+    enabled: Boolean,
+    onDistro: (String) -> Unit,
+    onShell: (String?) -> Unit,
+) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -226,8 +266,53 @@ private fun TerminalHeader(onBack: () -> Unit) {
             text = stringResource(R.string.terminal_title),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 8.dp),
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
         )
+
+        if (!enabled) return@Row
+        val distros = remember { LinuxDistros.installed(context) }
+        if (distros.size > 1) {
+            HeaderChoice(
+                description = stringResource(R.string.terminal_distro),
+                value = LinuxDistroCatalog.nameOf(distroId),
+                choices = distros.map { it.displayName to it.id },
+                onChoose = onDistro,
+            )
+        }
+        val shells = remember(distroId) {
+            LinuxDistros.installedRootfs(context, distroId)?.let(LinuxDistros::shells).orEmpty()
+        }
+        if (shells.size > 1) {
+            HeaderChoice(
+                description = stringResource(R.string.terminal_shell),
+                value = (shell ?: shells.first()).substringAfterLast('/'),
+                choices = shells.map { it to it },
+                onChoose = { onShell(it) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun <T> HeaderChoice(description: String, value: String, choices: List<Pair<String, T>>, onChoose: (T) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(text = "$description: $value", color = PluviaTheme.colors.accentCyan)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            choices.forEach { (name, choice) ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        expanded = false
+                        onChoose(choice)
+                    },
+                )
+            }
+        }
     }
 }
 

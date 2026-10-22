@@ -30,7 +30,14 @@ class LinuxDisplaySession private constructor(
     val port: Int,
     /** Whether this session is one application or a desktop. */
     private val mode: LinuxDesktopConfig.Mode,
+    /** Which distro and desktop a [LinuxDesktopConfig.Mode.DESKTOP] session runs; Ubuntu and openbox otherwise. */
+    private val target: LinuxDesktopSessions.Target,
 ) : LinuxSession {
+
+    private val rootfs: File =
+        LinuxDistros.installedRootfs(context, target.distroId) ?: LinuxRootfs.rootfsDir(context)
+
+    private val ubuntu: Boolean get() = target.distroId == LinuxDistroCatalog.UBUNTU
 
     private var server: Process? = null
     private var wm: Process? = null
@@ -92,17 +99,25 @@ class LinuxDisplaySession private constructor(
             densityDpi: Int,
             scalePercent: Int,
             mode: LinuxDesktopConfig.Mode,
+            target: LinuxDesktopSessions.Target =
+                LinuxDesktopSessions.Target(LinuxDistroCatalog.UBUNTU, LinuxDesktopSessions.Session.OPENBOX),
         ): Result<LinuxDisplaySession> = withContext(Dispatchers.IO) {
             runCatching {
-                if (!LinuxRootfs.isInstalled(context)) {
-                    throw IOException("The Linux userland is not installed")
-                }
-                if (!LinuxRootfs.hasDisplaySession(context)) {
-                    throw IOException("The graphical session is not installed")
+                if (target.isBuiltIn) {
+                    if (!LinuxRootfs.isInstalled(context)) {
+                        throw IOException("The Linux userland is not installed")
+                    }
+                    if (!LinuxRootfs.hasDisplaySession(context)) {
+                        throw IOException("The graphical session is not installed")
+                    }
+                } else if (!LinuxDesktopSessions.isInstalled(context, target.distroId, target.session)) {
+                    throw IOException(
+                        "${target.session.displayName} is not installed in ${LinuxDistroCatalog.nameOf(target.distroId)}",
+                    )
                 }
 
                 val port = claimPort()
-                val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode)
+                val session = LinuxDisplaySession(context, FIRST_DISPLAY + (port - FIRST_PORT), port, mode, target)
                 runCatching { session.launch(width, height, LinuxDisplayScale.xdpi(densityDpi, scalePercent)) }
                     .onFailure {
                         // Nothing is listening on it and nothing will be, so holding the claim
@@ -164,7 +179,9 @@ class LinuxDisplaySession private constructor(
         // TigerVNC has RENDER/Xft; restore faceName so a prior Android X session's core-font
         // ~/.Xdefaults does not leave xterm on "fixed" under this backend.
         writeXdefaults(dpi)
-        LinuxRootfs.writeFirefoxScale(LinuxRootfs.rootfsDir(context), dpi)
+        if (ubuntu) LinuxRootfs.writeFirefoxScale(rootfs, dpi)
+        val xServer = LinuxDesktopSessions.X_SERVERS.firstOrNull { File(rootfs, it).exists() }
+            ?: throw IOException("No X server in ${LinuxDistroCatalog.nameOf(target.distroId)}")
 
         // Audio before any client that might open Cubeb/Pulse (browsers, media players).
         LinuxPulse.acquire(context)
@@ -172,7 +189,7 @@ class LinuxDisplaySession private constructor(
             // -localhost so the desktop is not reachable from the network: this is a transport
             // between two processes on one device, not a remote desktop.
             server = start(
-                "/usr/bin/Xtigervnc :$display" +
+                "/$xServer :$display" +
                     " -geometry ${width}x$height" +
                     " -depth 24" +
                     " -dpi $dpi" +
@@ -192,18 +209,35 @@ class LinuxDisplaySession private constructor(
             val desktop = mode == LinuxDesktopConfig.Mode.DESKTOP
             val rc = if (desktop) LinuxDesktopConfig.DESKTOP_RC else LinuxDesktopConfig.APP_RC
 
-            // Built from what is installed right now, since apt runs in our own terminal.
-            if (desktop) {
+            if (desktop && target.session != LinuxDesktopSessions.Session.OPENBOX) {
+                // A full desktop brings its own window manager, panel and settings daemon.
+                LinuxDesktopSessions.prepare(rootfs, target.session)
+                val (command, env) = LinuxDesktopSessions.launch(target.session)
+                wm = start(command, tag = target.session.id, extraEnv = env)
+                    ?: throw IOException("Could not start ${target.session.displayName}")
+                isRunning = true
+                Timber.i("[LinuxDisplaySession]: display :%d ready (%s in %s)", display, target.session.id, target.distroId)
+                return
+            }
+
+            // Built from what is installed right now, since apt runs in our own terminal. Linux
+            // apps are scanned in Ubuntu only, so another distro's menu offers just a terminal.
+            if (desktop && ubuntu) {
                 val apps = LinuxAppScanner.scan(context)
                 LinuxDesktopConfig.writeDesktop(context, apps)
                 // Opening the desktop is another moment apps become visible; publish stubs here
                 // so a visit to Linux Apps is not required after an earlier apt install.
                 LinuxAppReconciler.reconcile(context, apps)
+            } else if (desktop) {
+                LinuxDesktopSessions.prepare(rootfs, target.session)
+                LinuxDesktopConfig.writeDesktop(context, emptyList(), rootfs)
             }
 
             // Started after the server is up: they all connect to it, and none of them retries.
             wm = start("/usr/bin/openbox --config-file $rc", tag = "openbox")
-            settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
+            if (File(rootfs, "usr/bin/xsettingsd").exists()) {
+                settings = start("/usr/bin/xsettingsd", tag = "xsettingsd")
+            }
 
             // Only for an application, whose window is the Android window and should fill it. On a
             // desktop, a window that asked to be small is one the user can move and resize.
@@ -221,7 +255,10 @@ class LinuxDisplaySession private constructor(
             isRunning = true
             Timber.i("[LinuxDisplaySession]: display :%d ready (%s)", display, mode.name.lowercase())
         } catch (t: Throwable) {
-            LinuxPulse.release(context)
+            // Including cancellation, when the window reopens the session at a new size: a server
+            // left running holds the display, and the next attempt's greeting check finds it
+            // instead of its own, which has already exited unable to bind.
+            if (server != null) stop() else LinuxPulse.release(context)
             throw t
         }
     }
@@ -242,7 +279,6 @@ class LinuxDisplaySession private constructor(
             return
         }
 
-        val rootfs = LinuxRootfs.rootfsDir(context)
         val leftovers = listOf(
             File(rootfs, "tmp/.X$display-lock"),
             File(rootfs, "tmp/.X11-unix/X$display"),
@@ -253,16 +289,18 @@ class LinuxDisplaySession private constructor(
         }
     }
 
-    private fun start(argv: String, tag: String): Process? = LinuxProgramLauncher.start(
-        context = context,
-        argv = argv,
-        tag = tag,
-        extraEnv = mapOf("DISPLAY" to ":$display"),
-        // The session's own socket directory inside the rootfs, shared by every process
-        // that runs there. Binding the Wine image's directory over it would put this X
-        // server's socket where the Wine path expects to find its own.
-        displaySocketDir = null,
-    )
+    private fun start(argv: String, tag: String, extraEnv: Map<String, String> = emptyMap()): Process? =
+        LinuxProgramLauncher.start(
+            context = context,
+            argv = argv,
+            tag = tag,
+            extraEnv = extraEnv + ("DISPLAY" to ":$display"),
+            // The session's own socket directory inside the rootfs, shared by every process
+            // that runs there. Binding the Wine image's directory over it would put this X
+            // server's socket where the Wine path expects to find its own.
+            displaySocketDir = null,
+            rootfs = rootfs,
+        )
 
     /**
      * Waits until something on the port identifies itself as an RFB server.
@@ -327,8 +365,8 @@ class LinuxDisplaySession private constructor(
     override fun setDpi(densityDpi: Int, scalePercent: Int) {
         val dpi = LinuxDisplayScale.xdpi(densityDpi, scalePercent)
         writeXdefaults(dpi)
-        LinuxRootfs.writeFirefoxScale(LinuxRootfs.rootfsDir(context), dpi)
-        val settings = File(LinuxRootfs.rootfsDir(context), "root/.xsettingsd")
+        if (ubuntu) LinuxRootfs.writeFirefoxScale(rootfs, dpi)
+        val settings = File(rootfs, "root/.xsettingsd")
         val text = settings.takeIf { it.isFile }?.readText() ?: return
         val updated = text.lines().joinToString("\n") { line ->
             if (line.startsWith("Xft/DPI ")) "Xft/DPI ${dpi * 1024}" else line
@@ -342,6 +380,7 @@ class LinuxDisplaySession private constructor(
             argv = "/usr/bin/pkill -HUP xsettingsd",
             extraEnv = mapOf("DISPLAY" to ":$display"),
             displaySocketDir = null,
+            rootfs = rootfs,
         )
         Timber.i("[LinuxDisplaySession]: dpi set to %d", dpi)
     }
@@ -363,7 +402,7 @@ class LinuxDisplaySession private constructor(
      * rewriting here keeps the two backends from fighting when the user switches.
      */
     private fun writeXdefaults(dpi: Int) {
-        File(LinuxRootfs.rootfsDir(context), "root/.Xdefaults").writeText(
+        File(rootfs, "root/.Xdefaults").writeText(
             """
             Xft.dpi: $dpi
             XTerm*faceName: DejaVu Sans Mono

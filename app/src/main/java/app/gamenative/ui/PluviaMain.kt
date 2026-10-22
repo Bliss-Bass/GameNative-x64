@@ -99,6 +99,7 @@ import app.gamenative.ui.screen.HomeScreen
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.screen.linux.LinuxAppsScreen
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
+import app.gamenative.ui.screen.linux.LinuxDistrosScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
 import app.gamenative.ui.screen.terminal.TerminalScreen
@@ -2005,6 +2006,11 @@ fun PluviaMain(
                             }
                         },
                     )
+                }
+
+                /** Linux distros, desktop sessions and consoles **/
+                composable(route = PluviaScreen.LinuxDistros.route) {
+                    LinuxDistrosScreen(onBack = { navController.navigateUp() })
                 }
 
                 /** Linux terminal **/

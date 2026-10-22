@@ -7,8 +7,9 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import app.gamenative.linux.GuestProcesses
+import app.gamenative.linux.LinuxDistroCatalog
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxProgramLauncher
-import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxVtConsoles
 import app.gamenative.platform.PlatformCapabilities
 import java.io.File
@@ -41,7 +42,7 @@ class LinuxVtService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundWithType()
 
-        if (!PlatformCapabilities.refresh(this).linuxVt || !LinuxRootfs.isInstalled(this)) {
+        if (!PlatformCapabilities.refresh(this).linuxVt || LinuxDistros.installed(this).isEmpty()) {
             Timber.i("[LinuxVtService]: consoles unavailable here, stopping")
             stopSelf()
             return START_NOT_STICKY
@@ -49,6 +50,8 @@ class LinuxVtService : Service() {
         if (!running) {
             running = true
             startWatcher()
+        } else if (intent?.action == ACTION_RELOAD) {
+            reload()
         }
         // Sticky: the consoles should come back if Android kills the process.
         return START_STICKY
@@ -94,16 +97,17 @@ class LinuxVtService : Service() {
         val argv = LinuxProgramLauncher.buildArgv(
             this,
             LinuxVtConsoles.guestCommand(assignment),
-            extraEnv = LinuxVtConsoles.guestEnv(vt, distroName(assignment.distroId), shell, assignment),
+            extraEnv = LinuxVtConsoles.guestEnv(vt, LinuxDistroCatalog.nameOf(assignment.distroId), shell, assignment),
             // A text console has no X server to point DISPLAY at.
             displaySocketDir = null,
+            rootfs = rootfs,
         )
         val builder = ProcessBuilder(listOf(vtExec(), "/dev/tty$vt") + argv)
             .directory(rootfs)
             .redirectErrorStream(true)
         builder.environment().apply {
             clear()
-            LinuxProgramLauncher.prootEnv(this@LinuxVtService).toStringArray().forEach { entry ->
+            LinuxProgramLauncher.prootEnv(this@LinuxVtService, rootfs).toStringArray().forEach { entry ->
                 val split = entry.indexOf('=')
                 if (split > 0) put(entry.substring(0, split), entry.substring(split + 1))
             }
@@ -127,12 +131,20 @@ class LinuxVtService : Service() {
         }, "linux-vt-tty$vt").apply { isDaemon = true }.start()
     }
 
-    /** Where [distroId]'s userland lives; only Ubuntu until per-distro installs exist. */
-    private fun rootfsFor(distroId: String): File? =
-        if (distroId == LinuxVtConsoles.DEFAULT_DISTRO && LinuxRootfs.isInstalled(this)) LinuxRootfs.rootfsDir(this) else null
+    private fun rootfsFor(distroId: String): File? = LinuxDistros.installedRootfs(this, distroId)
 
-    private fun distroName(distroId: String): String =
-        if (distroId == LinuxVtConsoles.DEFAULT_DISTRO) "Ubuntu" else distroId
+    /**
+     * Ends every console's shell so each starts with its current assignment the next time it is
+     * shown. The one on screen comes straight back, through the same respawn as a shell that exited.
+     */
+    @Synchronized
+    private fun reload() {
+        for ((vt, process) in shells.toList()) {
+            shells.remove(vt)
+            val pid = LinuxProgramLauncher.pidOf(process)
+            if (pid > 0) GuestProcesses.end(process, pid, "Linux console tty$vt") else process.destroyForcibly()
+        }
+    }
 
     private fun startForegroundWithType() {
         val notification = notifications.createLinuxVtNotification()
@@ -175,14 +187,21 @@ class LinuxVtService : Service() {
 
         private const val RESPAWN_DELAY_MS = 1_000L
 
+        private const val ACTION_RELOAD = "app.gamenative.action.RELOAD_LINUX_VT"
+
         /**
-         * Starts the consoles when this device provides them and the userland is installed. Safe to
+         * Starts the consoles when this device provides them and a distro is installed. Safe to
          * call anywhere: it is a no-op on other devices, and a refused background start only logs.
          */
-        fun startIfSupported(context: Context) {
+        fun startIfSupported(context: Context) = start(context, null)
+
+        /** Restarts the consoles' shells with their current assignments, after the user changed them. */
+        fun reloadIfSupported(context: Context) = start(context, ACTION_RELOAD)
+
+        private fun start(context: Context, action: String?) {
             val app = context.applicationContext
-            if (!PlatformCapabilities.refresh(app).linuxVt || !LinuxRootfs.isInstalled(app)) return
-            runCatching { app.startForegroundService(Intent(app, LinuxVtService::class.java)) }
+            if (!PlatformCapabilities.refresh(app).linuxVt || LinuxDistros.installed(app).isEmpty()) return
+            runCatching { app.startForegroundService(Intent(app, LinuxVtService::class.java).setAction(action)) }
                 .onFailure { Timber.w(it, "[LinuxVtService]: could not start") }
         }
     }

@@ -16,7 +16,7 @@ object LinuxVtConsoles {
     /** The VT numbers GameNative owns. F1-F3 are Android consoles, F7 is Android itself. */
     val CONSOLES: IntRange = 4..6
 
-    const val DEFAULT_DISTRO = "ubuntu"
+    const val DEFAULT_DISTRO = LinuxDistroCatalog.UBUNTU
     const val ROOT_USER = "root"
 
     private const val PREFS = "linux_vt_consoles"
@@ -56,13 +56,26 @@ object LinuxVtConsoles {
     fun setAll(context: Context, assignment: Assignment) = CONSOLES.forEach { set(context, it, assignment) }
 
     /**
-     * The shell [assignment] runs in [rootfs]: its own choice, else bash, else POSIX sh. Paths are
-     * guest paths; they are checked against the host copy of the rootfs.
+     * The shell [assignment] runs in [rootfs]: its own choice, else bash, else the distro's first
+     * login shell. Paths are guest paths; they are checked against the host copy of the rootfs.
      */
     fun shellFor(rootfs: File, assignment: Assignment): String =
-        assignment.shell ?: listOf("/bin/bash", "/usr/bin/bash", "/bin/sh")
-            .firstOrNull { File(rootfs, it.removePrefix("/")).exists() }
-            ?: "/bin/sh"
+        assignment.shell ?: LinuxDistros.shells(rootfs).firstOrNull() ?: "/bin/sh"
+
+    /**
+     * Accounts a console can log in as in [rootfs]: root plus every ordinary user (uid 1000 and up)
+     * with a real shell.
+     */
+    fun users(rootfs: File): List<String> {
+        val passwd = File(rootfs, "etc/passwd").takeIf { it.isFile }?.readLines().orEmpty()
+        val regular = passwd.mapNotNull { line ->
+            val fields = line.split(':')
+            val uid = fields.getOrNull(2)?.toIntOrNull() ?: return@mapNotNull null
+            val shell = fields.getOrNull(6).orEmpty()
+            fields[0].takeIf { uid in 1000 until 65534 && !shell.endsWith("nologin") && !shell.endsWith("false") }
+        }
+        return listOf(ROOT_USER) + regular
+    }
 
     /**
      * The guest command for a console: clear it, say what it is, then start a login shell. The

@@ -144,8 +144,11 @@ object LinuxDesktopConfig {
      * terminal, so what is installed changes under us, and neither a menu nor a launcher is worth
      * having if it does not list what is actually there.
      */
-    fun writeDesktop(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
-        val rootfs = LinuxRootfs.rootfsDir(context)
+    fun writeDesktop(
+        context: Context,
+        apps: List<LinuxAppScanner.LinuxApp>,
+        rootfs: File = LinuxRootfs.rootfsDir(context),
+    ) {
         runCatching {
             writeMenu(rootfs, apps)
             writePanel(context, rootfs, apps)

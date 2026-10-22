@@ -46,6 +46,8 @@ object LinuxProgramLauncher {
      * [displaySocketDir] is bound onto the guest's /tmp/.X11-unix so an X client finds
      * the server at DISPLAY=:0. Stock libX11 does not accept a socket path in DISPLAY,
      * which is why this is a bind rather than an environment variable.
+     *
+     * [rootfs] is Ubuntu's unless a caller runs another distro ([LinuxDistros.installedRootfs]).
      */
     fun buildArgv(
         context: Context,
@@ -54,9 +56,9 @@ object LinuxProgramLauncher {
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
+        rootfs: File = LinuxRootfs.rootfsDir(context),
     ): List<String> {
         val libDir = nativeLibraryDir(context)
-        val rootfs = LinuxRootfs.rootfsDir(context)
 
         val argv = mutableListOf("$libDir/$PROOT")
         argv += "--kill-on-exit"
@@ -140,6 +142,7 @@ object LinuxProgramLauncher {
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
+        rootfs: File = LinuxRootfs.rootfsDir(context),
     ): String = buildArgv(
         context,
         // Already a shell word list rather than an argv, since ProcessHelper takes a string.
@@ -148,17 +151,18 @@ object LinuxProgramLauncher {
         extraEnv,
         displaySocketDir,
         extraBinds,
+        rootfs,
     ).joinToString(" ")
 
     /** Environment for the PRoot process itself, as opposed to the guest's. */
-    fun prootEnv(context: Context): EnvVars {
+    fun prootEnv(context: Context, rootfs: File = LinuxRootfs.rootfsDir(context)): EnvVars {
         val libDir = nativeLibraryDir(context)
         val env = EnvVars()
         // PRoot embeds a copy of the loader, but it would have to extract it to a file to
         // exec it, and an app may not exec from its own data dir. Pointing at the copy in
         // the lib dir, which is exec-allowed, avoids that.
         env.put("PROOT_LOADER", "$libDir/$PROOT_LOADER")
-        env.put("PROOT_TMP_DIR", LinuxRootfs.rootfsDir(context).absolutePath + "/tmp")
+        env.put("PROOT_TMP_DIR", rootfs.absolutePath + "/tmp")
         return env
     }
 
@@ -171,13 +175,14 @@ object LinuxProgramLauncher {
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
         onTerminated: ((Int) -> Unit)? = null,
+        rootfs: File = LinuxRootfs.rootfsDir(context),
     ): Int {
-        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir, extraBinds)
+        val command = buildCommand(context, argv, cwd, extraEnv, displaySocketDir, extraBinds, rootfs)
         Timber.i("[LinuxProgramLauncher]: exec %s", argv)
         return ProcessHelper.exec(
             command,
-            prootEnv(context).toStringArray(),
-            LinuxRootfs.rootfsDir(context),
+            prootEnv(context, rootfs).toStringArray(),
+            rootfs,
             Callback<Int> { status -> onTerminated?.invoke(status) },
         )
     }
@@ -211,15 +216,16 @@ object LinuxProgramLauncher {
         extraEnv: Map<String, String> = emptyMap(),
         displaySocketDir: File? = defaultDisplaySocketDir(context),
         extraBinds: List<String> = emptyList(),
+        rootfs: File = LinuxRootfs.rootfsDir(context),
     ): Process? {
         val guestArgv = argvForRootGuest(argv)
-        val command = buildCommand(context, guestArgv, cwd, extraEnv, displaySocketDir, extraBinds)
+        val command = buildCommand(context, guestArgv, cwd, extraEnv, displaySocketDir, extraBinds, rootfs)
         Timber.i("[LinuxProgramLauncher]: start %s", guestArgv)
 
         val process = ProcessHelper.startProcess(
             command,
-            prootEnv(context).toStringArray(),
-            LinuxRootfs.rootfsDir(context),
+            prootEnv(context, rootfs).toStringArray(),
+            rootfs,
         ) ?: return null
 
         drain(process.inputStream, tag)
@@ -271,10 +277,11 @@ object LinuxProgramLauncher {
         cwd: String = GUEST_HOME,
         extraEnv: Map<String, String> = emptyMap(),
         timeoutSeconds: Int = 30,
+        rootfs: File = LinuxRootfs.rootfsDir(context),
     ): String = ProcessHelper.execWithOutput(
-        buildCommand(context, argv, cwd, extraEnv),
-        prootEnv(context).toStringArray(),
-        LinuxRootfs.rootfsDir(context),
+        buildCommand(context, argv, cwd, extraEnv, rootfs = rootfs),
+        prootEnv(context, rootfs).toStringArray(),
+        rootfs,
         true,
         timeoutSeconds,
     )

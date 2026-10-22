@@ -123,11 +123,16 @@ object LinuxSessions {
         val mode = if (argv == null) LinuxDesktopConfig.Mode.DESKTOP else LinuxDesktopConfig.Mode.APP
         val backend = PrefManager.linuxDisplayBackend
         val scale = LinuxAppSettings.scalePercent(context, key)
-        Timber.i("[LinuxSessions]: opening %s with backend %s at %d%%", key, backend.key, scale)
-        return@withLock when (backend) {
-            LinuxDisplayBackend.ANDROID_X ->
+        // Applications always run in Ubuntu; the desktop runs whichever distro and session the
+        // user picked, and anything but Ubuntu's openbox needs Xtigervnc's extensions.
+        val target = if (argv == null) LinuxDesktopSessions.target(context) else null
+        Timber.i("[LinuxSessions]: opening %s with backend %s at %d%% (%s)", key, backend.key, scale, target)
+        return@withLock when {
+            target != null && !target.isBuiltIn ->
+                LinuxDisplaySession.start(context, width, height, densityDpi, scale, mode, target)
+            backend == LinuxDisplayBackend.ANDROID_X ->
                 LinuxAndroidXSession.start(context, width, height, densityDpi, scale, mode)
-            LinuxDisplayBackend.XTIGERVNC ->
+            else ->
                 LinuxDisplaySession.start(context, width, height, densityDpi, scale, mode)
         }
             .onSuccess { session ->
