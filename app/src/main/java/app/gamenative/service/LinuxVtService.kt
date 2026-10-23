@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.system.Os
+import android.system.OsConstants
 import app.gamenative.linux.GuestProcesses
 import app.gamenative.linux.LinuxDistroCatalog
 import app.gamenative.linux.LinuxDistros
@@ -39,31 +41,55 @@ class LinuxVtService : Service() {
     @Volatile
     private var activeVt = -1
 
+    @Volatile
+    private var watchedVt = -1
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundWithType()
 
-        if (!PlatformCapabilities.refresh(this).linuxVt || LinuxDistros.installed(this).isEmpty()) {
-            Timber.i("[LinuxVtService]: consoles unavailable here, stopping")
+        val inUse = consolesInUse()
+        if (!PlatformCapabilities.refresh(this).linuxVt || LinuxDistros.installed(this).isEmpty() || inUse.isEmpty()) {
+            Timber.i("[LinuxVtService]: no consoles to serve here, stopping")
             stopSelf()
             return START_NOT_STICKY
         }
+        allocate(inUse)
         if (!running) {
             running = true
             startWatcher()
         } else if (intent?.action == ACTION_RELOAD) {
             reload()
+            // The watcher holds its console open; move it off one that was just turned off.
+            if (watchedVt !in inUse) watcher?.destroy()
         }
         // Sticky: the consoles should come back if Android kills the process.
         return START_STICKY
     }
 
+    private fun consolesInUse(): List<Int> = LinuxVtConsoles.CONSOLES.filter { LinuxVtConsoles.get(this, it) != null }
+
+    /**
+     * Opens each console once so the kernel allocates it. Ctrl+Alt+Fn ignores a VT nothing has
+     * opened yet, and a shell is only started once its console is showing; consoles set to Off are
+     * left unallocated. O_NOCTTY: an open tty must not become this process's controlling terminal.
+     */
+    private fun allocate(consoles: List<Int>) {
+        for (vt in consoles) {
+            runCatching { Os.close(Os.open("/dev/tty$vt", OsConstants.O_RDONLY or OsConstants.O_NOCTTY or OsConstants.O_CLOEXEC, 0)) }
+                .onFailure { Timber.w(it, "[LinuxVtService]: could not allocate tty%d", vt) }
+        }
+    }
+
     private fun vtExec(): String = File(applicationInfo.nativeLibraryDir, VT_EXEC).absolutePath
 
     private fun startWatcher() {
+        // Any console reports the active VT; one in use, so watching does not allocate an unused one.
+        val vt = consolesInUse().firstOrNull() ?: return
         val process = runCatching {
-            ProcessBuilder(vtExec(), "--watch", WATCH_TTY).redirectErrorStream(true).start()
+            ProcessBuilder(vtExec(), "--watch", "/dev/tty$vt").redirectErrorStream(true).start()
         }.onFailure { Timber.e(it, "[LinuxVtService]: cannot watch the active console") }.getOrNull() ?: return
         watcher = process
+        watchedVt = vt
 
         Thread({
             process.inputStream.bufferedReader().forEachLine { line ->
@@ -181,9 +207,6 @@ class LinuxVtService : Service() {
 
     companion object {
         private const val VT_EXEC = "libvtexec.so"
-
-        /** Any console GameNative owns; opening one does not switch to it. */
-        private const val WATCH_TTY = "/dev/tty4"
 
         private const val RESPAWN_DELAY_MS = 1_000L
 
