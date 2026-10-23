@@ -134,6 +134,34 @@ class LinuxDistrosTest {
     }
 
     @Test
+    fun unassignedConsolesRunTheFirstInstalledDistro() {
+        fakeInstall("alpine")
+        fakeInstall("fedora")
+        assertEquals("alpine", LinuxDistros.defaultId(context))
+        assertEquals("alpine", LinuxVtConsoles.get(context, 4)?.distroId)
+
+        // The user's default wins over catalog order, and an explicit pick wins over both.
+        LinuxDistros.setDefault(context, "fedora")
+        LinuxVtConsoles.set(context, 6, LinuxVtConsoles.Assignment("alpine"))
+        assertEquals("fedora", LinuxVtConsoles.get(context, 4)?.distroId)
+        assertEquals("fedora", LinuxVtConsoles.get(context, 5)?.distroId)
+        assertEquals("alpine", LinuxVtConsoles.get(context, 6)?.distroId)
+        assertNull(LinuxVtConsoles.assignedDistro(context, 4))
+    }
+
+    @Test
+    fun uninstallLeavesItsConsolesFollowingTheDefault() {
+        fakeInstall("alpine")
+        fakeInstall("fedora")
+        LinuxVtConsoles.set(context, 4, LinuxVtConsoles.Assignment("fedora", "/bin/bash"))
+
+        runBlocking { LinuxDistros.uninstall(context, "fedora") }
+
+        assertNull(LinuxVtConsoles.assignedDistro(context, 4))
+        assertEquals(LinuxVtConsoles.Assignment("alpine"), LinuxVtConsoles.get(context, 4))
+    }
+
+    @Test
     fun uninstallForgetsTheDesktopChoice() {
         fakeInstall("alpine")
         LinuxDesktopSessions.setDesktopDistro(context, "alpine")

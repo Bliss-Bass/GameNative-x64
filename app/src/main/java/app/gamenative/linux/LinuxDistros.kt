@@ -62,10 +62,14 @@ object LinuxDistros {
         return present.sortedBy { if (it.endsWith("/bash")) 0 else 1 }
     }
 
-    /** The distro new terminals open in: the user's choice while it is installed, else Ubuntu. */
+    /**
+     * The distro new terminals open in and unassigned consoles run: the user's choice while it is
+     * installed, else the first installed distro in catalog order, else Ubuntu (nothing installed).
+     */
     fun defaultId(context: Context): String =
         prefs(context).getString(KEY_DEFAULT, null)
             ?.takeIf { LinuxDistroCatalog.byId(it) != null && isInstalled(context, it) }
+            ?: installed(context).firstOrNull()?.id
             ?: LinuxDistroCatalog.UBUNTU
 
     fun setDefault(context: Context, id: String) {
@@ -171,8 +175,8 @@ object LinuxDistros {
     }
 
     /**
-     * Removes [id]'s rootfs. Consoles that ran it go back to the default distro, and it stops
-     * being the default itself and the desktop's distro.
+     * Removes [id]'s rootfs. Consoles assigned to it become unassigned, so they follow the default
+     * distro, and it stops being the default itself and the desktop's distro.
      */
     suspend fun uninstall(context: Context, id: String) {
         if (id == LinuxDistroCatalog.UBUNTU) {
@@ -188,10 +192,7 @@ object LinuxDistros {
         if (prefs(context).getString(KEY_DEFAULT, null) == id) prefs(context).edit().remove(KEY_DEFAULT).apply()
         LinuxDesktopSessions.forget(context, id)
         for (vt in LinuxVtConsoles.CONSOLES) {
-            val assignment = LinuxVtConsoles.get(context, vt) ?: continue
-            if (assignment.distroId == id) {
-                LinuxVtConsoles.set(context, vt, LinuxVtConsoles.Assignment(distroId = defaultId(context)))
-            }
+            if (LinuxVtConsoles.assignedDistro(context, vt) == id) LinuxVtConsoles.clear(context, vt)
         }
         Timber.i("[LinuxDistros]: removed %s", id)
     }

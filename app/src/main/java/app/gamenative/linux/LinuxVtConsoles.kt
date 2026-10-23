@@ -28,15 +28,28 @@ object LinuxVtConsoles {
         val user: String = ROOT_USER,
     )
 
-    /** The assignment for [vt], or null when that console is off. */
+    /**
+     * The assignment for [vt], or null when that console is off. A console nobody assigned a distro
+     * runs the default one ([LinuxDistros.defaultId]): the user's choice, else the first installed.
+     */
     fun get(context: Context, vt: Int): Assignment? {
         val prefs = prefs(context)
         if (prefs.getBoolean(key(vt, "off"), false)) return null
         return Assignment(
-            distroId = prefs.getString(key(vt, "distro"), null) ?: DEFAULT_DISTRO,
+            distroId = assignedDistro(context, vt) ?: LinuxDistros.defaultId(context),
             shell = prefs.getString(key(vt, "shell"), null),
             user = prefs.getString(key(vt, "user"), null) ?: ROOT_USER,
         )
+    }
+
+    /** The distro the user picked for [vt], or null when it follows the default. */
+    fun assignedDistro(context: Context, vt: Int): String? = prefs(context).getString(key(vt, "distro"), null)
+
+    /** Forgets everything set for [vt], so it follows the default distro with its default shell. */
+    fun clear(context: Context, vt: Int) {
+        prefs(context).edit().apply {
+            for (field in listOf("off", "distro", "shell", "user")) remove(key(vt, field))
+        }.apply()
     }
 
     /** Sets [vt] to [assignment], or turns it off for null. */
