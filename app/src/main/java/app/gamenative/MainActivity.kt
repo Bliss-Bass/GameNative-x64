@@ -126,8 +126,16 @@ class MainActivity : ComponentActivity() {
         /** Opens the Linux terminal, which is also where the userland is installed from. */
         const val ACTION_LINUX_TERMINAL = "app.gamenative.action.LINUX_TERMINAL"
 
+        /** Opens the Linux Distros screen. */
+        const val ACTION_LINUX_DISTROS = "app.gamenative.action.LINUX_DISTROS"
+
+        /** For [ACTION_LINUX_TERMINAL]: the installed distro to open in, instead of the default. */
+        const val EXTRA_LINUX_DISTRO = "linux_distro"
+
+        enum class LinuxScreen { DESKTOP, TERMINAL, DISTROS }
+
         /** A Linux screen asked for by intent, held until the UI can act on it. */
-        data class PendingLinuxRequest(val terminal: Boolean, val argv: String?)
+        data class PendingLinuxRequest(val screen: LinuxScreen, val argv: String?, val distroId: String? = null)
 
         @Volatile
         private var pendingLinuxRequest: PendingLinuxRequest? = null
@@ -447,15 +455,23 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (intent.action == ACTION_LINUX_DESKTOP || intent.action == ACTION_LINUX_TERMINAL) {
+        if (intent.action == ACTION_LINUX_DESKTOP || intent.action == ACTION_LINUX_TERMINAL ||
+            intent.action == ACTION_LINUX_DISTROS
+        ) {
             // Not a game launch, so these skip IntentLaunchManager entirely. The desktop
             // action is also the entry point a per-app launcher shortcut uses.
-            val terminal = intent.action == ACTION_LINUX_TERMINAL
+            val screen = when (intent.action) {
+                ACTION_LINUX_TERMINAL -> LinuxScreen.TERMINAL
+                ACTION_LINUX_DISTROS -> LinuxScreen.DISTROS
+                else -> LinuxScreen.DESKTOP
+            }
+            val terminal = screen != LinuxScreen.DESKTOP
+            val distroId = intent.getStringExtra(EXTRA_LINUX_DISTRO)
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
             val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
             val entryId = intent.getStringExtra(EXTRA_LINUX_ENTRY_ID)
             val label = intent.getStringExtra(EXTRA_LINUX_LABEL)
-            Timber.i("[IntentLaunch]: Linux %s requested (argv=%s)", if (terminal) "terminal" else "desktop", argv)
+            Timber.i("[IntentLaunch]: Linux %s requested (argv=%s, distro=%s)", screen.name.lowercase(), argv, distroId)
 
             // An application gets a window of its own, so Android sizes and remembers it per
             // application rather than reusing whatever bounds this activity happens to have. The
@@ -483,7 +499,7 @@ class MainActivity : ComponentActivity() {
             // launcher shortcut does when its own task is already in recents, and the request
             // was then dropped. Recording it first means the request survives either way, and is
             // picked up by whichever of the two runs.
-            setPendingLinuxRequest(PendingLinuxRequest(terminal, argv))
+            setPendingLinuxRequest(PendingLinuxRequest(screen, argv, distroId))
             lifecycleScope.launch { PluviaApp.events.emit(AndroidEvent.LinuxRequestPending) }
             return
         }

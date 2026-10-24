@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,7 @@ import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxShellSession
 import app.gamenative.ui.theme.PluviaTheme
+import app.gamenative.ui.util.automationIds
 import app.gamenative.ui.util.pluviaSafeDrawingPadding
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -68,14 +70,18 @@ import timber.log.Timber
  * is the glue that points them at a PRoot bash and puts them in the app's shell.
  */
 @Composable
-fun TerminalScreen(onBack: () -> Unit) {
+fun TerminalScreen(initialDistroId: String? = null, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var installing by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<LinuxRootfs.Progress?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var distroId by remember { mutableStateOf(LinuxDistros.terminalDefaultId(context)) }
+    var distroId by remember {
+        mutableStateOf(
+            initialDistroId?.takeIf { LinuxDistros.isInstalled(context, it) } ?: LinuxDistros.terminalDefaultId(context),
+        )
+    }
     var shell by remember { mutableStateOf<String?>(null) }
     var installed by remember { mutableStateOf(LinuxDistros.isInstalled(context, distroId)) }
     // False until ensureDisplaySession finishes so Terminal never mounts in the gap between
@@ -114,7 +120,9 @@ fun TerminalScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .pluviaSafeDrawingPadding()
             .imePadding()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            .automationIds()
+            .testTag("terminal_screen"),
     ) {
         TerminalHeader(
             onBack = onBack,
@@ -190,7 +198,7 @@ private fun Terminal(distroId: String, shell: String?, onSessionEnded: () -> Uni
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag("terminal_view"),
             factory = { viewContext ->
                 TerminalView(viewContext, null).apply {
                     setTextSize((14 * viewContext.resources.displayMetrics.density).toInt())
@@ -278,6 +286,7 @@ private fun TerminalHeader(
                 description = stringResource(R.string.terminal_distro),
                 value = LinuxDistroCatalog.nameOf(distroId),
                 choices = distros.map { it.displayName to it.id },
+                tag = "terminal_distro",
                 onChoose = onDistro,
             )
         }
@@ -289,6 +298,7 @@ private fun TerminalHeader(
                 description = stringResource(R.string.terminal_shell),
                 value = (shell ?: shells.first()).substringAfterLast('/'),
                 choices = shells.map { it to it },
+                tag = "terminal_shell",
                 onChoose = { onShell(it) },
             )
         }
@@ -296,15 +306,22 @@ private fun TerminalHeader(
 }
 
 @Composable
-private fun <T> HeaderChoice(description: String, value: String, choices: List<Pair<String, T>>, onChoose: (T) -> Unit) {
+private fun <T> HeaderChoice(
+    description: String,
+    value: String,
+    choices: List<Pair<String, T>>,
+    tag: String,
+    onChoose: (T) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { expanded = true }) {
+        TextButton(modifier = Modifier.testTag(tag), onClick = { expanded = true }) {
             Text(text = "$description: $value", color = PluviaTheme.colors.accentCyan)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            choices.forEach { (name, choice) ->
+        DropdownMenu(modifier = Modifier.automationIds(), expanded = expanded, onDismissRequest = { expanded = false }) {
+            choices.forEachIndexed { index, (name, choice) ->
                 DropdownMenuItem(
+                    modifier = Modifier.testTag("${tag}_item_$index"),
                     text = { Text(name) },
                     onClick = {
                         expanded = false
@@ -331,7 +348,7 @@ private fun InstallPrompt(onInstall: () -> Unit) {
             color = PluviaTheme.colors.textMuted,
             textAlign = TextAlign.Center,
         )
-        Button(onClick = onInstall, modifier = Modifier.padding(top = 24.dp)) {
+        Button(onClick = onInstall, modifier = Modifier.padding(top = 24.dp).testTag("terminal_install")) {
             Text(stringResource(R.string.terminal_install))
         }
     }
@@ -342,7 +359,8 @@ private fun InstallProgress(progress: LinuxRootfs.Progress?) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(32.dp)
+            .testTag("terminal_progress"),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -369,7 +387,8 @@ private fun Message(text: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(32.dp)
+            .testTag("terminal_message"),
         contentAlignment = Alignment.Center,
     ) {
         Text(

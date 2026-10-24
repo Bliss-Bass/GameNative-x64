@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
@@ -48,6 +49,7 @@ import app.gamenative.linux.LinuxVtConsoles
 import app.gamenative.platform.PlatformCapabilities
 import app.gamenative.service.LinuxVtService
 import app.gamenative.ui.theme.PluviaTheme
+import app.gamenative.ui.util.automationIds
 import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,17 +79,23 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
             title = { Text(stringResource(R.string.linux_distro_remove_title, distro.displayName)) },
             text = { Text(stringResource(R.string.linux_distro_remove_message, distro.displayName)) },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmRemove = null
-                    DistroWork.run(context, distro.id) {
-                        if (distro.id == LinuxDistroCatalog.UBUNTU) LinuxSessions.stopAll(context)
-                        LinuxDistros.uninstall(context, distro.id)
-                        Result.success(Unit)
-                    }
-                }) { Text(stringResource(R.string.linux_distro_remove)) }
+                TextButton(
+                    modifier = Modifier.automationIds().testTag("dialog_confirm"),
+                    onClick = {
+                        confirmRemove = null
+                        DistroWork.run(context, distro.id) {
+                            if (distro.id == LinuxDistroCatalog.UBUNTU) LinuxSessions.stopAll(context)
+                            LinuxDistros.uninstall(context, distro.id)
+                            Result.success(Unit)
+                        }
+                    },
+                ) { Text(stringResource(R.string.linux_distro_remove)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmRemove = null }) { Text(stringResource(R.string.cancel)) }
+                TextButton(
+                    modifier = Modifier.automationIds().testTag("dialog_cancel"),
+                    onClick = { confirmRemove = null },
+                ) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -96,7 +104,9 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .pluviaTopSafeAreaPadding(),
+            .pluviaTopSafeAreaPadding()
+            .automationIds()
+            .testTag("linux_distros_screen"),
     ) {
         Header(onBack)
 
@@ -111,7 +121,7 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
                     text = it,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("work_failure"),
                 )
             }
 
@@ -154,7 +164,7 @@ private fun DistroRow(
     onRemove: () -> Unit,
     onMakeDefault: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag("distro_${distro.id}")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -182,15 +192,27 @@ private fun DistroRow(
             }
             if (installed) {
                 if (!isDefault && distro.supported) {
-                    TextButton(enabled = !busy, onClick = onMakeDefault) {
+                    TextButton(
+                        modifier = Modifier.testTag("distro_default_${distro.id}"),
+                        enabled = !busy,
+                        onClick = onMakeDefault,
+                    ) {
                         Text(stringResource(R.string.linux_distro_make_default))
                     }
                 }
-                OutlinedButton(enabled = !busy, onClick = onRemove) {
+                OutlinedButton(
+                    modifier = Modifier.testTag("distro_remove_${distro.id}"),
+                    enabled = !busy,
+                    onClick = onRemove,
+                ) {
                     Text(stringResource(R.string.linux_distro_remove))
                 }
             } else {
-                Button(enabled = !busy && LinuxRootfs.isSupported(), onClick = onInstall) {
+                Button(
+                    modifier = Modifier.testTag("distro_install_${distro.id}"),
+                    enabled = !busy && LinuxRootfs.isSupported(),
+                    onClick = onInstall,
+                ) {
                     Text(stringResource(R.string.linux_distro_install))
                 }
             }
@@ -220,6 +242,7 @@ private fun DesktopSection(
         label = stringResource(R.string.linux_desktop_distro),
         value = LinuxDistroCatalog.nameOf(distroId),
         choices = installed.map { it.displayName to it.id },
+        tag = "desktop_distro",
         onChoose = {
             distroId = it
             LinuxDesktopSessions.setDesktopDistro(context, it)
@@ -233,6 +256,7 @@ private fun DesktopSection(
             stringResource(R.string.linux_desktop_session_not_installed, session.displayName)
         },
         choices = LinuxDesktopSessions.Session.entries.map { it.displayName to it },
+        tag = "desktop_session",
         onChoose = {
             session = it
             // Remembered even before it is installed, so installing it next makes it the one used.
@@ -250,10 +274,10 @@ private fun DesktopSection(
         val distro = distroId
         when {
             builtIn -> Unit
-            sessionInstalled -> OutlinedButton(enabled = work == null, onClick = {
+            sessionInstalled -> OutlinedButton(modifier = Modifier.testTag("desktop_session_remove"), enabled = work == null, onClick = {
                 onWork(key) { LinuxDesktopSessions.remove(context, distro, chosen) }
             }) { Text(stringResource(R.string.linux_desktop_session_remove, chosen.displayName)) }
-            else -> Button(enabled = work == null, onClick = {
+            else -> Button(modifier = Modifier.testTag("desktop_session_install"), enabled = work == null, onClick = {
                 onWork(key) { progress ->
                     LinuxDesktopSessions.install(context, distro, chosen, progress)
                         .onSuccess { LinuxDesktopSessions.select(context, distro, chosen) }
@@ -307,6 +331,7 @@ private fun ConsolesSection(version: Int) {
                 label = stringResource(R.string.linux_desktop_distro),
                 value = assignment?.let { LinuxDistroCatalog.nameOf(it.distroId) } ?: off,
                 choices = listOf(off to null) + installed.map { it.displayName to it.id },
+                tag = "vt${vt}_distro",
                 onChoose = { id -> save(vt, id?.let { LinuxVtConsoles.Assignment(distroId = it) }) },
             )
             if (assignment != null && rootfs != null) {
@@ -315,6 +340,7 @@ private fun ConsolesSection(version: Int) {
                     label = stringResource(R.string.terminal_shell),
                     value = assignment.shell ?: defaultShell,
                     choices = listOf(defaultShell to null) + shells.map { it to it },
+                    tag = "vt${vt}_shell",
                     onChoose = { save(vt, assignment.copy(shell = it)) },
                 )
                 val users = remember(rootfs) { LinuxVtConsoles.users(rootfs) }
@@ -323,6 +349,7 @@ private fun ConsolesSection(version: Int) {
                         label = stringResource(R.string.linux_vt_user),
                         value = assignment.user,
                         choices = users.map { it to it },
+                        tag = "vt${vt}_user",
                         onChoose = { save(vt, assignment.copy(user = it)) },
                     )
                 }
@@ -334,7 +361,7 @@ private fun ConsolesSection(version: Int) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        OutlinedButton(onClick = {
+        OutlinedButton(modifier = Modifier.testTag("vt_use_on_all"), onClick = {
             val first = LinuxVtConsoles.get(context, LinuxVtConsoles.CONSOLES.first)
             for (vt in LinuxVtConsoles.CONSOLES) LinuxVtConsoles.set(context, vt, first)
             LinuxVtService.reloadIfSupported(context)
@@ -343,8 +370,15 @@ private fun ConsolesSection(version: Int) {
     }
 }
 
+/** [tag] names the button (`<tag>`) and each menu entry (`<tag>_item_<index>`) for automation. */
 @Composable
-private fun <T> LabeledChoice(label: String, value: String, choices: List<Pair<String, T>>, onChoose: (T) -> Unit) {
+private fun <T> LabeledChoice(
+    label: String,
+    value: String,
+    choices: List<Pair<String, T>>,
+    tag: String,
+    onChoose: (T) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
@@ -357,10 +391,15 @@ private fun <T> LabeledChoice(label: String, value: String, choices: List<Pair<S
             modifier = Modifier.weight(1f),
         )
         Box {
-            TextButton(onClick = { expanded = true }) { Text(value) }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                choices.forEach { (name, choice) ->
+            TextButton(modifier = Modifier.testTag(tag), onClick = { expanded = true }) { Text(value) }
+            DropdownMenu(
+                modifier = Modifier.automationIds(),
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                choices.forEachIndexed { index, (name, choice) ->
                     DropdownMenuItem(
+                        modifier = Modifier.testTag("${tag}_item_$index"),
                         text = { Text(name) },
                         onClick = {
                             expanded = false
@@ -376,7 +415,7 @@ private fun <T> LabeledChoice(label: String, value: String, choices: List<Pair<S
 @Composable
 private fun Progress(state: DistroWork.State) {
     val fraction = state.progress?.fraction ?: -1f
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("work_progress")) {
         if (fraction >= 0f) {
             LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
         } else {

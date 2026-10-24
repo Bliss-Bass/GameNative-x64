@@ -10,7 +10,12 @@ sealed class PluviaScreen(val route: String) {
     data object Home : PluviaScreen("home")
     data object XServer : PluviaScreen("xserver")
     data object Settings : PluviaScreen("settings")
-    data object Terminal : PluviaScreen("terminal")
+    data object Terminal : PluviaScreen("terminal?distro={distro}") {
+        /** [distro] is the installed distro to open in, or null for the default. */
+        fun route(distro: String? = null) =
+            if (distro == null) "terminal" else "terminal?distro=${Uri.encode(distro)}"
+        const val ARG_DISTRO = "distro"
+    }
     data object LinuxApps : PluviaScreen("linux-apps")
     data object LinuxDistros : PluviaScreen("linux-distros")
     data object LinuxDesktop : PluviaScreen("linux-desktop?argv={argv}") {

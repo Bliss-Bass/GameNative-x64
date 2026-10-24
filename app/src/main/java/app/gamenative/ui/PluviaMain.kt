@@ -184,10 +184,17 @@ private fun NavHostController.navigateFromLoginIfNeeded(
  */
 private fun NavHostController.navigateToPendingLinuxRequest() {
     val request = MainActivity.consumePendingLinuxRequest() ?: return
-    Timber.i("[PluviaMain]: Opening Linux %s", if (request.terminal) "terminal" else "session")
-    if (request.terminal) {
-        navigate(PluviaScreen.Terminal.route)
-        return
+    Timber.i("[PluviaMain]: Opening Linux %s", request.screen.name.lowercase())
+    when (request.screen) {
+        MainActivity.Companion.LinuxScreen.TERMINAL -> {
+            navigate(PluviaScreen.Terminal.route(request.distroId))
+            return
+        }
+        MainActivity.Companion.LinuxScreen.DISTROS -> {
+            navigate(PluviaScreen.LinuxDistros.route)
+            return
+        }
+        MainActivity.Companion.LinuxScreen.DESKTOP -> Unit
     }
 
     // A session launched from an app-drawer entry has only the graph's start destination beneath
@@ -1987,7 +1994,7 @@ fun PluviaMain(
                 composable(route = PluviaScreen.LinuxApps.route) {
                     LinuxAppsScreen(
                         onBack = { navController.navigateUp() },
-                        onOpenTerminal = { navController.navigate(PluviaScreen.Terminal.route) },
+                        onOpenTerminal = { navController.navigate(PluviaScreen.Terminal.route()) },
                         // Its own window rather than a screen in this one, so Android sizes and
                         // remembers each application separately and two can be open at once. The
                         // in-app route below remains for the bare desktop, and as the fallback if
@@ -2014,10 +2021,22 @@ fun PluviaMain(
                 }
 
                 /** Linux terminal **/
-                composable(route = PluviaScreen.Terminal.route) { entry ->
+                composable(
+                    route = PluviaScreen.Terminal.route,
+                    arguments = listOf(
+                        navArgument(PluviaScreen.Terminal.ARG_DISTRO) {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                    ),
+                ) { entry ->
                     // Guarded because the shell dies when this screen leaves composition,
                     // and the resulting callback would otherwise pop whatever replaced it.
-                    TerminalScreen(onBack = { navController.navigateUpFrom(entry) })
+                    TerminalScreen(
+                        initialDistroId = entry.arguments?.getString(PluviaScreen.Terminal.ARG_DISTRO),
+                        onBack = { navController.navigateUpFrom(entry) },
+                    )
                 }
 
                 /** Linux graphical session **/

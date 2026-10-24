@@ -599,7 +599,7 @@ fun SystemMenu(
                                 text = stringResource(R.string.terminal_title),
                                 icon = Icons.Default.Terminal,
                                 onClick = {
-                                    onNavigateRoute(PluviaScreen.Terminal.route)
+                                    onNavigateRoute(PluviaScreen.Terminal.route())
                                     onDismiss()
                                 },
                             )

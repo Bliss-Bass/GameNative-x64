@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,6 +73,7 @@ import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxStorage
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.theme.PluviaTheme
+import app.gamenative.ui.util.automationIds
 import app.gamenative.ui.util.pluviaTopSafeAreaPadding
 import app.gamenative.utils.createLinuxAppShortcut
 import kotlinx.coroutines.Dispatchers
@@ -159,7 +161,9 @@ fun LinuxAppsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .pluviaTopSafeAreaPadding(),
+            .pluviaTopSafeAreaPadding()
+            .automationIds()
+            .testTag("linux_apps_screen"),
     ) {
         val installed = LinuxRootfs.isInstalled(context)
         Header(
@@ -514,6 +518,7 @@ private fun AppRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("linux_app_${app.entryId}")
             .clickable(onClick = onClick)
             .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
