@@ -137,6 +137,15 @@ open_terminal() {
 
 back_to_android() { input keyevent KEYCODE_HOME; }
 
+# Removes Linux app stub tasks left in recents. Desktop mode relaunches a desk's tasks when the
+# desk comes forward, so a stale one would open its app over the screen under test.
+clear_stub_tasks() {
+    for t in $(dumpsys activity recents | grep -E 'Recent #[0-9]+: Task\{.*app\.gamenative\.stub\.' |
+        sed -E 's/.* #([0-9]+) type=.*/\1/'); do
+        am stack remove "$t" >/dev/null 2>&1 && log "removed stale stub task $t"
+    done
+}
+
 is_installed() {
     open_distros
     ui_find "distro_remove_$1" linux_distros_screen >/dev/null
@@ -299,16 +308,20 @@ test_desktop() {
 test_apps() {
     d=$1; since=$(now); start=$(date +%s)
     status "RUNNING $d apps"
+    clear_stub_tasks
     am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
     sleep 6; ui_dump
-    entries=$(grep -o 'resource-id="linux_app_[^"]*"' "$W/ui.xml" | sed 's/resource-id="linux_app_//; s/"$//' |
-        grep -vE '^(restart|stop|drawer|undrawer|pin)_')
+    # Rows are tagged linux_app_<distro>__<desktop entry>; buttons put their verb first.
+    entries=$(grep -o "resource-id=\"linux_app_${d}__[^\"]*\"" "$W/ui.xml" | sed "s/resource-id=\"linux_app_${d}__//; s/\"\$//")
     if [ -z "$entries" ]; then
         evidence "$d" apps "$since"
-        result "$d" apps FAIL 0 "Linux Apps lists no apps"; back_to_android; return 1
+        result "$d" apps FAIL 0 "Linux Apps lists no $d apps"; back_to_android; return 1
     fi
-    entry=$(echo "$entries" | grep -m1 -E '(^|-)xterm$' || echo "$entries" | head -n 1)
-    result "$d" apps-list PASS 0 "$(echo "$entries" | wc -l | tr -d ' ') apps listed"
+    name=$(echo "$entries" | grep -m1 -E '(^|-)xterm$' || echo "$entries" | head -n 1)
+    result "$d" apps-list PASS 0 "$(echo "$entries" | wc -l | tr -d ' ') $d apps listed"
+    # $entry tags the row; $key is the session the app runs under, which only Ubuntu leaves bare.
+    entry="${d}__$name"
+    if [ "$d" = ubuntu ]; then key=$name; else key="$d:$name"; fi
 
     # A cold launch each time: a session left running would only bring its window forward.
     if ui_has_id "linux_app_stop_$entry"; then
@@ -317,16 +330,16 @@ test_apps() {
     launched=$(now); t0=$(date +%s)
     tap_id "linux_app_$entry" linux_apps_screen
     # A window already open for the app is brought forward and its session reused.
-    wait_log "$launched" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready|\[LinuxSessions\]: reusing display :[0-9]+ for $entry" \
-        "\[LinuxSessions\]: could not open $entry" 180
+    wait_log "$launched" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready|\[LinuxSessions\]: reusing display :[0-9]+ for $key" \
+        "\[LinuxSessions\]: could not open $key|\[LinuxDesktopScreen\]: could not complete" 600
     rc=$?
     sleep 10
     alive=$(guest_count "$d")
     evidence "$d" app-window "$since"
     secs=$(( $(date +%s) - t0 ))
-    if [ $rc -ne 0 ]; then result "$d" app-window FAIL "$secs" "$entry did not open"
-    elif [ "$alive" -lt 1 ]; then result "$d" app-window FAIL "$secs" "$entry exited"
-    else result "$d" app-window PASS "$secs" "$entry window up"
+    if [ $rc -ne 0 ]; then result "$d" app-window FAIL "$secs" "$key did not open"
+    elif [ "$alive" -lt 1 ]; then result "$d" app-window FAIL "$secs" "$key exited"
+    else result "$d" app-window PASS "$secs" "$key window up"
     fi
 
     # Stop it from its Linux Apps row, the way a user ends a session left running.
@@ -334,11 +347,11 @@ test_apps() {
     sleep 4
     if tap_id "linux_app_stop_$entry" linux_apps_screen; then
         sleep 6; ui_dump
-        if ui_has_id "linux_app_stop_$entry"; then result "$d" app-stop FAIL 6 "$entry still listed as running"
-        else result "$d" app-stop PASS 6 "$entry stopped from Linux Apps"
+        if ui_has_id "linux_app_stop_$entry"; then result "$d" app-stop FAIL 6 "$key still listed as running"
+        else result "$d" app-stop PASS 6 "$key stopped from Linux Apps"
         fi
     else
-        result "$d" app-stop FAIL 0 "no stop button while $entry was running"
+        result "$d" app-stop FAIL 0 "no stop button while $key was running"
     fi
 
     am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1

@@ -14,10 +14,10 @@ import java.io.File
  */
 object LinuxAppIcon {
 
-    /** The icon at [iconPath] (a guest-absolute path), or null if it cannot be read. */
-    fun load(context: Context, iconPath: String?): Bitmap? {
+    /** The icon at [iconPath] (a guest-absolute path in [distroId]), or null if it cannot be read. */
+    fun load(context: Context, iconPath: String?, distroId: String = LinuxDistroCatalog.UBUNTU): Bitmap? {
         val png = iconPath?.takeIf { it.endsWith(".png", ignoreCase = true) } ?: return null
-        val file = File(LinuxRootfs.rootfsDir(context), png.removePrefix("/"))
+        val file = File(LinuxDistros.rootfsOf(context, distroId), png.removePrefix("/"))
         return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
     }
 }

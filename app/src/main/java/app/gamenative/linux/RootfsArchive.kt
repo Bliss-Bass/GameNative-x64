@@ -6,6 +6,12 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -170,6 +176,42 @@ internal object RootfsArchive {
 
     fun chmod(file: File, mode: Int) {
         runCatching { Os.chmod(file.absolutePath, mode and 0xFFF) }
+    }
+
+    /**
+     * Deletes [dir] and everything in it, as [File.deleteRecursively] would if it could.
+     *
+     * Guest packages leave directories without owner write (Arch's `update-ca-trust` makes its
+     * cadir 0555), and nothing in those can be unlinked until that is put back. Symlinks are
+     * removed, never followed: a rootfs can link to the user's storage. True when [dir] is gone.
+     */
+    fun deleteTree(dir: File): Boolean {
+        val root = dir.toPath()
+        if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return true
+        runCatching {
+            Files.walkFileTree(root, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(path: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    chmod(path.toFile(), 0x1C0) // u+rwx, so its entries can be listed and unlinked
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFile(path: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.deleteIfExists(path)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(path: Path, error: IOException): FileVisitResult {
+                    runCatching { Files.deleteIfExists(path) }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(path: Path, error: IOException?): FileVisitResult {
+                    Files.deleteIfExists(path)
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        }.onFailure { Timber.w(it, "[RootfsArchive]: could not delete all of %s", dir) }
+        return !Files.exists(root, LinkOption.NOFOLLOW_LINKS)
     }
 
     /**

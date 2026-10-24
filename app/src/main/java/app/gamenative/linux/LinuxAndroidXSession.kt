@@ -34,7 +34,11 @@ class LinuxAndroidXSession private constructor(
     override val display: Int,
     private val mode: LinuxDesktopConfig.Mode,
     private val sessionRoot: File,
+    /** The distro whose programs this display runs. */
+    private val distroId: String,
 ) : LinuxSession {
+
+    private val rootfs: File = LinuxDistros.rootfsOf(context, distroId)
 
     private var xServer: XServer? = null
     private var xServerComponent: XServerComponent? = null
@@ -81,7 +85,7 @@ class LinuxAndroidXSession private constructor(
     private val guestConfigDir = "/root/.config/gamenative/x11-$display"
 
     private val configDir: File
-        get() = File(LinuxRootfs.rootfsDir(context), guestConfigDir.removePrefix("/"))
+        get() = File(rootfs, guestConfigDir.removePrefix("/"))
 
     companion object {
         private const val FIRST_DISPLAY = 10
@@ -106,13 +110,14 @@ class LinuxAndroidXSession private constructor(
             densityDpi: Int,
             scalePercent: Int,
             mode: LinuxDesktopConfig.Mode,
+            distroId: String = LinuxDistroCatalog.UBUNTU,
         ): Result<LinuxAndroidXSession> = withContext(Dispatchers.IO) {
             runCatching {
-                if (!LinuxRootfs.isInstalled(context)) {
-                    throw IOException("The Linux userland is not installed")
+                if (!LinuxDistros.isInstalled(context, distroId)) {
+                    throw IOException("${LinuxDistroCatalog.nameOf(distroId)} is not installed")
                 }
-                if (!LinuxRootfs.hasDisplaySession(context)) {
-                    throw IOException("The graphical session is not installed")
+                if (!LinuxGraphics.isReady(context, distroId)) {
+                    throw IOException("The graphical session is not installed in ${LinuxDistroCatalog.nameOf(distroId)}")
                 }
 
                 val display = claimDisplay(context)
@@ -121,7 +126,7 @@ class LinuxAndroidXSession private constructor(
                     File(this, "tmp/.X11-unix").mkdirs()
                     File(this, "tmp/.sysvshm").mkdirs()
                 }
-                val session = LinuxAndroidXSession(context, display, mode, sessionRoot)
+                val session = LinuxAndroidXSession(context, display, mode, sessionRoot, distroId)
                 runCatching {
                     session.launch(
                         width.coerceAtLeast(320),
@@ -200,16 +205,17 @@ class LinuxAndroidXSession private constructor(
             val desktop = mode == LinuxDesktopConfig.Mode.DESKTOP
 
             if (desktop) {
-                val scanned = LinuxAppScanner.scan(context)
-                LinuxDesktopConfig.writeDesktop(context, scanned)
-                LinuxAppReconciler.reconcile(context, scanned)
+                LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context, distroId), rootfs)
+                LinuxAppReconciler.reconcile(context, LinuxAppScanner.scan(context))
             }
 
             // Openbox needs XKB/Shape/RandR that Winlator does not advertise and SIGSEGVs on
             // BadImplementation. Wine games never use a guest WM either — DesktopHelper plus
             // [installAppWindowFitter] fill application windows instead.
-            settings = startGuest("/bin/sh $guestConfigDir/xsettingsd.sh", tag = "xsettingsd")
-            if (desktop) {
+            if (File(rootfs, "usr/bin/xsettingsd").exists()) {
+                settings = startGuest("/bin/sh $guestConfigDir/xsettingsd.sh", tag = "xsettingsd")
+            }
+            if (desktop && File(rootfs, "usr/bin/xsetroot").exists()) {
                 startGuest("/usr/bin/xsetroot -solid ${LinuxDesktopConfig.BACKGROUND}", tag = "xsetroot")
                 // tint2 also expects a WM; skip until we have a compatible panel story.
             }
@@ -558,7 +564,6 @@ class LinuxAndroidXSession private constructor(
     }
 
     private fun writeXresources(dpi: Int) {
-        val rootfs = LinuxRootfs.rootfsDir(context)
         val dir = configDir.apply { mkdirs() }
         // The shared file carries the font settings; only the DPI is this display's own.
         val shared = File(rootfs, "root/.xsettingsd").takeIf { it.isFile }?.readText().orEmpty()
@@ -628,6 +633,7 @@ class LinuxAndroidXSession private constructor(
         extraEnv = graphicalEnv(),
         displaySocketDir = displaySocketDir,
         extraBinds = LinuxProgramLauncher.graphicalBinds(),
+        rootfs = rootfs,
     )
 
     private fun graphicalEnv(): Map<String, String> = buildMap {

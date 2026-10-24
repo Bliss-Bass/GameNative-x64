@@ -20,14 +20,21 @@ import timber.log.Timber
  * audio bridge of their own: Firefox's Cubeb finds libasound, cannot open Android's
  * `/dev/snd`, and YouTube (and anything else that waits on an audio clock) never starts.
  *
- * The socket is created on the host at `{rootfs}/tmp/.sound/PS0`, which is `/tmp/.sound/PS0`
- * inside the guest — no extra bind. Guests must have `libpulse0` so Cubeb can speak the
- * native protocol.
+ * The socket is created on the host under `files/linux/pulse`, outside every rootfs, and
+ * [LinuxProgramLauncher] binds its directory onto `/tmp/.sound` in each guest, so one daemon
+ * serves whichever distro a session runs in. Guests need the Pulse client library (`libpulse0`,
+ * `libpulse`) so Cubeb can speak the native protocol.
  */
 object LinuxPulse {
 
     /** Guest-side value for `PULSE_SERVER`. */
     const val GUEST_SERVER = "unix:${UnixSocketConfig.PULSE_SERVER_PATH}"
+
+    private fun hostRoot(context: Context): File = File(LinuxRootfs.rootDir(context), "pulse")
+
+    /** The host directory that is `/tmp/.sound` in every guest. */
+    fun hostSocketDir(context: Context): File =
+        File(hostRoot(context), UnixSocketConfig.PULSE_SERVER_PATH.substringBeforeLast('/').removePrefix("/"))
 
     private var holders = 0
 
@@ -49,7 +56,7 @@ object LinuxPulse {
 
         val workingDir = File(context.filesDir, "pulseaudio")
         val socket = UnixSocketConfig.createSocket(
-            LinuxRootfs.rootfsDir(context).absolutePath,
+            hostRoot(context).absolutePath,
             UnixSocketConfig.PULSE_SERVER_PATH,
         )
 

@@ -220,17 +220,14 @@ class LinuxDisplaySession private constructor(
                 return
             }
 
-            // Built from what is installed right now, since apt runs in our own terminal. Linux
-            // apps are scanned in Ubuntu only, so another distro's menu offers just a terminal.
-            if (desktop && ubuntu) {
-                val apps = LinuxAppScanner.scan(context)
-                LinuxDesktopConfig.writeDesktop(context, apps)
+            // Built from what is installed right now, since the package manager runs in our own
+            // terminal. The menu lists only this distro's apps: it launches them in this rootfs.
+            if (desktop) {
+                if (!ubuntu) LinuxDesktopSessions.prepare(rootfs, target.session)
+                LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context, target.distroId), rootfs)
                 // Opening the desktop is another moment apps become visible; publish stubs here
-                // so a visit to Linux Apps is not required after an earlier apt install.
-                LinuxAppReconciler.reconcile(context, apps)
-            } else if (desktop) {
-                LinuxDesktopSessions.prepare(rootfs, target.session)
-                LinuxDesktopConfig.writeDesktop(context, emptyList(), rootfs)
+                // so a visit to Linux Apps is not required after an earlier install.
+                LinuxAppReconciler.reconcile(context, LinuxAppScanner.scan(context))
             }
 
             // Started after the server is up: they all connect to it, and none of them retries.

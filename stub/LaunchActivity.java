@@ -109,9 +109,10 @@ public class LaunchActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        // The window closed, or never opened; either way there is nothing left to host, and an
-        // empty task would linger in recents under the application's name.
-        if (requestCode == REQUEST_WINDOW) finish();
+        // The window closed, or never opened; either way there is nothing left to host. An empty
+        // task would linger in recents under the application's name, and desktop mode relaunches
+        // the tasks on a desk when it comes forward, which would open the application again.
+        if (requestCode == REQUEST_WINDOW) finishAndRemoveTask();
     }
 
     @Override

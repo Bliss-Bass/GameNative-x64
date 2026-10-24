@@ -64,6 +64,8 @@ import app.gamenative.R
 import app.gamenative.enums.LinuxDisplayBackend
 import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.linux.LinuxAppIcon
+import app.gamenative.linux.LinuxAppIds
+import app.gamenative.linux.LinuxDistroCatalog
 import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
@@ -221,6 +223,7 @@ fun LinuxAppsScreen(
                 )
 
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    val showDistro = found.map { it.distroId }.distinct().size > 1
                     items(found, key = { it.id }) { app ->
                         val session = sessions.firstOrNull {
                             it.key == LinuxSessions.keyFor(app.entryId, app.launchArgv)
@@ -255,6 +258,7 @@ fun LinuxAppsScreen(
                             } else {
                                 null
                             },
+                            showDistro = showDistro,
                         )
                     }
                 }
@@ -514,16 +518,20 @@ private fun AppRow(
     /** Null when stubs are unavailable; otherwise whether this app is in the drawer. */
     inDrawer: Boolean?,
     onToggleDrawer: (() -> Unit)?,
+    /** Whether apps from more than one distro are listed, so each row says which it is from. */
+    showDistro: Boolean = false,
 ) {
+    // Automation id: distro and entry kept apart, since an entry may contain dots and dashes.
+    val tagKey = "${app.distroId}__${LinuxAppIds.entryOf(app.entryId)}"
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("linux_app_${app.entryId}")
+            .testTag("linux_app_$tagKey")
             .clickable(onClick = onClick)
             .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AppIcon(iconPath = app.iconPath)
+        AppIcon(iconPath = app.iconPath, distroId = app.distroId)
 
         Column(
             modifier = Modifier
@@ -539,12 +547,16 @@ private fun AppRow(
             )
             // A running session is what someone is looking for when they came here to stop
             // one, so it displaces the description while it lasts.
-            val subtitle = when {
+            val detail = when {
                 session != null -> stringResource(R.string.linux_session_running, session.display)
                 app.comment != null -> app.comment
                 app.terminal -> stringResource(R.string.linux_apps_terminal_app)
                 else -> null
             }
+            val subtitle = listOfNotNull(
+                LinuxDistroCatalog.nameOf(app.distroId).takeIf { showDistro },
+                detail,
+            ).joinToString(" · ").ifEmpty { null }
             if (subtitle != null) {
                 Text(
                     text = subtitle,
@@ -563,14 +575,14 @@ private fun AppRow(
         // Only while there is a session to act on: a stop button for something that is not
         // running would be furniture, and a restart would be a launch by another name.
         if (session != null) {
-            IconButton(onClick = { onRestart(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_restart_${app.entryId}")) {
+            IconButton(onClick = { onRestart(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_restart_$tagKey")) {
                 Icon(
                     imageVector = Icons.Filled.RestartAlt,
                     contentDescription = stringResource(R.string.linux_session_restart),
                     tint = Color.White.copy(alpha = 0.7f),
                 )
             }
-            IconButton(onClick = { onStop(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_stop_${app.entryId}")) {
+            IconButton(onClick = { onStop(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_stop_$tagKey")) {
                 Icon(
                     imageVector = Icons.Filled.StopCircle,
                     contentDescription = stringResource(R.string.linux_session_stop),
@@ -583,7 +595,7 @@ private fun AppRow(
             IconButton(
                 onClick = onToggleDrawer,
                 modifier = Modifier.size(44.dp)
-                    .testTag(if (inDrawer) "linux_app_undrawer_${app.entryId}" else "linux_app_drawer_${app.entryId}"),
+                    .testTag(if (inDrawer) "linux_app_undrawer_$tagKey" else "linux_app_drawer_$tagKey"),
             ) {
                 Icon(
                     imageVector = if (inDrawer) {
@@ -599,7 +611,7 @@ private fun AppRow(
             }
         }
 
-        IconButton(onClick = onPin, modifier = Modifier.size(44.dp).testTag("linux_app_pin_${app.entryId}")) {
+        IconButton(onClick = onPin, modifier = Modifier.size(44.dp).testTag("linux_app_pin_$tagKey")) {
             Icon(
                 imageVector = Icons.Filled.AddToHomeScreen,
                 contentDescription = stringResource(R.string.linux_apps_pin),
@@ -611,11 +623,11 @@ private fun AppRow(
 
 /** The entry's icon, or a stand-in when it is missing or in a format Android cannot read. */
 @Composable
-private fun AppIcon(iconPath: String?) {
+private fun AppIcon(iconPath: String?, distroId: String) {
     val context = LocalContext.current
 
-    val bitmap by produceState<ImageBitmap?>(null, iconPath) {
-        value = withContext(Dispatchers.IO) { LinuxAppIcon.load(context, iconPath)?.asImageBitmap() }
+    val bitmap by produceState<ImageBitmap?>(null, iconPath, distroId) {
+        value = withContext(Dispatchers.IO) { LinuxAppIcon.load(context, iconPath, distroId)?.asImageBitmap() }
     }
 
     val image = bitmap

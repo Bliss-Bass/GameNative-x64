@@ -29,14 +29,16 @@ object LinuxAppStubs {
     private const val META_ENTRY_ID = "app.gamenative.stub.ENTRY_ID"
 
     /**
-     * Which trampoline behaviour a stub was built for. From [STUB_FORMAT] 2 a stub stays as the
+     * Which trampoline behaviour a stub was built for. From [ROOTED_FORMAT] a stub stays as the
      * root of its window's task, so GameNative launches through it; an older one hands straight
-     * back to MainActivity, and launching through it would loop.
+     * back to MainActivity, and launching through it would loop. From 3 the task goes with the
+     * window, so desktop mode cannot relaunch an emptied one when its desk comes forward.
      */
     const val META_FORMAT = "app.gamenative.stub.FORMAT"
-    const val STUB_FORMAT = 2
+    const val STUB_FORMAT = 3
+    const val ROOTED_FORMAT = 2
 
-    fun packageNameFor(app: LinuxAppScanner.LinuxApp): String = Stubs.packageNameFor(app.entryId)
+    fun packageNameFor(app: LinuxAppScanner.LinuxApp): String = LinuxAppIds.stubPackage(app.entryId)
 
     /** Whether a stub can be built at all, which needs a userland as well as the trampoline. */
     fun isSupported(context: Context): Boolean = LinuxRootfs.isSupported() && Stubs.isSupported(context)
@@ -50,7 +52,7 @@ object LinuxAppStubs {
      * icon replaces the file.
      */
     fun contentFingerprint(context: Context, app: LinuxAppScanner.LinuxApp): String {
-        val icon = app.iconPath?.let { File(LinuxRootfs.rootfsDir(context), it.removePrefix("/")) }
+        val icon = app.iconPath?.let { File(LinuxDistros.rootfsOf(context, app.distroId), it.removePrefix("/")) }
 
         val summary = listOf(
             app.name,
@@ -145,7 +147,7 @@ object LinuxAppStubs {
      * a stand-in glyph in the same situation.
      */
     private fun iconPng(context: Context, app: LinuxAppScanner.LinuxApp): ByteArray {
-        val bitmap = LinuxAppIcon.load(context, app.iconPath)
+        val bitmap = LinuxAppIcon.load(context, app.iconPath, app.distroId)
             ?: StubIcons.lettered(context, app.name)
         return StubIcons.png(bitmap)
     }

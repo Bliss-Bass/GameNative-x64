@@ -157,7 +157,7 @@ internal suspend fun createLinuxAppShortcut(
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 
-    val bitmap = withContext(Dispatchers.IO) { LinuxAppIcon.load(appContext, app.iconPath) }
+    val bitmap = withContext(Dispatchers.IO) { LinuxAppIcon.load(appContext, app.iconPath, app.distroId) }
     val icon: Icon = if (bitmap != null) {
         val adaptive = createAdaptiveIconBitmap(appContext, bitmap)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

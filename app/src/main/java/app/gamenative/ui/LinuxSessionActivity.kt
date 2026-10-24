@@ -22,6 +22,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import app.gamenative.PrefManager
 import app.gamenative.enums.AppTheme
+import app.gamenative.linux.LinuxAppIds
 import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxXServerView
@@ -123,7 +124,7 @@ class LinuxSessionActivity : ComponentActivity() {
     private fun applySessionCaption(label: String?, entryId: String?) {
         val stubPkg = entryId
             ?.takeIf { it.isNotBlank() && !it.startsWith("argv-") }
-            ?.let { Stubs.packageNameFor(it) }
+            ?.let { LinuxAppIds.stubPackage(it) }
         val stubInfo = stubPkg?.let { pkg ->
             runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
         }
@@ -246,12 +247,12 @@ class LinuxSessionActivity : ComponentActivity() {
          * the task: it would hand the launch straight back to MainActivity.
          */
         private fun stubLaunchIntent(context: Context, entryId: String): Intent? {
-            val component = ComponentName(Stubs.packageNameFor(entryId), Stubs.TRAMPOLINE_CLASS)
+            val component = ComponentName(LinuxAppIds.stubPackage(entryId), Stubs.TRAMPOLINE_CLASS)
             val format = runCatching {
                 context.packageManager.getActivityInfo(component, PackageManager.GET_META_DATA)
                     .metaData?.getString(LinuxAppStubs.META_FORMAT)?.toIntOrNull()
             }.getOrNull() ?: 0
-            if (format < LinuxAppStubs.STUB_FORMAT) return null
+            if (format < LinuxAppStubs.ROOTED_FORMAT) return null
             return Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(component)

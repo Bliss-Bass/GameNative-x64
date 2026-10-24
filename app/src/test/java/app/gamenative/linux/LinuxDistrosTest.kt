@@ -204,6 +204,23 @@ class LinuxDistrosTest {
         assertEquals(LinuxDesktopSessions.Session.OPENBOX, LinuxDesktopSessions.selected(context, "debian"))
     }
 
+    @Test
+    fun uninstallClearsReadOnlyDirectoriesButNotWhatLinksPointAt() {
+        fakeInstall("archlinux")
+        val rootfs = LinuxDistros.rootfsDir(context, "archlinux")
+        val cadir = File(rootfs, "etc/ca-certificates/extracted/cadir").apply { mkdirs() }
+        File(cadir, "cert.pem").writeText("pem")
+        android.system.Os.chmod(cadir.absolutePath, "555".toInt(8))
+        val outside = Files.createTempDirectory("storage").toFile()
+        File(outside, "keep.txt").writeText("keep")
+        android.system.Os.symlink(outside.absolutePath, File(rootfs, "root-storage").absolutePath)
+
+        runBlocking { LinuxDistros.uninstall(context, "archlinux") }
+
+        assertFalse(File(LinuxDistros.distrosDir(context), "archlinux").exists())
+        assertTrue(File(outside, "keep.txt").isFile)
+    }
+
     private fun fakeInstall(id: String) {
         File(LinuxDistros.rootfsDir(context, id), "etc").mkdirs()
         File(LinuxDistros.distrosDir(context), "$id/.installed").writeText(LinuxDistroCatalog.byId(id)!!.sha256!!)

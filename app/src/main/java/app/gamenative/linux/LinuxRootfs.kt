@@ -220,7 +220,7 @@ object LinuxRootfs {
 
                 onProgress(Progress("Unpacking Linux userland", -1f))
                 stampFile(context).delete()
-                if (rootfs.exists()) rootfs.deleteRecursively()
+                if (!RootfsArchive.deleteTree(rootfs)) throw IOException("Could not clear the old Linux userland")
                 rootfs.mkdirs()
                 RootfsArchive.extract(tarball, rootfs)
 
@@ -281,7 +281,7 @@ object LinuxRootfs {
         stampFile(context).delete()
         aptPolicyStampFile(context).delete()
         browserSourcesStampFile(context).delete()
-        rootfsDir(context).deleteRecursively()
+        RootfsArchive.deleteTree(rootfsDir(context))
     }
 
     /**

@@ -30,9 +30,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
+import app.gamenative.linux.LinuxAppIds
 import app.gamenative.linux.LinuxDesktopSessions
 import app.gamenative.linux.LinuxDistroCatalog
-import app.gamenative.linux.LinuxRootfs
+import app.gamenative.linux.LinuxGraphics
 import app.gamenative.linux.LinuxSession
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxXServerView
@@ -130,11 +131,15 @@ fun LinuxDesktopScreen(
             return@LaunchedEffect
         }
 
-        // A desktop in another distro does not need Ubuntu at all, let alone its session packages.
-        val ubuntuSession = argv != null ||
-            LinuxDesktopSessions.target(context).distroId == LinuxDistroCatalog.UBUNTU
-        if (ubuntuSession) {
-            LinuxRootfs.ensureDisplaySession(context) { status = it.message }
+        // An application needs its own distro's window packages; a desktop in another distro
+        // brings its own through LinuxDesktopSessions and does not need Ubuntu at all.
+        val sessionDistro = if (argv != null) {
+            LinuxAppIds.distroOf(key)
+        } else {
+            LinuxDesktopSessions.target(context).distroId.takeIf { it == LinuxDistroCatalog.UBUNTU }
+        }
+        if (sessionDistro != null) {
+            LinuxGraphics.ensure(context, sessionDistro) { status = it.message }
                 .onFailure {
                     Timber.e(it, "[LinuxDesktopScreen]: could not complete the session install")
                     error = it.message

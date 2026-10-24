@@ -23,6 +23,11 @@ object LinuxDistros {
     private const val PREFS = "linux_distros"
     private const val KEY_DEFAULT = "default"
 
+    /** Package installs can be gigabytes over a slow link. */
+    private const val PACKAGE_TIMEOUT_SECONDS = 3 * 60 * 60
+
+    private const val PACMAN_TRUST_MARKER = "etc/pacman.d/gnupg/.gamenative-populated"
+
     /** Where Ubuntu lived before there was more than one distro. */
     private const val LEGACY_ROOTFS = "rootfs"
 
@@ -31,6 +36,10 @@ object LinuxDistros {
     fun distrosDir(context: Context): File = File(LinuxRootfs.rootDir(context), "distros")
 
     fun rootfsDir(context: Context, id: String): File = File(distrosDir(context), "$id/rootfs")
+
+    /** Where [id]'s files are on the host, installed or not: for reading an app's icon and the like. */
+    fun rootfsOf(context: Context, id: String): File =
+        if (id == LinuxDistroCatalog.UBUNTU) LinuxRootfs.rootfsDir(context) else rootfsDir(context, id)
 
     /** Holds the tarball checksum the rootfs came from, written last so a partial unpack is not trusted. */
     private fun stampFile(context: Context, id: String): File = File(distrosDir(context), "$id/.installed")
@@ -128,19 +137,21 @@ object LinuxDistros {
 
         onProgress(LinuxRootfs.Progress("Unpacking ${distro.displayName}", -1f))
         stampFile(context, distro.id).delete()
-        if (rootfs.exists()) rootfs.deleteRecursively()
+        if (!RootfsArchive.deleteTree(rootfs)) throw IOException("Could not clear the old ${distro.displayName} files")
         rootfs.mkdirs()
         RootfsArchive.extract(tarball, rootfs, distro.stripComponents, ownerAccess = true)
         tarball.delete()
 
         // A missing /etc means the strip count is wrong for this tarball, not a usable distro.
         if (!File(rootfs, "etc").isDirectory) {
-            rootfs.deleteRecursively()
+            RootfsArchive.deleteTree(rootfs)
             throw IOException("${distro.displayName}'s archive has no /etc; not a rootfs")
         }
         RootfsArchive.prepareBase(rootfs)
         prepareShell(rootfs)
         preparePackageManager(rootfs, distro.packageManager)
+        onProgress(LinuxRootfs.Progress("Setting up ${distro.displayName}'s package manager", -1f))
+        initializePackageManager(context, rootfs, distro.packageManager)
 
         stampFile(context, distro.id).writeText(sha256)
         Timber.i("[LinuxDistros]: installed %s to %s", distro.id, rootfs)
@@ -197,6 +208,64 @@ object LinuxDistros {
     }
 
     /**
+     * Setup that has to run inside the guest before its package manager can install anything.
+     *
+     * Arch's image carries its keyring package without the trust database built from it, so
+     * pacman rejects every package as "unknown trust" until `pacman-key` populates it. The image's
+     * keyring also predates newer packagers' keys, so it is refreshed on its own first, which is
+     * the one partial upgrade Arch documents. Marked done once it worked, so an install made
+     * before this existed is set up on its first package operation instead.
+     */
+    private fun initializePackageManager(context: Context, rootfs: File, packageManager: LinuxPackageManager) {
+        if (packageManager != LinuxPackageManager.PACMAN) return
+        val marker = File(rootfs, PACMAN_TRUST_MARKER)
+        if (marker.isFile) return
+        val steps = listOf(
+            "pacman-key --init",
+            "pacman-key --populate archlinux",
+            "pacman -Sy --noconfirm --needed archlinux-keyring",
+        )
+        for (step in steps) {
+            val output = LinuxProgramLauncher.runWithOutput(
+                context,
+                step,
+                timeoutSeconds = PACKAGE_TIMEOUT_SECONDS,
+                rootfs = rootfs,
+            )
+            Timber.i("[LinuxDistros]: %s:\n%s", step, output.takeLast(1_000))
+        }
+        if (!File(rootfs, "etc/pacman.d/gnupg/trustdb.gpg").isFile) {
+            throw IOException("Could not set up the Arch Linux keyring")
+        }
+        marker.writeText("1\n")
+    }
+
+    /**
+     * Runs [argv], a [packageManager] command, in [rootfs] unattended and returns its output.
+     * The launcher folds the exit status into the output, so callers judge by what landed.
+     */
+    fun runPackageManager(
+        context: Context,
+        rootfs: File,
+        packageManager: LinuxPackageManager,
+        argv: List<String>,
+    ): String {
+        initializePackageManager(context, rootfs, packageManager)
+        val env = if (packageManager == LinuxPackageManager.APT) {
+            mapOf("DEBIAN_FRONTEND" to "noninteractive", "DEBCONF_NONINTERACTIVE_SEEN" to "true")
+        } else {
+            emptyMap()
+        }
+        return LinuxProgramLauncher.runWithOutput(
+            context,
+            argv.joinToString(" "),
+            extraEnv = env,
+            timeoutSeconds = PACKAGE_TIMEOUT_SECONDS,
+            rootfs = rootfs,
+        )
+    }
+
+    /**
      * Removes [id]'s rootfs. Consoles assigned to it become unassigned, so they follow the default
      * distro, and it stops being the default itself and the desktop's distro.
      */
@@ -207,7 +276,7 @@ object LinuxDistros {
             withContext(Dispatchers.IO) {
                 installLock.withLock {
                     stampFile(context, id).delete()
-                    File(distrosDir(context), id).deleteRecursively()
+                    RootfsArchive.deleteTree(File(distrosDir(context), id))
                 }
             }
         }

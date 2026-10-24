@@ -73,8 +73,9 @@ object LinuxAppScanner {
         val id: Int,
         /**
          * The desktop entry's file name without its extension, which is what identifies an
-         * application on a Linux system and survives reinstalls and upgrades. Used where
-         * something readable and stable is needed, such as a generated package name.
+         * application on a Linux system and survives reinstalls and upgrades, prefixed with its
+         * distro for every distro but Ubuntu (see [LinuxAppIds]). Used where something readable
+         * and stable is needed, such as a generated package name or a session key.
          */
         val entryId: String,
         /**
@@ -91,6 +92,8 @@ object LinuxAppScanner {
         val terminal: Boolean = false,
         val categories: List<String> = emptyList(),
         val comment: String? = null,
+        /** The distro whose rootfs the entry is in, and which the app runs in. */
+        val distroId: String = LinuxDistroCatalog.UBUNTU,
     ) {
         /**
          * What to actually run. A console program asked to run in a terminal gets one,
@@ -100,9 +103,23 @@ object LinuxAppScanner {
             get() = if (terminal) "xterm -e $exec" else exec
     }
 
-    /** Applications in the userland, by name. Empty if it is not installed. */
+    /**
+     * Applications in every supported distro that is installed, by name. Ubuntu's are read
+     * whenever its rootfs exists; experimental distros are never scanned.
+     */
     fun scan(context: Context): List<LinuxApp> {
-        val rootfs = LinuxRootfs.rootfsDir(context)
+        val distros = listOf(LinuxDistroCatalog.UBUNTU) +
+            LinuxDistros.integrated(context).map { it.id }.filter { it != LinuxDistroCatalog.UBUNTU }
+        return distros.flatMap { scan(context, it) }.sortedBy { it.name.lowercase() }
+    }
+
+    /** Applications in [distroId], by name. Empty if it is not installed. */
+    fun scan(context: Context, distroId: String): List<LinuxApp> {
+        val rootfs = if (distroId == LinuxDistroCatalog.UBUNTU) {
+            LinuxRootfs.rootfsDir(context)
+        } else {
+            LinuxDistros.installedRootfs(context, distroId)?.takeIf { LinuxDistros.isIntegrated(context, distroId) }
+        } ?: return emptyList()
         if (!rootfs.isDirectory) return emptyList()
 
         // Keyed by desktop file id so a later directory shadows an earlier one, which is
@@ -123,16 +140,19 @@ object LinuxAppScanner {
                     .onFailure { Timber.w(it, "[LinuxAppScanner]: could not read %s", file.name) }
                             .getOrNull() ?: continue
                         found[file.name] = app.copy(
-                            id = idFor(file.name),
-                            entryId = file.nameWithoutExtension,
+                            id = idFor(LinuxAppIds.qualify(distroId, file.name)),
+                            entryId = LinuxAppIds.qualify(distroId, file.nameWithoutExtension),
                             desktopFile = "/$dir/${file.name}",
+                            distroId = distroId,
                         )
             }
         }
 
-        scanAppImages(context, rootfs, found)
+        // AppImages are glibc programs unpacked and run in place; they stay with Ubuntu, where
+        // they always ran, rather than appearing once per distro.
+        if (distroId == LinuxDistroCatalog.UBUNTU) scanAppImages(context, rootfs, found)
 
-        Timber.i("[LinuxAppScanner]: found %d applications", found.size)
+        Timber.i("[LinuxAppScanner]: found %d applications in %s", found.size, distroId)
         return found.values.sortedBy { it.name.lowercase() }
     }
 

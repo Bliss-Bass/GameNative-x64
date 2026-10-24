@@ -83,6 +83,10 @@ object LinuxProgramLauncher {
 
         if (displaySocketDir != null) argv += "--bind=${displaySocketDir.absolutePath}:/tmp/.X11-unix"
 
+        // The audio daemon's socket lives outside every rootfs; see [LinuxPulse].
+        val sound = LinuxPulse.hostSocketDir(context).apply { mkdirs() }
+        argv += "--bind=${sound.absolutePath}:/tmp/.sound"
+
         // Android's shared storage, when this app is allowed to read it. Skipped rather than
         // bound-and-broken otherwise, so a file dialog shows no directory instead of one that
         // refuses to open.

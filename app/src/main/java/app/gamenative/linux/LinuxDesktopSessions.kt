@@ -157,8 +157,8 @@ object LinuxDesktopSessions {
 
                 val label = "Installing ${session.displayName} in ${distro.displayName}"
                 onProgress(LinuxRootfs.Progress(label, -1f))
-                pm.refresh?.let { runPackageManager(context, rootfs, pm, it) }
-                val output = runPackageManager(context, rootfs, pm, pm.install + wanted)
+                pm.refresh?.let { LinuxDistros.runPackageManager(context, rootfs, pm, it) }
+                val output = LinuxDistros.runPackageManager(context, rootfs, pm, pm.install + wanted)
                 // Judged by what landed: the launcher folds the exit status into the output.
                 if (!isInstalled(context, distroId, session)) {
                     Timber.w("[LinuxDesktopSessions]: %s output:\n%s", label, output.takeLast(4_000))
@@ -183,7 +183,7 @@ object LinuxDesktopSessions {
                 val distro = LinuxDistroCatalog.byId(distroId) ?: throw IOException("Unknown distro $distroId")
                 val rootfs = LinuxDistros.installedRootfs(context, distroId)
                     ?: throw IOException("${distro.displayName} is not installed")
-                val output = runPackageManager(
+                val output = LinuxDistros.runPackageManager(
                     context, rootfs, distro.packageManager,
                     distro.packageManager.remove + packages(session, distro.packageManager),
                 )
@@ -198,27 +198,7 @@ object LinuxDesktopSessions {
         }
     }
 
-    private fun runPackageManager(
-        context: Context,
-        rootfs: File,
-        packageManager: LinuxPackageManager,
-        argv: List<String>,
-    ): String {
-        val env = if (packageManager == LinuxPackageManager.APT) {
-            mapOf("DEBIAN_FRONTEND" to "noninteractive", "DEBCONF_NONINTERACTIVE_SEEN" to "true")
-        } else {
-            emptyMap()
-        }
-        return LinuxProgramLauncher.runWithOutput(
-            context,
-            argv.joinToString(" "),
-            extraEnv = env,
-            timeoutSeconds = INSTALL_TIMEOUT_SECONDS,
-            rootfs = rootfs,
-        )
-    }
-
-    private fun lastLine(output: String): String = output.lines().lastOrNull { it.isNotBlank() }.orEmpty()
+    fun lastLine(output: String): String = output.lines().lastOrNull { it.isNotBlank() }.orEmpty()
 
     /**
      * Turns off what cannot work under PRoot, before every start: a compositor (no GPU path over
@@ -269,9 +249,6 @@ object LinuxDesktopSessions {
             "DESKTOP_SESSION" to session.id,
         )
     }
-
-    /** Long: a full desktop is a few hundred packages over whatever network the tablet has. */
-    private const val INSTALL_TIMEOUT_SECONDS = 3 * 60 * 60
 
     private fun sessionKey(distroId: String) = "session.$distroId"
 
