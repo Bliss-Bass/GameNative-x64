@@ -136,6 +136,10 @@ internal object RootfsArchive {
                         target.parentFile?.mkdirs()
                         target.outputStream().use { tar.copyTo(it) }
                         chmod(target, if (ownerAccess) entry.mode or 0x180 else entry.mode) // u+rw
+                        // Kept, not left at unpack time: package managers send it as
+                        // If-Modified-Since, and pacman then keeps the image's months-old
+                        // package databases because the mirror answers "not modified".
+                        target.setLastModified(entry.modTime.time)
                     }
                 }
             }

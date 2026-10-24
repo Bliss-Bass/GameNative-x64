@@ -97,7 +97,13 @@ class LinuxDistrosTest {
             val body = "root:x:0:\n".toByteArray()
             tar.putArchiveEntry(TarArchiveEntry("alpine-x86_64/etc/").apply { mode = 0x41ed })
             tar.closeArchiveEntry()
-            tar.putArchiveEntry(TarArchiveEntry("alpine-x86_64/etc/group").apply { size = body.size.toLong(); mode = 0x8000 })
+            tar.putArchiveEntry(
+                TarArchiveEntry("alpine-x86_64/etc/group").apply {
+                    size = body.size.toLong()
+                    mode = 0x8000
+                    modTime = java.util.Date(1_735_689_600_000L) // 2025-01-01
+                },
+            )
             tar.write(body)
             tar.closeArchiveEntry()
         }
@@ -106,6 +112,7 @@ class LinuxDistrosTest {
         RootfsArchive.extract(tarball, rootfs, stripComponents = 1, ownerAccess = true)
 
         assertEquals("root:x:0:\n", File(rootfs, "etc/group").readText())
+        assertEquals(1_735_689_600_000L, File(rootfs, "etc/group").lastModified())
         assertFalse(File(rootfs, "alpine-x86_64").exists())
     }
 

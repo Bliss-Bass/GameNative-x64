@@ -13,10 +13,12 @@ DISTROS="ubuntu debian archlinux"
 TESTS="A B C"
 KEEP=0
 NO_INSTALL=0
+PROBE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --user) USER_ID=$2; shift ;;
+        --probe) PROBE=$2; shift ;;
         --distros) DISTROS=$2; shift ;;
         --tests) TESTS=$2; shift ;;
         --keep) KEEP=1 ;;
@@ -226,6 +228,7 @@ test_terminal_and_shell() {
     fi
     probe_tests=terminal
     has_test B && probe_tests="terminal info net pkg user"
+    [ -n "$PROBE" ] && probe_tests="terminal $PROBE"
     run_probe "$d" $probe_tests
     evidence "$d" terminal "$since"
     if grep -q "^$d	probe-terminal	PASS" "$RUN/results.tsv"; then

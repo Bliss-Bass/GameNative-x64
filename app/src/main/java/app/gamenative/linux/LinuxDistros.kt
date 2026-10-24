@@ -175,12 +175,16 @@ object LinuxDistros {
             }
 
             LinuxPackageManager.PACMAN -> {
-                // The x86_64 image is pacstrapped, so its mirrorlist is the stock one with every
-                // server commented out. CheckSpace reads the mount table, which under PRoot is
-                // Android's and fails the check outright.
+                // The image names a single mirror (mirror.rackspace.com); Arch's geo-routed one
+                // goes first so that host is not the only source, and stays as a fallback.
+                // CheckSpace reads the mount table, which under PRoot is Android's and fails the
+                // check outright.
                 val mirrors = File(rootfs, "etc/pacman.d/mirrorlist")
-                if (mirrors.isFile && mirrors.readLines().none { it.trim().startsWith("Server") }) {
-                    mirrors.appendText("Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch\n")
+                val geo = "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch"
+                val listed = if (mirrors.isFile) mirrors.readText() else ""
+                if (geo !in listed) {
+                    mirrors.parentFile?.mkdirs()
+                    mirrors.writeText("$geo\n$listed")
                 }
                 val conf = File(rootfs, "etc/pacman.conf")
                 if (conf.isFile) {

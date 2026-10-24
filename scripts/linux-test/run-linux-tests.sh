@@ -11,6 +11,7 @@ usage: run-linux-tests.sh -s <serial> --yes [options]
   --user <id>          Android user GameNative runs in (default 0; the Googlebook uses 10)
   --distros "<ids>"    default "ubuntu debian archlinux"
   --tests "<letters>"  default "A B C" (A install/remove, B shell basics, C terminal)
+  --probe "<tests>"    run these probe tests instead of B's set (e.g. "pkgdiag pkg")
   --keep               leave the distros installed at the end
   --no-install         only test distros that are already installed
   --out <dir>          where to put the report (default ./linux-test-reports)
@@ -18,7 +19,7 @@ usage: run-linux-tests.sh -s <serial> --yes [options]
 EOF
 }
 
-SERIAL="" USER_ID=0 DISTROS="ubuntu debian archlinux" TESTS="A B C" KEEP="" NO_INSTALL="" YES=0
+SERIAL="" USER_ID=0 DISTROS="ubuntu debian archlinux" TESTS="A B C" KEEP="" NO_INSTALL="" YES=0 PROBE=""
 OUT=./linux-test-reports
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -27,6 +28,7 @@ while [ $# -gt 0 ]; do
         --distros) DISTROS=$2; shift ;;
         --tests) TESTS=$2; shift ;;
         --keep) KEEP=--keep ;;
+        --probe) PROBE=$2; shift ;;
         --no-install) NO_INSTALL=--no-install ;;
         --out) OUT=$2; shift ;;
         --yes) YES=1 ;;
@@ -54,7 +56,9 @@ echo "Device: $("${A[@]}" shell getprop ro.product.model | tr -d '\r'), user $US
 # only while GameNative has all-files access.
 "${A[@]}" shell "appops set --user $USER_ID app.gamenative MANAGE_EXTERNAL_STORAGE allow"
 
-"${A[@]}" shell "cd $W && nohup sh linux-test.sh --user $USER_ID --distros '$DISTROS' --tests '$TESTS' $KEEP $NO_INSTALL > $W/console.log 2>&1 &"
+PROBE_ARG=""
+[ -n "$PROBE" ] && PROBE_ARG="--probe '$PROBE'"
+"${A[@]}" shell "cd $W && nohup sh linux-test.sh --user $USER_ID --distros '$DISTROS' --tests '$TESTS' $KEEP $NO_INSTALL $PROBE_ARG > $W/console.log 2>&1 &"
 echo "Started. Following progress (Ctrl+C stops following, not the run):"
 
 last=""

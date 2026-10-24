@@ -112,6 +112,23 @@ t_user() {
     [ "$out" = "$name" ]
 }
 
+# Package manager state, for diagnosing a failing pkg test; always passes.
+t_pkgdiag() {
+    case "$PM" in
+        pacman)
+            grep -nE '^\s*#?\s*(DownloadUser|DisableSandbox|CheckSpace|SigLevel|Architecture)' /etc/pacman.conf
+            grep -n '^Server' /etc/pacman.d/mirrorlist
+            ls -la --time-style=+%F_%T /var/lib/pacman/sync/
+            pacman -Sy --noconfirm 2>&1 | tail -n 5
+            ls -la --time-style=+%F_%T /var/lib/pacman/sync/
+            pacman -Si nano 2>&1 | grep -E '^(Version|Repository)'
+            ;;
+        apt) cat /etc/apt/apt.conf.d/* 2>/dev/null; apt-cache policy nano | head -n 5 ;;
+        *) echo "pm=$PM" ;;
+    esac
+    return 0
+}
+
 t_terminal() {
     echo "terminal ok: tty=$(tty 2>/dev/null) term=$TERM cols=$(stty size 2>/dev/null)"
     [ -n "$TERM" ]
@@ -122,7 +139,7 @@ run_one() {
     rm -f "$OUT/$test.done" "$OUT/$test.result"
     start=$(date +%s)
     case "$test" in
-        info|net|pkg|user|terminal) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        info|net|pkg|pkgdiag|user|terminal) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
         *) echo "unknown test $test" > "$OUT/$test.log"; rc=1 ;;
     esac
     end=$(date +%s)
