@@ -36,7 +36,9 @@ object LinuxVtConsoles {
         val prefs = prefs(context)
         if (prefs.getBoolean(key(vt, "off"), false)) return null
         return Assignment(
-            distroId = assignedDistro(context, vt) ?: LinuxDistros.defaultId(context),
+            // An experimental distro picked before it was marked so follows the default instead.
+            distroId = assignedDistro(context, vt)?.takeIf { LinuxDistroCatalog.byId(it)?.supported == true }
+                ?: LinuxDistros.defaultId(context),
             shell = prefs.getString(key(vt, "shell"), null),
             user = prefs.getString(key(vt, "user"), null) ?: ROOT_USER,
         )

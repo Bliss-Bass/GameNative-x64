@@ -75,7 +75,7 @@ fun TerminalScreen(onBack: () -> Unit) {
     var installing by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<LinuxRootfs.Progress?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var distroId by remember { mutableStateOf(LinuxDistros.defaultId(context)) }
+    var distroId by remember { mutableStateOf(LinuxDistros.terminalDefaultId(context)) }
     var shell by remember { mutableStateOf<String?>(null) }
     var installed by remember { mutableStateOf(LinuxDistros.isInstalled(context, distroId)) }
     // False until ensureDisplaySession finishes so Terminal never mounts in the gap between

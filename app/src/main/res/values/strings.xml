@@ -2529,6 +2529,7 @@
     <string name="linux_distro_size">%1$s · %2$d MB download, about %3$d MB installed</string>
     <string name="linux_distro_installed">Installed</string>
     <string name="linux_distro_default">Default</string>
+    <string name="linux_distro_experimental">Experimental: Linux Terminal only. Desktop, consoles and Linux Apps use Ubuntu, Debian or Arch.</string>
     <string name="linux_distro_make_default">Make default</string>
     <string name="linux_distro_install">Install</string>
     <string name="linux_distro_remove">Remove</string>

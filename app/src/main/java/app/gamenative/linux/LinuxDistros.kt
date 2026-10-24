@@ -43,6 +43,16 @@ object LinuxDistros {
     fun installed(context: Context): List<LinuxDistro> =
         LinuxDistroCatalog.all.filter { isInstalled(context, it.id) }
 
+    /**
+     * Installed distros GameNative's features may use: everything but the terminal goes through
+     * this rather than [installed], so an experimental distro is never a default, desktop, console
+     * or app source.
+     */
+    fun integrated(context: Context): List<LinuxDistro> = installed(context).filter { it.supported }
+
+    fun isIntegrated(context: Context, id: String): Boolean =
+        LinuxDistroCatalog.byId(id)?.supported == true && isInstalled(context, id)
+
     /** [id]'s rootfs, or null when it is not installed. */
     fun installedRootfs(context: Context, id: String): File? =
         rootfsDir(context, id).takeIf { isInstalled(context, id) }
@@ -64,16 +74,24 @@ object LinuxDistros {
 
     /**
      * The distro new terminals open in and unassigned consoles run: the user's choice while it is
-     * installed, else the first installed distro in catalog order, else Ubuntu (nothing installed).
+     * installed, else the first installed supported distro in catalog order, else Ubuntu (nothing
+     * supported installed). Never an experimental distro.
      */
     fun defaultId(context: Context): String =
         prefs(context).getString(KEY_DEFAULT, null)
-            ?.takeIf { LinuxDistroCatalog.byId(it) != null && isInstalled(context, it) }
+            ?.takeIf { isIntegrated(context, it) }
+            ?: integrated(context).firstOrNull()?.id
+            ?: LinuxDistroCatalog.UBUNTU
+
+    /** Where a new terminal opens: the default distro, else any installed one, experimental included. */
+    fun terminalDefaultId(context: Context): String =
+        defaultId(context).takeIf { isInstalled(context, it) }
             ?: installed(context).firstOrNull()?.id
             ?: LinuxDistroCatalog.UBUNTU
 
     fun setDefault(context: Context, id: String) {
-        require(LinuxDistroCatalog.byId(id) != null) { "Unknown distro $id" }
+        val distro = requireNotNull(LinuxDistroCatalog.byId(id)) { "Unknown distro $id" }
+        require(distro.supported) { "${distro.displayName} is experimental and cannot be the default" }
         prefs(context).edit().putString(KEY_DEFAULT, id).apply()
     }
 

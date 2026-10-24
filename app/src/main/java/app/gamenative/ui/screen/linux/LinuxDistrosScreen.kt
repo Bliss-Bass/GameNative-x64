@@ -172,9 +172,16 @@ private fun DistroRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isDefault) PluviaTheme.colors.accentCyan else PluviaTheme.colors.textMuted,
                 )
+                if (!distro.supported) {
+                    Text(
+                        text = stringResource(R.string.linux_distro_experimental),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PluviaTheme.colors.textMuted,
+                    )
+                }
             }
             if (installed) {
-                if (!isDefault) {
+                if (!isDefault && distro.supported) {
                     TextButton(enabled = !busy, onClick = onMakeDefault) {
                         Text(stringResource(R.string.linux_distro_make_default))
                     }
@@ -201,7 +208,7 @@ private fun DesktopSection(
     val context = LocalContext.current
     Section(R.string.linux_desktop_section, R.string.linux_desktop_section_hint)
 
-    val installed = remember(version) { LinuxDistros.installed(context) }
+    val installed = remember(version) { LinuxDistros.integrated(context) }
     if (installed.isEmpty()) return
     var distroId by remember(version) { mutableStateOf(LinuxDesktopSessions.desktopDistro(context)) }
     var session by remember(version, distroId) { mutableStateOf(LinuxDesktopSessions.selected(context, distroId)) }
@@ -274,7 +281,7 @@ private fun ConsolesSection(version: Int) {
         return
     }
 
-    val installed = remember(version) { LinuxDistros.installed(context) }
+    val installed = remember(version) { LinuxDistros.integrated(context) }
     // Bumped on every change so the rows reread what was saved.
     var edits by remember { mutableStateOf(0) }
     val off = stringResource(R.string.linux_vt_off)

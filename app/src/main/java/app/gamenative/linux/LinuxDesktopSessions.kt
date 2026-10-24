@@ -93,11 +93,14 @@ object LinuxDesktopSessions {
         }
     }
 
-    /** The distro the desktop window opens in: the user's choice while it is installed, else Ubuntu. */
+    /**
+     * The distro the desktop window opens in: the user's choice while it is installed and supported,
+     * else the default distro.
+     */
     fun desktopDistro(context: Context): String =
         prefs(context).getString(KEY_DISTRO, null)
-            ?.takeIf { LinuxDistros.isInstalled(context, it) }
-            ?: LinuxDistroCatalog.UBUNTU
+            ?.takeIf { LinuxDistros.isIntegrated(context, it) }
+            ?: LinuxDistros.defaultId(context)
 
     fun setDesktopDistro(context: Context, distroId: String) {
         prefs(context).edit().putString(KEY_DISTRO, distroId).apply()

@@ -48,7 +48,7 @@ class LinuxVtService : Service() {
         startForegroundWithType()
 
         val inUse = consolesInUse()
-        if (!PlatformCapabilities.refresh(this).linuxVt || LinuxDistros.installed(this).isEmpty() || inUse.isEmpty()) {
+        if (!PlatformCapabilities.refresh(this).linuxVt || LinuxDistros.integrated(this).isEmpty() || inUse.isEmpty()) {
             Timber.i("[LinuxVtService]: no consoles to serve here, stopping")
             stopSelf()
             return START_NOT_STICKY
@@ -157,7 +157,8 @@ class LinuxVtService : Service() {
         }, "linux-vt-tty$vt").apply { isDaemon = true }.start()
     }
 
-    private fun rootfsFor(distroId: String): File? = LinuxDistros.installedRootfs(this, distroId)
+    private fun rootfsFor(distroId: String): File? =
+        LinuxDistros.installedRootfs(this, distroId)?.takeIf { LinuxDistros.isIntegrated(this, distroId) }
 
     /**
      * Ends every console's shell so each starts with its current assignment the next time it is
@@ -223,7 +224,7 @@ class LinuxVtService : Service() {
 
         private fun start(context: Context, action: String?) {
             val app = context.applicationContext
-            if (!PlatformCapabilities.refresh(app).linuxVt || LinuxDistros.installed(app).isEmpty()) return
+            if (!PlatformCapabilities.refresh(app).linuxVt || LinuxDistros.integrated(app).isEmpty()) return
             runCatching { app.startForegroundService(Intent(app, LinuxVtService::class.java).setAction(action)) }
                 .onFailure { Timber.w(it, "[LinuxVtService]: could not start") }
         }

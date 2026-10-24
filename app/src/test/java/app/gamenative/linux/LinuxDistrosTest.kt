@@ -12,6 +12,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -111,67 +112,89 @@ class LinuxDistrosTest {
     @Test
     fun defaultFallsBackToUbuntuUnlessInstalled() {
         assertEquals(LinuxDistroCatalog.UBUNTU, LinuxDistros.defaultId(context))
-        LinuxDistros.setDefault(context, "alpine")
+        LinuxDistros.setDefault(context, "debian")
         assertEquals(LinuxDistroCatalog.UBUNTU, LinuxDistros.defaultId(context))
 
+        fakeInstall("debian")
+        assertEquals("debian", LinuxDistros.defaultId(context))
+        assertNotNull(LinuxDistros.installedRootfs(context, "debian"))
+    }
+
+    @Test
+    fun experimentalDistrosAreTerminalOnly() {
+        assertEquals(setOf("alpine", "fedora"), LinuxDistroCatalog.all.filterNot { it.supported }.map { it.id }.toSet())
         fakeInstall("alpine")
-        assertEquals("alpine", LinuxDistros.defaultId(context))
-        assertNotNull(LinuxDistros.installedRootfs(context, "alpine"))
+
+        assertTrue(LinuxDistros.isInstalled(context, "alpine"))
+        assertFalse(LinuxDistros.isIntegrated(context, "alpine"))
+        assertTrue(LinuxDistros.integrated(context).isEmpty())
+        // Not a default, so consoles and the desktop keep Ubuntu; the terminal still opens it.
+        assertEquals(LinuxDistroCatalog.UBUNTU, LinuxDistros.defaultId(context))
+        assertEquals("alpine", LinuxDistros.terminalDefaultId(context))
+        assertThrows(IllegalArgumentException::class.java) { LinuxDistros.setDefault(context, "alpine") }
+
+        // A console assigned before the distro was marked experimental follows the default instead.
+        LinuxVtConsoles.set(context, 5, LinuxVtConsoles.Assignment("alpine", "/bin/ash"))
+        fakeInstall("debian")
+        assertEquals("debian", LinuxVtConsoles.get(context, 5)?.distroId)
+        LinuxDesktopSessions.setDesktopDistro(context, "alpine")
+        assertEquals("debian", LinuxDesktopSessions.desktopDistro(context))
     }
 
     @Test
     fun uninstallMovesConsolesBackToTheDefault() {
-        fakeInstall("alpine")
-        LinuxDistros.setDefault(context, "alpine")
-        LinuxVtConsoles.set(context, 5, LinuxVtConsoles.Assignment("alpine", "/bin/ash"))
+        fakeInstall("debian")
+        LinuxDistros.setDefault(context, "debian")
+        LinuxVtConsoles.set(context, 5, LinuxVtConsoles.Assignment("debian", "/bin/bash"))
 
-        runBlocking { LinuxDistros.uninstall(context, "alpine") }
+        runBlocking { LinuxDistros.uninstall(context, "debian") }
 
-        assertFalse(LinuxDistros.isInstalled(context, "alpine"))
-        assertFalse(File(LinuxDistros.distrosDir(context), "alpine").exists())
+        assertFalse(LinuxDistros.isInstalled(context, "debian"))
+        assertFalse(File(LinuxDistros.distrosDir(context), "debian").exists())
         assertEquals(LinuxDistroCatalog.UBUNTU, LinuxDistros.defaultId(context))
         assertEquals(LinuxVtConsoles.Assignment(), LinuxVtConsoles.get(context, 5))
     }
 
     @Test
     fun unassignedConsolesRunTheFirstInstalledDistro() {
-        fakeInstall("alpine")
-        fakeInstall("fedora")
-        assertEquals("alpine", LinuxDistros.defaultId(context))
-        assertEquals("alpine", LinuxVtConsoles.get(context, 4)?.distroId)
+        fakeInstall("debian")
+        fakeInstall("archlinux")
+        assertEquals("debian", LinuxDistros.defaultId(context))
+        assertEquals("debian", LinuxVtConsoles.get(context, 4)?.distroId)
 
         // The user's default wins over catalog order, and an explicit pick wins over both.
-        LinuxDistros.setDefault(context, "fedora")
-        LinuxVtConsoles.set(context, 6, LinuxVtConsoles.Assignment("alpine"))
-        assertEquals("fedora", LinuxVtConsoles.get(context, 4)?.distroId)
-        assertEquals("fedora", LinuxVtConsoles.get(context, 5)?.distroId)
-        assertEquals("alpine", LinuxVtConsoles.get(context, 6)?.distroId)
+        LinuxDistros.setDefault(context, "archlinux")
+        LinuxVtConsoles.set(context, 6, LinuxVtConsoles.Assignment("debian"))
+        assertEquals("archlinux", LinuxVtConsoles.get(context, 4)?.distroId)
+        assertEquals("archlinux", LinuxVtConsoles.get(context, 5)?.distroId)
+        assertEquals("debian", LinuxVtConsoles.get(context, 6)?.distroId)
         assertNull(LinuxVtConsoles.assignedDistro(context, 4))
     }
 
     @Test
     fun uninstallLeavesItsConsolesFollowingTheDefault() {
-        fakeInstall("alpine")
-        fakeInstall("fedora")
-        LinuxVtConsoles.set(context, 4, LinuxVtConsoles.Assignment("fedora", "/bin/bash"))
+        fakeInstall("debian")
+        fakeInstall("archlinux")
+        LinuxVtConsoles.set(context, 4, LinuxVtConsoles.Assignment("archlinux", "/bin/bash"))
 
-        runBlocking { LinuxDistros.uninstall(context, "fedora") }
+        runBlocking { LinuxDistros.uninstall(context, "archlinux") }
 
         assertNull(LinuxVtConsoles.assignedDistro(context, 4))
-        assertEquals(LinuxVtConsoles.Assignment("alpine"), LinuxVtConsoles.get(context, 4))
+        assertEquals(LinuxVtConsoles.Assignment("debian"), LinuxVtConsoles.get(context, 4))
     }
 
     @Test
     fun uninstallForgetsTheDesktopChoice() {
-        fakeInstall("alpine")
-        LinuxDesktopSessions.setDesktopDistro(context, "alpine")
-        LinuxDesktopSessions.select(context, "alpine", LinuxDesktopSessions.Session.XFCE)
+        fakeInstall("debian")
+        LinuxDesktopSessions.setDesktopDistro(context, "debian")
+        LinuxDesktopSessions.select(context, "debian", LinuxDesktopSessions.Session.XFCE)
 
-        runBlocking { LinuxDistros.uninstall(context, "alpine") }
-        fakeInstall("alpine")
+        runBlocking { LinuxDistros.uninstall(context, "debian") }
+        fakeInstall("debian")
 
-        assertEquals(LinuxDistroCatalog.UBUNTU, LinuxDesktopSessions.desktopDistro(context))
-        assertEquals(LinuxDesktopSessions.Session.OPENBOX, LinuxDesktopSessions.selected(context, "alpine"))
+        // The saved desktop choice is gone, so the desktop follows the default distro again.
+        assertEquals(LinuxDistros.defaultId(context), LinuxDesktopSessions.desktopDistro(context))
+        assertEquals(LinuxDesktopSessions.Session.OPENBOX, LinuxDesktopSessions.selected(context, "debian"))
     }
 
     private fun fakeInstall(id: String) {

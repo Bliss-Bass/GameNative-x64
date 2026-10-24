@@ -40,6 +40,12 @@ enum class LinuxPackageManager(
 }
 
 /**
+ * How far GameNative's Linux features go with a distro. Experimental ones install and run in the
+ * Linux Terminal, and nothing else: no default distro, desktop, consoles, Linux Apps or browsers.
+ */
+enum class LinuxDistroSupport { SUPPORTED, EXPERIMENTAL }
+
+/**
  * One installable Linux userland.
  *
  * [graphical] is whether the Android X session, Linux app stubs and app scanning run in it.
@@ -62,7 +68,10 @@ data class LinuxDistro(
     val downloadMb: Int,
     /** Expanded size plus room for a few packages; checked against free space before install. */
     val installedMb: Int,
-)
+    val support: LinuxDistroSupport = LinuxDistroSupport.SUPPORTED,
+) {
+    val supported: Boolean get() = support == LinuxDistroSupport.SUPPORTED
+}
 
 /**
  * The distros GameNative offers. The non-Ubuntu tarballs are proot-distro's x86_64 builds, which
@@ -123,6 +132,7 @@ object LinuxDistroCatalog {
             stripComponents = 1,
             downloadMb = 3,
             installedMb = 100,
+            support = LinuxDistroSupport.EXPERIMENTAL,
         ),
         LinuxDistro(
             id = "fedora",
@@ -135,6 +145,7 @@ object LinuxDistroCatalog {
             stripComponents = 1,
             downloadMb = 33,
             installedMb = 500,
+            support = LinuxDistroSupport.EXPERIMENTAL,
         ),
     )
 
