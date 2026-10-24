@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.linux.LinuxAppReconciler
+import app.gamenative.linux.LinuxBrowserSetup
 import app.gamenative.linux.LinuxDistroCatalog
 import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
@@ -60,6 +61,7 @@ import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -98,6 +100,8 @@ fun TerminalScreen(initialDistroId: String? = null, onBack: () -> Unit) {
             return@LaunchedEffect
         }
         if (distroId != LinuxDistroCatalog.UBUNTU) {
+            // So browsers installed from this shell can run; never holds the shell up.
+            launch(Dispatchers.IO) { LinuxBrowserSetup.configure(context, distroId) }
             preparing = false
             sessionReady = true
             return@LaunchedEffect

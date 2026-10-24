@@ -71,6 +71,8 @@ object LinuxGraphics {
                     if (!distro.supported) throw IOException("${distro.displayName} is experimental")
                     val rootfs = LinuxDistros.installedRootfs(context, distroId)
                         ?: throw IOException("${distro.displayName} is not installed")
+                    // Browsers installed since the last window need their flags before they open.
+                    LinuxBrowserSetup.configure(context, distroId)
                     if (isReady(rootfs)) return@runCatching
 
                     val label = "Setting up app windows in ${distro.displayName}"

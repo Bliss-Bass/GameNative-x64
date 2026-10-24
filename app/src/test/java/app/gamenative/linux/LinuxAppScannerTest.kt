@@ -46,6 +46,28 @@ class LinuxAppScannerTest {
     }
 
     @Test
+    fun `follows absolute symlinks inside the rootfs, as Chrome's launcher is installed`() {
+        binary("opt/google/chrome/google-chrome")
+        val launcher = File(rootfs, "usr/bin/google-chrome-stable").apply { parentFile?.mkdirs() }
+        java.nio.file.Files.createSymbolicLink(launcher.toPath(), java.nio.file.Paths.get("/opt/google/chrome/google-chrome"))
+        desktopEntry(
+            "google-chrome.desktop",
+            """
+            [Desktop Entry]
+            Type=Application
+            Name=Google Chrome
+            TryExec=/usr/bin/google-chrome-stable
+            Exec=/usr/bin/google-chrome-stable %U
+            """,
+        )
+
+        val app = LinuxAppScanner.scan(context).single()
+
+        assertEquals("Google Chrome", app.name)
+        assertEquals("/usr/bin/google-chrome-stable", app.exec)
+    }
+
+    @Test
     fun `lists an AppImage and launches it without FUSE`() {
         File(rootfs, "root/Tools/Sample App.AppImage").apply {
             parentFile?.mkdirs()

@@ -221,6 +221,21 @@ class LinuxDistrosTest {
         assertTrue(File(outside, "keep.txt").isFile)
     }
 
+    @Test
+    fun archChromiumStartsWithoutItsSandbox() {
+        fakeInstall("archlinux")
+        LinuxBrowserSetup.configure(context, "archlinux")
+        val flags = File(LinuxDistros.rootfsDir(context, "archlinux"), "root/.config/chromium-flags.conf")
+        assertTrue(flags.readLines().contains("--no-sandbox"))
+    }
+
+    @Test
+    fun experimentalDistrosGetNoBrowserSetup() {
+        fakeInstall("alpine")
+        LinuxBrowserSetup.configure(context, "alpine")
+        assertFalse(File(LinuxDistros.rootfsDir(context, "alpine"), "root/.config").exists())
+    }
+
     private fun fakeInstall(id: String) {
         File(LinuxDistros.rootfsDir(context, id), "etc").mkdirs()
         File(LinuxDistros.distrosDir(context), "$id/.installed").writeText(LinuxDistroCatalog.byId(id)!!.sha256!!)

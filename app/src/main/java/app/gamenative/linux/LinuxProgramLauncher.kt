@@ -31,8 +31,15 @@ object LinuxProgramLauncher {
     private const val PROOT_LOADER = "libproot-linux-loader.so"
     private val WHITESPACE = Regex("\\s+")
 
-    /** Electron/Chromium binaries that refuse to start as root. */
-    private val ROOT_SANDBOX_BINS = setOf("cursor", "code", "code-oss", "electron")
+    /**
+     * Electron/Chromium binaries that refuse to start as root. The browsers also get the flag
+     * from each distro's own launcher config ([LinuxBrowserSetup]); this covers a launch that
+     * reaches the binary before that config exists.
+     */
+    private val ROOT_SANDBOX_BINS = setOf(
+        "cursor", "code", "code-oss", "electron",
+        "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+    )
 
     private fun nativeLibraryDir(context: Context): String = context.applicationInfo.nativeLibraryDir
 

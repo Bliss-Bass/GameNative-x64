@@ -53,6 +53,8 @@ object LinuxRootfs {
     // listing the same source twice.
     private const val XTRADEB_SOURCES_PATH = "etc/apt/sources.list.d/xtradeb-ubuntu-apps-noble.sources"
     private const val XTRADEB_PIN_PATH = "etc/apt/preferences.d/xtradeb"
+    private const val XTRADEB_SOURCE_HOST = "ppa.launchpadcontent.net/xtradeb/apps"
+    private const val GOOGLE_SOURCE_HOST = "dl.google.com/linux/chrome"
 
     private const val GOOGLE_KEY_URL = "https://dl.google.com/linux/linux_signing_key.pub"
     private const val GOOGLE_KEY_PATH = "etc/apt/keyrings/google-chrome.asc"
@@ -65,7 +67,7 @@ object LinuxRootfs {
     private const val CHROME_LAUNCHER = "/opt/google/chrome/google-chrome"
     // Ending a session stops the guest from outside, which Chromium records as a crash; without
     // the last flag every launch opens with a "Restore pages?" bubble.
-    private const val CHROMIUM_FAMILY_FLAGS = "--no-sandbox --test-type --hide-crash-restore-bubble"
+    internal const val CHROMIUM_FAMILY_FLAGS = "--no-sandbox --test-type --hide-crash-restore-bubble"
 
     /**
      * What the graphical session is built from. All of it comes from apt, which is the
@@ -391,7 +393,7 @@ object LinuxRootfs {
      * over every window, as the Firefox sandbox notice is hidden in [ensureFirefoxSandboxNotice].
      * Written whether or not Chromium is installed yet: the launcher reads it on each start.
      */
-    private fun ensureChromiumFlags(rootfs: File) {
+    internal fun ensureChromiumFlags(rootfs: File) {
         val flags = File(rootfs, CHROMIUM_FLAGS_PATH)
         flags.parentFile?.mkdirs()
         flags.writeText(
@@ -406,7 +408,7 @@ object LinuxRootfs {
      * own script is diverted to `.real` by [registerChromeDiversion]; this wrapper takes its
      * place. Written only once the diversion exists, or it would overwrite Chrome's script.
      */
-    private fun ensureChromeLaunchWrapper(rootfs: File) {
+    internal fun ensureChromeLaunchWrapper(rootfs: File) {
         if (!isChromeDiverted(rootfs)) return
         val wrapper = File(rootfs, CHROME_LAUNCHER.removePrefix("/"))
         wrapper.parentFile?.mkdirs()
@@ -426,13 +428,14 @@ object LinuxRootfs {
         return lines.chunked(3).any { it.size >= 2 && it[0] == CHROME_LAUNCHER && it[1] == "$CHROME_LAUNCHER.real" }
     }
 
-    private fun registerChromeDiversion(context: Context, rootfs: File) {
+    internal fun registerChromeDiversion(context: Context, rootfs: File) {
         if (isChromeDiverted(rootfs)) return
         val divert = LinuxProgramLauncher.runWithOutput(
             context,
             "dpkg-divert --local --rename --divert $CHROME_LAUNCHER.real --add $CHROME_LAUNCHER",
             extraEnv = APT_ENV,
             timeoutSeconds = 60,
+            rootfs = rootfs,
         )
         Timber.i("[LinuxRootfs]: chrome diversion: %s", divert.trim())
         // --rename moved an installed Chrome's script aside; put the wrapper in its place now
@@ -445,12 +448,14 @@ object LinuxRootfs {
      * or `apt install google-chrome-stable` works without setting either up by hand.
      *
      * A source already configured by the user or by Chrome's own postinst is left as it is.
-     * Only runs once per [BROWSER_SOURCES_VERSION]; a failed key download leaves the stamp
-     * unwritten so the next session tries again.
+     * Runs once per [BROWSER_SOURCES_VERSION], and again whenever a source has gone: purging
+     * Chrome deletes `google-chrome.sources`, which would otherwise leave Chrome impossible to
+     * reinstall. A failed key download leaves the stamp unwritten so the next session tries again.
      */
     private fun ensureBrowserSources(context: Context, rootfs: File, onProgress: (Progress) -> Unit) {
         val stamp = browserSourcesStampFile(context)
-        if (stamp.takeIf { it.isFile }?.readText()?.trim() == BROWSER_SOURCES_VERSION.toString()) return
+        val current = stamp.takeIf { it.isFile }?.readText()?.trim() == BROWSER_SOURCES_VERSION.toString()
+        if (current && hasAptSource(rootfs, XTRADEB_SOURCE_HOST) && hasAptSource(rootfs, GOOGLE_SOURCE_HOST)) return
         // Both are HTTPS sources; ensureAptPolicy installs the CA bundle first.
         if (!File(rootfs, "etc/ssl/certs/ca-certificates.crt").isFile) return
 
@@ -458,7 +463,7 @@ object LinuxRootfs {
         writeXtradebPin(rootfs)
         val xtradeb = ensureAptSource(
             rootfs,
-            existing = "ppa.launchpadcontent.net/xtradeb/apps",
+            existing = XTRADEB_SOURCE_HOST,
             sourcesPath = XTRADEB_SOURCES_PATH,
             keyPath = XTRADEB_KEY_PATH,
             keyUrl = XTRADEB_KEY_URL,
@@ -470,21 +475,7 @@ object LinuxRootfs {
                 Signed-By: /$XTRADEB_KEY_PATH
                 """.trimIndent() + "\n",
         )
-        val chrome = ensureAptSource(
-            rootfs,
-            existing = "dl.google.com/linux/chrome",
-            sourcesPath = GOOGLE_SOURCES_PATH,
-            keyPath = GOOGLE_KEY_PATH,
-            keyUrl = GOOGLE_KEY_URL,
-            sources = """
-                Types: deb
-                URIs: https://dl.google.com/linux/chrome-stable/deb/
-                Suites: stable
-                Components: main
-                Architectures: amd64
-                Signed-By: /$GOOGLE_KEY_PATH
-                """.trimIndent() + "\n",
-        )
+        val chrome = ensureGoogleChromeSource(rootfs)
         registerChromeDiversion(context, rootfs)
 
         if (xtradeb == SourceState.ADDED || chrome == SourceState.ADDED) {
@@ -502,7 +493,31 @@ object LinuxRootfs {
         }
     }
 
-    private enum class SourceState { PRESENT, ADDED, FAILED }
+    internal enum class SourceState { PRESENT, ADDED, FAILED }
+
+    /** Google's Chrome repository, in [rootfs]'s apt sources unless one already points there. */
+    internal fun ensureGoogleChromeSource(rootfs: File): SourceState = ensureAptSource(
+        rootfs,
+        existing = GOOGLE_SOURCE_HOST,
+        sourcesPath = GOOGLE_SOURCES_PATH,
+        keyPath = GOOGLE_KEY_PATH,
+        keyUrl = GOOGLE_KEY_URL,
+        sources = """
+            Types: deb
+            URIs: https://dl.google.com/linux/chrome-stable/deb/
+            Suites: stable
+            Components: main
+            Architectures: amd64
+            Signed-By: /$GOOGLE_KEY_PATH
+            """.trimIndent() + "\n",
+    )
+
+    /** Whether any apt source in [rootfs] points at [host]. */
+    private fun hasAptSource(rootfs: File, host: String): Boolean {
+        val configured = listOf(File(rootfs, "etc/apt/sources.list")) +
+            (File(rootfs, "etc/apt/sources.list.d").listFiles()?.toList() ?: emptyList())
+        return configured.any { it.isFile && runCatching { it.readText() }.getOrDefault("").contains(host) }
+    }
 
     /** Writes [sources] unless any apt source already points at [existing]. */
     private fun ensureAptSource(
@@ -513,11 +528,7 @@ object LinuxRootfs {
         keyUrl: String,
         sources: String,
     ): SourceState {
-        val configured = listOf(File(rootfs, "etc/apt/sources.list")) +
-            (File(rootfs, "etc/apt/sources.list.d").listFiles()?.toList() ?: emptyList())
-        if (configured.any { it.isFile && runCatching { it.readText() }.getOrDefault("").contains(existing) }) {
-            return SourceState.PRESENT
-        }
+        if (hasAptSource(rootfs, existing)) return SourceState.PRESENT
         return runCatching {
             ensureAptKey(rootfs, keyPath, keyUrl)
             File(rootfs, sourcesPath).apply { parentFile?.mkdirs() }.writeText(sources)

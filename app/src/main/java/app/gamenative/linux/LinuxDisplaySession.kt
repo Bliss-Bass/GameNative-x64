@@ -223,7 +223,10 @@ class LinuxDisplaySession private constructor(
             // Built from what is installed right now, since the package manager runs in our own
             // terminal. The menu lists only this distro's apps: it launches them in this rootfs.
             if (desktop) {
-                if (!ubuntu) LinuxDesktopSessions.prepare(rootfs, target.session)
+                if (!ubuntu) {
+                    LinuxDesktopSessions.prepare(rootfs, target.session)
+                    LinuxBrowserSetup.configure(context, target.distroId)
+                }
                 LinuxDesktopConfig.writeDesktop(context, LinuxAppScanner.scan(context, target.distroId), rootfs)
                 // Opening the desktop is another moment apps become visible; publish stubs here
                 // so a visit to Linux Apps is not required after an earlier install.

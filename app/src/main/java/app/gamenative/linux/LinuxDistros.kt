@@ -154,6 +154,7 @@ object LinuxDistros {
         initializePackageManager(context, rootfs, distro.packageManager)
 
         stampFile(context, distro.id).writeText(sha256)
+        LinuxBrowserSetup.configure(context, distro.id)
         Timber.i("[LinuxDistros]: installed %s to %s", distro.id, rootfs)
         LinuxVtService.startIfSupported(context)
     }

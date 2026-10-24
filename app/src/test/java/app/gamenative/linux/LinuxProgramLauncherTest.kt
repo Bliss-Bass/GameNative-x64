@@ -25,6 +25,15 @@ class LinuxProgramLauncherTest {
     }
 
     @Test
+    fun argvForRootGuest_addsNoSandbox_forChromiumAndChrome() {
+        assertEquals("/usr/bin/chromium --no-sandbox", LinuxProgramLauncher.argvForRootGuest("/usr/bin/chromium"))
+        assertEquals(
+            "/usr/bin/google-chrome-stable --no-sandbox",
+            LinuxProgramLauncher.argvForRootGuest("/usr/bin/google-chrome-stable"),
+        )
+    }
+
+    @Test
     fun argvForRootGuest_leavesOtherPrograms() {
         assertEquals("firefox", LinuxProgramLauncher.argvForRootGuest("firefox"))
     }

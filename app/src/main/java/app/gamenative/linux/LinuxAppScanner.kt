@@ -299,11 +299,31 @@ object LinuxAppScanner {
 
     /** Whether [command] resolves to something executable in the guest. */
     private fun isPresent(rootfs: File, command: String): Boolean {
-        if (command.startsWith("/")) return File(rootfs, command.removePrefix("/")).canExecute()
+        if (command.startsWith("/")) return inGuest(rootfs, command).canExecute()
         return listOf("usr/local/bin", "usr/bin", "bin", "usr/sbin", "sbin").any {
-            File(rootfs, "$it/$command").canExecute()
+            inGuest(rootfs, "/$it/$command").canExecute()
         }
     }
+
+    /**
+     * The host file for guest path [path], following symlinks inside [rootfs]. The host would
+     * resolve an absolute link against Android's root instead: Chrome's
+     * `/usr/bin/google-chrome-stable -> /opt/google/chrome/google-chrome` then looks missing.
+     */
+    internal fun inGuest(rootfs: File, path: String): File {
+        var guest = path
+        repeat(MAX_SYMLINKS) {
+            val host = File(rootfs, guest.removePrefix("/"))
+            val link = host.toPath()
+            if (!java.nio.file.Files.isSymbolicLink(link)) return host
+            val target = runCatching { java.nio.file.Files.readSymbolicLink(link).toString() }.getOrNull() ?: return host
+            guest = if (target.startsWith("/")) target else "${guest.substringBeforeLast('/')}/$target"
+            guest = java.nio.file.Paths.get(guest).normalize().toString()
+        }
+        return File(rootfs, guest.removePrefix("/"))
+    }
+
+    private const val MAX_SYMLINKS = 40
 
     /**
      * Finds the icon named by an entry, as a path inside the guest.
