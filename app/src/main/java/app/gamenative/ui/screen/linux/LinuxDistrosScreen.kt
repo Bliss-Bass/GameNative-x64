@@ -56,6 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Installs and removes Linux distros, picks the desktop the session window opens, and assigns
@@ -511,6 +512,7 @@ private object DistroWork {
             val result = runCatching { block { progress -> running.value = State(key, progress) } }
                 .getOrElse { Result.failure(it) }
             result.onFailure {
+                Timber.e(it, "[LinuxDistrosScreen]: %s failed", key)
                 val name = LinuxDistroCatalog.byId(key)?.displayName ?: key.substringAfterLast(':')
                 failure.value = app.getString(R.string.linux_distro_failed, name, it.message ?: it.toString())
             }
