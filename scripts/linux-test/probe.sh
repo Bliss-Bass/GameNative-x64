@@ -38,7 +38,9 @@ pm_refresh() {
 pm_install() {
     case "$PM" in
         apt) apt-get install -y --no-install-recommends "$@" ;;
-        pacman) pacman -S --noconfirm --needed "$@" ;;
+        # -Syu, as GameNative does: installing against a refreshed index without upgrading is a
+        # partial upgrade, which Arch does not support.
+        pacman) pacman -Syu --noconfirm --needed "$@" ;;
         dnf) dnf install -y "$@" ;;
         apk) apk add "$@" ;;
         *) return 1 ;;
@@ -47,7 +49,7 @@ pm_install() {
 
 pm_remove() {
     case "$PM" in
-        apt) apt-get purge -y "$@" ;;
+        apt) apt-get purge -y --autoremove "$@" ;;
         pacman) pacman -Rns --noconfirm "$@" ;;
         dnf) dnf remove -y "$@" ;;
         apk) apk del "$@" ;;
@@ -129,6 +131,72 @@ t_srcs() {
     return $rc
 }
 
+# Browsers, by the names the Linux Apps hint gives: <browser> is firefox, chromium or chrome.
+# Prints this distro's package for it, nothing when it has none (Chrome is AUR-only on Arch).
+browser_pkg() {
+    case "$1:$DISTRO" in
+        firefox:debian) echo firefox-esr ;;
+        firefox:*) echo firefox ;;
+        chromium:*) echo chromium ;;
+        chrome:ubuntu | chrome:debian) echo google-chrome-stable ;;
+    esac
+}
+
+browser_bin() {
+    case "$1:$DISTRO" in
+        firefox:debian) echo firefox-esr ;;
+        firefox:*) echo firefox ;;
+        chromium:*) echo chromium ;;
+        chrome:*) echo google-chrome-stable ;;
+    esac
+}
+
+# The desktop entries <package> installed, one per line, without .desktop.
+pkg_entries() {
+    case "$PM" in
+        apt) dpkg -L "$1" 2>/dev/null ;;
+        pacman) pacman -Qlq "$1" 2>/dev/null ;;
+    esac | grep -E '^/usr/share/applications/[^/]+\.desktop$' | sed 's|.*/||; s|\.desktop$||'
+}
+
+# Installs <browser> from the distro's sources and checks it runs. Writes the desktop entry it
+# added to br_<browser>.entry, which linux-test.sh opens from Linux Apps.
+t_browser() {
+    b=$1; pkg=$(browser_pkg "$b")
+    rm -f "$OUT/br_$b.entry"
+    [ -n "$pkg" ] || { echo "$b is not packaged for $DISTRO"; return 2; }
+    pm_refresh || echo "refresh failed; trying the install anyway"
+    pm_install "$pkg" || { echo "installing $pkg failed"; return 1; }
+    hash -r 2>/dev/null
+    bin=$(browser_bin "$b")
+    command -v "$bin" || { echo "$bin missing after installing $pkg"; return 1; }
+    version=$("$bin" --version 2>&1 | tail -n 1)
+    echo "version: $version"
+    # Every entry it added: Chrome ships two, and only one is listed in Linux Apps.
+    pkg_entries "$pkg" > "$OUT/br_$b.entry"
+    [ -s "$OUT/br_$b.entry" ] || { echo "$pkg installed no desktop entry"; return 1; }
+    echo "installed $pkg ($version), entries $(tr '\n' ' ' < "$OUT/br_$b.entry")"
+}
+
+pkg_installed() {
+    case "$PM" in
+        apt) dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed' ;;
+        pacman) pacman -Q "$1" >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Judged by the package manager: GameNative's /usr/local/bin/firefox launcher outlives the
+# package until the next session start clears it.
+t_rmbrowser() {
+    b=$1; pkg=$(browser_pkg "$b")
+    [ -n "$pkg" ] || { echo "$b is not packaged for $DISTRO"; return 2; }
+    pkg_installed "$pkg" || { echo "$pkg was not installed"; return 2; }
+    pm_remove "$pkg" || { echo "removing $pkg failed"; return 1; }
+    if pkg_installed "$pkg"; then echo "$pkg still installed after remove"; return 1; fi
+    echo "removed $pkg"
+}
+
 # Package manager state, for diagnosing a failing pkg test; always passes.
 t_pkgdiag() {
     case "$PM" in
@@ -157,6 +225,8 @@ run_one() {
     start=$(date +%s)
     case "$test" in
         info|net|pkg|pkgdiag|user|terminal|srcs) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        br_*) t_browser "${test#br_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        rmbr_*) t_rmbrowser "${test#rmbr_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
         *) echo "unknown test $test" > "$OUT/$test.log"; rc=1 ;;
     esac
     end=$(date +%s)

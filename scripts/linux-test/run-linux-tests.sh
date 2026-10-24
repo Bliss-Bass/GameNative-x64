@@ -11,7 +11,7 @@ usage: run-linux-tests.sh -s <serial> --yes [options]
   --user <id>          Android user GameNative runs in (default 0; the Googlebook uses 10)
   --distros "<ids>"    default "ubuntu debian archlinux"
   --tests "<letters>"  default "A B C" (A install/remove, B shell basics, C terminal,
-                       D desktop session, F Linux Apps and app windows)
+                       D desktop session, E browsers, F Linux Apps and app windows)
   --probe "<tests>"    run these probe tests instead of B's set (e.g. "pkgdiag pkg")
   --keep               leave the distros installed at the end
   --no-install         only test distros that are already installed
@@ -51,6 +51,11 @@ A=(adb -s "$SERIAL")
 
 "${A[@]}" get-state >/dev/null
 echo "Device: $("${A[@]}" shell getprop ro.product.model | tr -d '\r'), user $USER_ID"
+busy=$("${A[@]}" shell "[ -f $W/run.pid ] && kill -0 \$(cat $W/run.pid) 2>/dev/null && cat $W/run.pid; true" | tr -d '\r')
+if [ -n "$busy" ]; then
+    echo "A run is already in progress on $SERIAL (pid $busy); not starting another."
+    exit 3
+fi
 "${A[@]}" shell "mkdir -p $W && rm -f $W/status"
 "${A[@]}" push "$HERE/linux-test.sh" "$HERE/probe.sh" "$W/" >/dev/null
 # The guest reaches probe.sh and writes its results through shared storage, which PRoot binds

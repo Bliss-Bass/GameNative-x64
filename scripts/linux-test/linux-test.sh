@@ -56,13 +56,28 @@ result() {
     log "RESULT $1 $2: $3 (${4}s) $5"
 }
 
+# The log since <since> ("MM-DD HH:MM:SS.mmm", as [now] prints). Read from a capture of the whole
+# run rather than the ring buffer: some devices keep 256 KiB, which a browser's console output
+# and the window fitter's lines turn over in seconds.
+log_since() { awk -v s="$1" 'substr($0, 1, 18) >= s' "$RUN/logcat.txt"; }
+
 # Saves this app's logcat since <since> and a screenshot, named <distro>-<test>.
 evidence() {
-    logcat -d -T "$3" 2>/dev/null | grep -E "app\.gamenative|$PKG|proot" > "$RUN/logs/$1-$2.logcat"
+    log_since "$3" | grep -E "app\.gamenative|$PKG|proot" > "$RUN/logs/$1-$2.logcat"
     screencap -p "$RUN/shots/$1-$2.png"
 }
 
-ui_dump() { uiautomator dump "$W/ui.xml" >/dev/null 2>&1; }
+# uiautomator dumps only the active window, which a dock or notification popup can briefly be;
+# every screen the suite reads is GameNative's, so dump again until it is in the picture.
+ui_dump() {
+    local tries=0
+    while [ $tries -lt 5 ]; do
+        uiautomator dump "$W/ui.xml" >/dev/null 2>&1
+        grep -q "package=\"$PKG\"" "$W/ui.xml" 2>/dev/null && return 0
+        tries=$((tries + 1)); sleep 1
+    done
+    return 0
+}
 
 # Prints "x y" for the centre of the node with resource id <id> in the last dump.
 ui_center_id() {
@@ -85,20 +100,31 @@ ui_center_text() {
 ui_has_id() { grep -q "resource-id=\"$1\"" "$W/ui.xml"; }
 ui_has_text() { grep -q "text=\"$1" "$W/ui.xml"; }
 
-# Finds <id>, scrolling the screen <root> when it is off screen. Prints its centre.
+# Finds <id>, scrolling the screen <root> when it is off screen: to the top, then down a page at
+# a time until the list stops moving. Prints its centre.
 ui_find() {
-    id=$1; root=$2; tries=0
-    while [ $tries -lt 8 ]; do
-        ui_dump
-        if c=$(ui_center_id "$id"); then echo "$c"; return 0; fi
-        r=$(ui_center_id "$root") || return 1
-        set -- $r
-        if [ $tries -lt 4 ]; then
-            input swipe "$1" $(( $2 + 250 )) "$1" $(( $2 - 250 )) 300
-        else
-            input swipe "$1" $(( $2 - 250 )) "$1" $(( $2 + 250 )) 300
-        fi
-        tries=$((tries + 1)); sleep 1
+    local id=$1 root=$2 c b x lo hi dir prev n sig
+    ui_dump
+    if c=$(ui_center_id "$id"); then echo "$c"; return 0; fi
+    # Swipe in the lower part of the screen: fixed settings can sit above the list, and a swipe
+    # that starts on them scrolls nothing.
+    b=$(grep -o "resource-id=\"$root\"[^>]*" "$W/ui.xml" | head -n 1 |
+        sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p')
+    [ -n "$b" ] || return 1
+    set -- $b
+    x=$(( ($1 + $3) / 2 )); hi=$(( $2 + ($4 - $2) * 85 / 100 )); lo=$(( $2 + ($4 - $2) * 45 / 100 ))
+    for dir in top down; do
+        prev=""; n=0
+        while [ $n -lt 30 ]; do
+            if [ $dir = top ]; then input swipe "$x" "$lo" "$x" "$hi" 300
+            else input swipe "$x" "$hi" "$x" "$lo" 300
+            fi
+            sleep 1; ui_dump
+            if c=$(ui_center_id "$id"); then echo "$c"; return 0; fi
+            sig=$(md5sum "$W/ui.xml" | cut -c1-32)
+            [ "$sig" = "$prev" ] && break
+            prev=$sig; n=$((n + 1))
+        done
     done
     return 1
 }
@@ -112,7 +138,7 @@ tap_id() {
 wait_log() {
     since=$1; ok=$2; bad=$3; limit=$4; waited=0
     while [ $waited -lt "$limit" ]; do
-        out=$(logcat -d -T "$since" 2>/dev/null)
+        out=$(log_since "$since")
         echo "$out" | grep -Eq "$ok" && return 0
         [ -n "$bad" ] && echo "$out" | grep -Eq "$bad" && return 1
         sleep 10; waited=$((waited + 10))
@@ -192,12 +218,38 @@ test_remove() {
 # Types the probe command into an open terminal and waits for each test's .done file.
 run_probe() {
     d=$1; shift; tests="$*"
-    for t in $tests; do rm -f "$SHARED/results/$d/$t.done" "$SHARED/results/$d/$t.result"; done
-    ui_dump
-    c=$(ui_center_id terminal_screen) || return 1
-    set -- $c; input tap "$1" "$(( $2 + 100 ))"; sleep 1
-    input text "sh%s$GUEST/probe.sh%s$(echo "$tests" | sed 's/ /%s/g')"
-    input keyevent KEYCODE_ENTER
+    for t in $tests; do rm -f "$SHARED/results/$d/$t.done" "$SHARED/results/$d/$t.result" "$SHARED/results/$d/$t.log"; done
+    tries=0; c=""
+    while [ $tries -lt 10 ] && [ -z "$c" ]; do
+        ui_dump; c=$(ui_center_id terminal_screen) || { sleep 2; tries=$((tries + 1)); }
+    done
+    if [ -z "$c" ]; then
+        evidence "$d" probe-start "$(now)"
+        for t in $tests; do result "$d" "probe-$t" FAIL 0 "the terminal was not on screen"; done
+        return 1
+    fi
+    set -- $c; input tap "$1" "$(( $2 + 100 ))"
+    # A shell still starting under PRoot drops what is typed ahead of its prompt.
+    sleep 3
+    command="sh%s$GUEST/probe.sh%s$(echo "$tests" | sed 's/ /%s/g')"
+    input text "$command"; input keyevent KEYCODE_ENTER
+    # The first test's log appears as soon as the probe starts. Without it the command never
+    # reached the shell, and waiting out every test's timeout would only stall the run. One
+    # retry, after Enter has cleared whatever part of the line did arrive.
+    first=${tests%% *}; waited=0
+    while [ ! -f "$SHARED/results/$d/$first.log" ] && [ $waited -lt 90 ]; do
+        sleep 5; waited=$((waited + 5))
+        if [ $waited -eq 20 ] && [ ! -f "$SHARED/results/$d/$first.log" ]; then
+            log "probe did not start in $d; typing the command again"
+            input keyevent KEYCODE_ENTER; sleep 1
+            input text "$command"; input keyevent KEYCODE_ENTER
+        fi
+    done
+    if [ ! -f "$SHARED/results/$d/$first.log" ]; then
+        evidence "$d" probe-start "$(now)"
+        for t in $tests; do result "$d" "probe-$t" FAIL 0 "probe did not start (the command did not reach the shell)"; done
+        return 1
+    fi
     for t in $tests; do
         waited=0
         while [ ! -f "$SHARED/results/$d/$t.done" ] && [ $waited -lt 2400 ]; do sleep 5; waited=$((waited + 5)); done
@@ -213,11 +265,9 @@ run_probe() {
     done
 }
 
-# C: the terminal opens on the distro and runs the probe; B: shell basics through the probe.
-test_terminal_and_shell() {
-    d=$1; since=$(now); start=$(date +%s)
-    status "RUNNING $d terminal"
-    open_terminal "$d"
+# Opens the terminal on <distro> and waits out any setup it shows first.
+await_terminal() {
+    open_terminal "$1"
     waited=0
     while [ $waited -lt 1800 ]; do
         ui_dump
@@ -225,6 +275,13 @@ test_terminal_and_shell() {
         sleep 10; waited=$((waited + 10))
     done
     ui_dump
+}
+
+# C: the terminal opens on the distro and runs the probe; B: shell basics through the probe.
+test_terminal_and_shell() {
+    d=$1; since=$(now); start=$(date +%s)
+    status "RUNNING $d terminal"
+    await_terminal "$d"
     if ui_has_id terminal_message; then
         evidence "$d" terminal "$since"
         result "$d" terminal FAIL "$(( $(date +%s) - start ))" "terminal shows a message instead of a shell"
@@ -319,40 +376,10 @@ test_apps() {
     fi
     name=$(echo "$entries" | grep -m1 -E '(^|-)xterm$' || echo "$entries" | head -n 1)
     result "$d" apps-list PASS 0 "$(echo "$entries" | wc -l | tr -d ' ') $d apps listed"
-    # $entry tags the row; $key is the session the app runs under, which only Ubuntu leaves bare.
+    t0=$(date +%s)
+    open_app "$d" "$name" app-window 10
+    stop_app "$d" "$name" app-stop
     entry="${d}__$name"
-    if [ "$d" = ubuntu ]; then key=$name; else key="$d:$name"; fi
-
-    # A cold launch each time: a session left running would only bring its window forward.
-    if ui_has_id "linux_app_stop_$entry"; then
-        tap_id "linux_app_stop_$entry" linux_apps_screen; sleep 6
-    fi
-    launched=$(now); t0=$(date +%s)
-    tap_id "linux_app_$entry" linux_apps_screen
-    # A window already open for the app is brought forward and its session reused.
-    wait_log "$launched" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready|\[LinuxSessions\]: reusing display :[0-9]+ for $key" \
-        "\[LinuxSessions\]: could not open $key|\[LinuxDesktopScreen\]: could not complete" 600
-    rc=$?
-    sleep 10
-    alive=$(guest_count "$d")
-    evidence "$d" app-window "$since"
-    secs=$(( $(date +%s) - t0 ))
-    if [ $rc -ne 0 ]; then result "$d" app-window FAIL "$secs" "$key did not open"
-    elif [ "$alive" -lt 1 ]; then result "$d" app-window FAIL "$secs" "$key exited"
-    else result "$d" app-window PASS "$secs" "$key window up"
-    fi
-
-    # Stop it from its Linux Apps row, the way a user ends a session left running.
-    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
-    sleep 4
-    if tap_id "linux_app_stop_$entry" linux_apps_screen; then
-        sleep 6; ui_dump
-        if ui_has_id "linux_app_stop_$entry"; then result "$d" app-stop FAIL 6 "$key still listed as running"
-        else result "$d" app-stop PASS 6 "$key stopped from Linux Apps"
-        fi
-    else
-        result "$d" app-stop FAIL 0 "no stop button while $key was running"
-    fi
 
     am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
     sleep 4; ui_dump
@@ -374,6 +401,100 @@ test_apps() {
     else
         result "$d" app-stub SKIP 0 "no drawer button (stubs unsupported here)"
     fi
+    back_to_android
+}
+
+# open_app <distro> <desktop entry> <result name> <settle s> [<command pattern>]: opens the app
+# from its Linux Apps row, cold, and checks it is still running <settle> seconds after its window
+# came up: any guest of the distro, or only PRoot hosts whose command matches <command pattern>.
+open_app() {
+    d=$1; name=$2; what=$3; settle=$4; pattern=$5; since=$(now)
+    # $entry tags the row; $key is the session the app runs under, which only Ubuntu leaves bare.
+    entry="${d}__$name"
+    if [ "$d" = ubuntu ]; then key=$name; else key="$d:$name"; fi
+    clear_stub_tasks
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4; ui_dump
+    # A cold launch each time: a session left running would only bring its window forward.
+    if ui_has_id "linux_app_stop_$entry"; then
+        tap_id "linux_app_stop_$entry" linux_apps_screen; sleep 6
+    fi
+    t0=$(date +%s)
+    if ! tap_id "linux_app_$entry" linux_apps_screen; then
+        evidence "$d" "$what" "$since"
+        result "$d" "$what" FAIL 0 "$key is not listed in Linux Apps"; return 1
+    fi
+    # A window already open for the app is brought forward and its session reused.
+    wait_log "$since" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready|\[LinuxSessions\]: reusing display :[0-9]+ for $key" \
+        "\[LinuxSessions\]: could not open $key|\[LinuxDesktopScreen\]: could not complete" 600
+    rc=$?
+    sleep "$settle"
+    if [ -n "$pattern" ]; then
+        alive=$(ps -A -o ARGS 2>/dev/null | grep libproot-linux | grep "distros/$d/rootfs" | grep -cE "$pattern")
+    else
+        alive=$(guest_count "$d")
+    fi
+    evidence "$d" "$what" "$since"
+    secs=$(( $(date +%s) - t0 ))
+    if [ $rc -ne 0 ]; then result "$d" "$what" FAIL "$secs" "$key did not open"
+    elif [ "$alive" -lt 1 ]; then result "$d" "$what" FAIL "$secs" "$key exited within ${settle}s"
+    else result "$d" "$what" PASS "$secs" "$key window up, running after ${settle}s"
+    fi
+    [ $rc -eq 0 ] && [ "$alive" -ge 1 ]
+}
+
+# stop_app <distro> <desktop entry> <result name>: stops it from its Linux Apps row, the way a
+# user ends a session left running.
+stop_app() {
+    d=$1; entry="${1}__$2"; what=$3
+    if [ "$d" = ubuntu ]; then key=$2; else key="$d:$2"; fi
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4
+    if tap_id "linux_app_stop_$entry" linux_apps_screen; then
+        sleep 6; ui_dump
+        if ui_has_id "linux_app_stop_$entry"; then result "$d" "$what" FAIL 6 "$key still listed as running"
+        else result "$d" "$what" PASS 6 "$key stopped from Linux Apps"
+        fi
+    else
+        result "$d" "$what" FAIL 0 "no stop button while $key was running"
+    fi
+}
+
+# E: each browser installs from the terminal the way the Linux Apps hint says, opens from Linux
+# Apps and stays up, then is removed again (browsers are large and the suite runs often).
+BROWSERS="firefox chromium chrome"
+test_browsers() {
+    d=$1
+    status "RUNNING $d browsers"
+    await_terminal "$d"
+    probes=""; for b in $BROWSERS; do probes="$probes br_$b"; done
+    run_probe "$d" $probes
+    back_to_android
+    for b in $BROWSERS; do
+        grep -q "^$d	probe-br_$b	PASS" "$RUN/results.tsv" || continue
+        # The first of its desktop entries that Linux Apps lists.
+        am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+        sleep 4
+        name=""
+        for candidate in $(cat "$SHARED/results/$d/br_$b.entry" 2>/dev/null); do
+            if ui_find "linux_app_${d}__$candidate" linux_apps_screen >/dev/null; then name=$candidate; break; fi
+        done
+        if [ -z "$name" ]; then
+            evidence "$d" "open-$b" "$(now)"
+            result "$d" "open-$b" FAIL 0 "none of its entries ($(tr '\n' ' ' < "$SHARED/results/$d/br_$b.entry")) is listed in Linux Apps"
+            continue
+        fi
+        case $b in chrome) pattern=google-chrome ;; *) pattern=$b ;; esac
+        if open_app "$d" "$name" "open-$b" 20 "$pattern"; then
+            stop_app "$d" "$name" "stop-$b"
+        else
+            stop_app "$d" "$name" "stop-$b" >/dev/null 2>&1
+        fi
+    done
+    back_to_android
+    await_terminal "$d"
+    probes=""; for b in $BROWSERS; do probes="$probes rmbr_$b"; done
+    run_probe "$d" $probes
     back_to_android
 }
 
@@ -437,7 +558,27 @@ write_report() {
 
 # ---------------------------------------------------------------- main
 
+# Two runs would type into each other's windows.
+if [ -f "$W/run.pid" ] && kill -0 "$(cat "$W/run.pid")" 2>/dev/null; then
+    log "another run (pid $(cat "$W/run.pid")) is in progress; not starting"
+    status "DONE busy $RUN"
+    exit 3
+fi
+echo $$ > "$W/run.pid"
 log "Linux test run: user=$USER_ID distros=[$DISTROS] tests=[$TESTS] keep=$KEEP"
+# Only the lines the tests read, so a long run does not fill the disk.
+logcat -v threadtime -T 1 2>/dev/null |
+    grep --line-buffered -E "app\.gamenative|proot|ActivityTaskManager|AndroidRuntime" > "$RUN/logcat.txt" &
+LOGCAT_PID=$!
+# SmartDock pops up notifications (its own "Dock service is running" among them) in a window that
+# uiautomator then dumps instead of GameNative's. Paused for the run, and only if it was on.
+DOCK_LISTENER=cu.axel.smartdock/cu.axel.smartdock.services.NotificationService
+DOCK_PAUSED=0
+if dumpsys notification 2>/dev/null | grep -q "$DOCK_LISTENER (user: $USER_ID"; then
+    cmd notification disallow_listener "$DOCK_LISTENER" "$USER_ID" && DOCK_PAUSED=1 && log "paused SmartDock notification popups"
+fi
+trap 'kill $LOGCAT_PID 2>/dev/null; rm -f "$W/run.pid"; [ $DOCK_PAUSED -eq 1 ] && cmd notification allow_listener "$DOCK_LISTENER" "$USER_ID"' EXIT
+trap 'exit 1' INT TERM HUP
 svc power stayon true
 wake
 
@@ -452,6 +593,7 @@ for d in $DISTROS; do
     [ $installed -eq 1 ] || continue
     if has_test B || has_test C; then test_terminal_and_shell "$d"; fi
     if has_test D; then test_desktop "$d"; fi
+    if has_test E; then test_browsers "$d"; fi
     if has_test F; then test_apps "$d"; fi
     if has_test A && [ $KEEP -eq 0 ]; then test_remove "$d"; fi
 done

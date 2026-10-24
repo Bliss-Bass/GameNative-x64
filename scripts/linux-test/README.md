@@ -44,6 +44,10 @@ The run is started detached on the device and survives a dropped adb connection;
 - **D** desktop: picks the distro and Openbox on the Linux Distros screen (installing the session
   when needed), opens the Linux Session, waits for its display to report ready, checks the guest is
   still running 15 s later, then closes it from the session menu.
+- **E** browsers: in the terminal, installs Firefox (`firefox-esr` on Debian), Chromium and Google
+  Chrome (Ubuntu and Debian only; Arch has it in the AUR alone) with the distro's package manager and
+  checks `--version`; opens each from its Linux Apps row and checks it is still running 20 s later;
+  stops it from the row; then removes the three again.
 - **F** Linux Apps (`ACTION_LINUX_APPS`): lists the distro's apps, cold-launches one (XTerm when
   present) in its own window, stops it from its row, and on Bass removes and re-adds its drawer stub
   (skipped where stubs need the user's confirmation).
