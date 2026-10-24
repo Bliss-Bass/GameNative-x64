@@ -228,6 +228,7 @@ test_terminal_and_shell() {
     fi
     probe_tests=terminal
     has_test B && probe_tests="terminal info net pkg user"
+    has_test B && [ "$d" = ubuntu ] && probe_tests="$probe_tests srcs"
     [ -n "$PROBE" ] && probe_tests="terminal $PROBE"
     run_probe "$d" $probe_tests
     evidence "$d" terminal "$since"

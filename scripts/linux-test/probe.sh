@@ -112,6 +112,23 @@ t_user() {
     [ "$out" = "$name" ]
 }
 
+# Ubuntu: browser package sources are set up, but no browser is installed by default.
+t_srcs() {
+    [ "$DISTRO" = ubuntu ] || { echo "Ubuntu only"; return 2; }
+    rc=0
+    for f in /etc/apt/sources.list.d/mozilla.sources /etc/apt/sources.list.d/xtradeb-ubuntu-apps-noble.sources \
+        /etc/apt/sources.list.d/google-chrome.sources; do
+        if [ -f "$f" ]; then echo "source: $f"; else echo "missing source: $f"; rc=1; fi
+    done
+    for b in firefox chromium google-chrome-stable; do
+        if dpkg-query -W -f='${Status}' "$b" 2>/dev/null | grep -q 'install ok installed'; then
+            echo "installed by default: $b"; rc=1
+        fi
+    done
+    [ $rc -eq 0 ] && echo "sources present, no browser installed"
+    return $rc
+}
+
 # Package manager state, for diagnosing a failing pkg test; always passes.
 t_pkgdiag() {
     case "$PM" in
@@ -139,7 +156,7 @@ run_one() {
     rm -f "$OUT/$test.done" "$OUT/$test.result"
     start=$(date +%s)
     case "$test" in
-        info|net|pkg|pkgdiag|user|terminal) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        info|net|pkg|pkgdiag|user|terminal|srcs) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
         *) echo "unknown test $test" > "$OUT/$test.log"; rc=1 ;;
     esac
     end=$(date +%s)

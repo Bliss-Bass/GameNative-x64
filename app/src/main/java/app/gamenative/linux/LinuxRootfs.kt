@@ -29,7 +29,7 @@ object LinuxRootfs {
     /**
      * Bump when Mozilla/nosnap apt policy files change. Applied without re-unpacking the
      * rootfs: [ensureDisplaySession] rewrites the files and, when the stamp advances, runs
-     * apt once to drop snap stubs and prefer Mozilla's firefox deb.
+     * apt once to drop snap stubs, so a later `apt install firefox` gets Mozilla's deb.
      */
     private const val APT_POLICY_VERSION = 2
 
@@ -41,7 +41,7 @@ object LinuxRootfs {
 
     /**
      * Bump when the default browser sources below change. Kept apart from
-     * [APT_POLICY_VERSION], whose bump also purges and reinstalls Firefox.
+     * [APT_POLICY_VERSION], whose bump also re-runs the snap purge.
      */
     private const val BROWSER_SOURCES_VERSION = 1
 
@@ -876,7 +876,7 @@ object LinuxRootfs {
 
     /**
      * Ensures Mozilla/nosnap apt policy is on disk and, when the policy stamp advances,
-     * refreshes apt and replaces snap transitional browsers with Mozilla's firefox deb.
+     * refreshes apt and purges the snap transitional browsers.
      *
      * Safe to call on every session start: rewriting the files is cheap, and the apt work
      * only runs when [APT_POLICY_VERSION] changes.
@@ -935,8 +935,11 @@ object LinuxRootfs {
     }
 
     /**
-     * Purges snapd / Ubuntu snap-stub browsers and installs Mozilla Firefox so the Apps
-     * list gets a real `.desktop` entry.
+     * Purges snapd and Ubuntu's snap-stub browsers. No browser is installed: the Mozilla,
+     * xtradeb and Google sources are set up, and the user installs the one they want.
+     *
+     * The stubs are purged only when what is installed really is a stub (Ubuntu versions them
+     * `1:1snap1...`), so a Firefox or Chromium the user installed from a real source survives.
      */
     private fun applyAptPolicyPackages(
         context: Context,
@@ -944,25 +947,26 @@ object LinuxRootfs {
         onProgress: (Progress) -> Unit,
     ) {
         onProgress(Progress("Removing snap packages", -1f))
+        val stubs = listOf("firefox", "chromium-browser").filter { isSnapStub(rootfs, it) }
         val purge = LinuxProgramLauncher.runWithOutput(
             context,
-            "apt-get remove -y --purge -o Dpkg::Use-Pty=0 snapd firefox chromium-browser",
+            "apt-get remove -y --purge -o Dpkg::Use-Pty=0 snapd " + stubs.joinToString(" "),
             extraEnv = APT_ENV,
             timeoutSeconds = 600,
         )
-        Timber.i("[LinuxRootfs]: snap purge:\n%s", purge.takeLast(2000))
+        Timber.i("[LinuxRootfs]: snap purge (%s):\n%s", stubs, purge.takeLast(2000))
         for (leftover in listOf("snap", "var/snap", "var/lib/snapd")) {
             File(rootfs, leftover).deleteRecursively()
         }
+    }
 
-        onProgress(Progress("Installing Firefox from Mozilla", -1f))
-        val firefox = LinuxProgramLauncher.runWithOutput(
-            context,
-            "apt-get install -y -o Dpkg::Use-Pty=0 firefox",
-            extraEnv = APT_ENV,
-            timeoutSeconds = 1800,
-        )
-        Timber.i("[LinuxRootfs]: mozilla firefox:\n%s", firefox.takeLast(2000))
+    /** Whether dpkg has [pkg] installed as one of Ubuntu's snap transitional packages. */
+    private fun isSnapStub(rootfs: File, pkg: String): Boolean {
+        val status = File(rootfs, "var/lib/dpkg/status").takeIf { it.isFile }?.readText() ?: return false
+        val stanza = status.split("\n\n").firstOrNull { it.lineSequence().any { line -> line == "Package: $pkg" } }
+            ?: return false
+        val version = stanza.lineSequence().firstOrNull { it.startsWith("Version: ") }.orEmpty()
+        return "snap" in version && stanza.contains("Status: install ok installed")
     }
 
     /** Fetches Mozilla's APT signing key into the rootfs when missing or empty. */
