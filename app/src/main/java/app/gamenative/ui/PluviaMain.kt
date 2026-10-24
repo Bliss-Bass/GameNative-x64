@@ -194,6 +194,10 @@ private fun NavHostController.navigateToPendingLinuxRequest() {
             navigate(PluviaScreen.LinuxDistros.route)
             return
         }
+        MainActivity.Companion.LinuxScreen.APPS -> {
+            navigate(PluviaScreen.LinuxApps.route)
+            return
+        }
         MainActivity.Companion.LinuxScreen.DESKTOP -> Unit
     }
 

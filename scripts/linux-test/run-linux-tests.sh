@@ -10,7 +10,8 @@ usage: run-linux-tests.sh -s <serial> --yes [options]
   -s <serial>          adb device, e.g. 192.168.1.208:5555
   --user <id>          Android user GameNative runs in (default 0; the Googlebook uses 10)
   --distros "<ids>"    default "ubuntu debian archlinux"
-  --tests "<letters>"  default "A B C" (A install/remove, B shell basics, C terminal)
+  --tests "<letters>"  default "A B C" (A install/remove, B shell basics, C terminal,
+                       D desktop session, F Linux Apps and app windows)
   --probe "<tests>"    run these probe tests instead of B's set (e.g. "pkgdiag pkg")
   --keep               leave the distros installed at the end
   --no-install         only test distros that are already installed

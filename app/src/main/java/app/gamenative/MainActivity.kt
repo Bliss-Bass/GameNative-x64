@@ -129,10 +129,13 @@ class MainActivity : ComponentActivity() {
         /** Opens the Linux Distros screen. */
         const val ACTION_LINUX_DISTROS = "app.gamenative.action.LINUX_DISTROS"
 
+        /** Opens the Linux Apps screen. */
+        const val ACTION_LINUX_APPS = "app.gamenative.action.LINUX_APPS"
+
         /** For [ACTION_LINUX_TERMINAL]: the installed distro to open in, instead of the default. */
         const val EXTRA_LINUX_DISTRO = "linux_distro"
 
-        enum class LinuxScreen { DESKTOP, TERMINAL, DISTROS }
+        enum class LinuxScreen { DESKTOP, TERMINAL, DISTROS, APPS }
 
         /** A Linux screen asked for by intent, held until the UI can act on it. */
         data class PendingLinuxRequest(val screen: LinuxScreen, val argv: String?, val distroId: String? = null)
@@ -456,13 +459,14 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (intent.action == ACTION_LINUX_DESKTOP || intent.action == ACTION_LINUX_TERMINAL ||
-            intent.action == ACTION_LINUX_DISTROS
+            intent.action == ACTION_LINUX_DISTROS || intent.action == ACTION_LINUX_APPS
         ) {
             // Not a game launch, so these skip IntentLaunchManager entirely. The desktop
             // action is also the entry point a per-app launcher shortcut uses.
             val screen = when (intent.action) {
                 ACTION_LINUX_TERMINAL -> LinuxScreen.TERMINAL
                 ACTION_LINUX_DISTROS -> LinuxScreen.DISTROS
+                ACTION_LINUX_APPS -> LinuxScreen.APPS
                 else -> LinuxScreen.DESKTOP
             }
             val terminal = screen != LinuxScreen.DESKTOP

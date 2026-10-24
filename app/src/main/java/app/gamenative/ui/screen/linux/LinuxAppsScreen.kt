@@ -563,14 +563,14 @@ private fun AppRow(
         // Only while there is a session to act on: a stop button for something that is not
         // running would be furniture, and a restart would be a launch by another name.
         if (session != null) {
-            IconButton(onClick = { onRestart(session) }, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = { onRestart(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_restart_${app.entryId}")) {
                 Icon(
                     imageVector = Icons.Filled.RestartAlt,
                     contentDescription = stringResource(R.string.linux_session_restart),
                     tint = Color.White.copy(alpha = 0.7f),
                 )
             }
-            IconButton(onClick = { onStop(session) }, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = { onStop(session) }, modifier = Modifier.size(44.dp).testTag("linux_app_stop_${app.entryId}")) {
                 Icon(
                     imageVector = Icons.Filled.StopCircle,
                     contentDescription = stringResource(R.string.linux_session_stop),
@@ -580,7 +580,11 @@ private fun AppRow(
         }
 
         if (onToggleDrawer != null && inDrawer != null) {
-            IconButton(onClick = onToggleDrawer, modifier = Modifier.size(44.dp)) {
+            IconButton(
+                onClick = onToggleDrawer,
+                modifier = Modifier.size(44.dp)
+                    .testTag(if (inDrawer) "linux_app_undrawer_${app.entryId}" else "linux_app_drawer_${app.entryId}"),
+            ) {
                 Icon(
                     imageVector = if (inDrawer) {
                         Icons.Filled.RemoveCircleOutline
@@ -595,7 +599,7 @@ private fun AppRow(
             }
         }
 
-        IconButton(onClick = onPin, modifier = Modifier.size(44.dp)) {
+        IconButton(onClick = onPin, modifier = Modifier.size(44.dp).testTag("linux_app_pin_${app.entryId}")) {
             Icon(
                 imageVector = Icons.Filled.AddToHomeScreen,
                 contentDescription = stringResource(R.string.linux_apps_pin),

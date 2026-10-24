@@ -240,6 +240,146 @@ test_terminal_and_shell() {
     back_to_android
 }
 
+# Number of PRoot hosts running guest processes in <distro>'s rootfs.
+guest_count() { ps -A -o ARGS 2>/dev/null | grep libproot-linux | grep -c "distros/$1/rootfs"; }
+
+# Picks <text> from the dropdown behind button <id> on the Linux Distros screen.
+choose() {
+    tap_id "$1" linux_distros_screen || return 1
+    sleep 1; ui_dump
+    c=$(ui_center_text "$2") || { input keyevent KEYCODE_BACK; return 1; }
+    set -- $c; input tap "$1" "$2"; sleep 1
+}
+
+# Closes the Linux window in front through its side menu (Back opens it).
+close_linux_window() {
+    input keyevent KEYCODE_BACK; sleep 2; ui_dump
+    c=$(ui_center_text "Close app") || return 1
+    set -- $c; input tap "$1" "$2"; sleep 3
+}
+
+# D: the desktop window runs <distro> with Openbox.
+test_desktop() {
+    d=$1; since=$(now); start=$(date +%s)
+    status "RUNNING $d desktop"
+    open_distros
+    if ! choose desktop_distro "$(name_of "$d")"; then
+        result "$d" desktop FAIL 0 "$(name_of "$d") not offered as the desktop distro"; return 1
+    fi
+    choose desktop_session Openbox || { result "$d" desktop FAIL 0 "Openbox not offered"; return 1; }
+    ui_dump
+    if ui_has_id desktop_session_install; then
+        tap_id desktop_session_install linux_distros_screen
+        wait_log "$since" "\[LinuxDesktopSessions\]: openbox installed in $d" \
+            "\[LinuxDistrosScreen\]: session:$d:openbox failed|openbox install in $d failed" 2400
+        if [ $? -ne 0 ]; then
+            evidence "$d" desktop "$since"
+            result "$d" desktop FAIL "$(( $(date +%s) - start ))" "installing Openbox failed or timed out"; return 1
+        fi
+    fi
+    launched=$(now)
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_DESKTOP >/dev/null 2>&1
+    wait_log "$launched" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready \(desktop\)" \
+        "\[LinuxSessions\]: could not open ::desktop|\[LinuxDesktopScreen\]: could not" 300
+    rc=$?
+    sleep 15
+    alive=$(guest_count "$d")
+    evidence "$d" desktop "$since"
+    close_linux_window
+    back_to_android
+    secs=$(( $(date +%s) - start ))
+    if [ $rc -ne 0 ]; then result "$d" desktop FAIL "$secs" "desktop did not report ready"
+    elif [ "$alive" -lt 1 ]; then result "$d" desktop FAIL "$secs" "no guest processes 15 s after start"
+    else result "$d" desktop PASS "$secs" "Openbox desktop up, $alive guest hosts"
+    fi
+}
+
+# F: Linux Apps lists <distro>'s apps; one opens in its own window; on Bass its drawer stub
+# installs and goes again.
+test_apps() {
+    d=$1; since=$(now); start=$(date +%s)
+    status "RUNNING $d apps"
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 6; ui_dump
+    entries=$(grep -o 'resource-id="linux_app_[^"]*"' "$W/ui.xml" | sed 's/resource-id="linux_app_//; s/"$//' |
+        grep -vE '^(restart|stop|drawer|undrawer|pin)_')
+    if [ -z "$entries" ]; then
+        evidence "$d" apps "$since"
+        result "$d" apps FAIL 0 "Linux Apps lists no apps"; back_to_android; return 1
+    fi
+    entry=$(echo "$entries" | grep -m1 -E '(^|-)xterm$' || echo "$entries" | head -n 1)
+    result "$d" apps-list PASS 0 "$(echo "$entries" | wc -l | tr -d ' ') apps listed"
+
+    # A cold launch each time: a session left running would only bring its window forward.
+    if ui_has_id "linux_app_stop_$entry"; then
+        tap_id "linux_app_stop_$entry" linux_apps_screen; sleep 6
+    fi
+    launched=$(now); t0=$(date +%s)
+    tap_id "linux_app_$entry" linux_apps_screen
+    # A window already open for the app is brought forward and its session reused.
+    wait_log "$launched" "\[LinuxDisplaySession\]: display :[0-9]+ ready|\[LinuxAndroidXSession\]: slot [0-9]+ ready|\[LinuxSessions\]: reusing display :[0-9]+ for $entry" \
+        "\[LinuxSessions\]: could not open $entry" 180
+    rc=$?
+    sleep 10
+    alive=$(guest_count "$d")
+    evidence "$d" app-window "$since"
+    secs=$(( $(date +%s) - t0 ))
+    if [ $rc -ne 0 ]; then result "$d" app-window FAIL "$secs" "$entry did not open"
+    elif [ "$alive" -lt 1 ]; then result "$d" app-window FAIL "$secs" "$entry exited"
+    else result "$d" app-window PASS "$secs" "$entry window up"
+    fi
+
+    # Stop it from its Linux Apps row, the way a user ends a session left running.
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4
+    if tap_id "linux_app_stop_$entry" linux_apps_screen; then
+        sleep 6; ui_dump
+        if ui_has_id "linux_app_stop_$entry"; then result "$d" app-stop FAIL 6 "$entry still listed as running"
+        else result "$d" app-stop PASS 6 "$entry stopped from Linux Apps"
+        fi
+    else
+        result "$d" app-stop FAIL 0 "no stop button while $entry was running"
+    fi
+
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4; ui_dump
+    if ui_has_id "linux_app_undrawer_$entry"; then
+        # Already in the drawer: take it out and put it back, leaving the device as it was.
+        if toggle_stub "$entry" undrawer down && toggle_stub "$entry" drawer up; then
+            result "$d" app-stub PASS "$(( $(date +%s) - t0 ))" "stub removed and added again"
+        else
+            result "$d" app-stub FAIL "$(( $(date +%s) - t0 ))" "stub did not leave and come back"
+        fi
+    elif ui_has_id "linux_app_drawer_$entry"; then
+        if ! toggle_stub "$entry" drawer up; then
+            result "$d" app-stub SKIP "$(( $(date +%s) - t0 ))" "stub did not install silently (needs the Bass stub installer)"
+        elif toggle_stub "$entry" undrawer down; then
+            result "$d" app-stub PASS "$(( $(date +%s) - t0 ))" "stub added and removed"
+        else
+            result "$d" app-stub FAIL "$(( $(date +%s) - t0 ))" "stub added but not removed"
+        fi
+    else
+        result "$d" app-stub SKIP 0 "no drawer button (stubs unsupported here)"
+    fi
+    back_to_android
+}
+
+# toggle_stub <entry> <drawer|undrawer> <up|down>: taps the row's drawer button and waits up to a
+# minute for the number of installed stub packages to go up or down.
+toggle_stub() {
+    before=$(pm list packages --user "$USER_ID" 2>/dev/null | grep -c 'app.gamenative.stub.')
+    ui_dump
+    tap_id "linux_app_$2_$1" linux_apps_screen || return 1
+    waited=0
+    while [ $waited -lt 60 ]; do
+        sleep 5; waited=$((waited + 5))
+        n=$(pm list packages --user "$USER_ID" 2>/dev/null | grep -c 'app.gamenative.stub.')
+        if [ "$3" = up ] && [ "$n" -gt "$before" ]; then sleep 2; return 0; fi
+        if [ "$3" = down ] && [ "$n" -lt "$before" ]; then sleep 2; return 0; fi
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------- report
 
 write_report() {
@@ -298,6 +438,8 @@ for d in $DISTROS; do
     fi
     [ $installed -eq 1 ] || continue
     if has_test B || has_test C; then test_terminal_and_shell "$d"; fi
+    if has_test D; then test_desktop "$d"; fi
+    if has_test F; then test_apps "$d"; fi
     if has_test A && [ $KEEP -eq 0 ]; then test_remove "$d"; fi
 done
 
