@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -73,6 +74,33 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
     // Bumped when work finishes, so every "is it installed" below is asked again.
     val version by DistroWork.version.collectAsState()
     var confirmRemove by remember { mutableStateOf<LinuxDistro?>(null) }
+    var confirmReset by remember { mutableStateOf<LinuxDistro?>(null) }
+    var editing by remember { mutableStateOf(false) }
+    val sessions by LinuxSessions.sessions.collectAsState()
+    val consoles by LinuxVtService.consoles.collectAsState()
+
+    confirmReset?.let { distro ->
+        AlertDialog(
+            onDismissRequest = { confirmReset = null },
+            title = { Text(stringResource(R.string.linux_distro_reset_title, distro.displayName)) },
+            text = { Text(stringResource(R.string.linux_distro_reset_message, distro.displayName)) },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.automationIds().testTag("dialog_confirm"),
+                    onClick = {
+                        confirmReset = null
+                        DistroWork.run(context, distro.id) { LinuxDistros.reset(context, distro.id, it) }
+                    },
+                ) { Text(stringResource(R.string.linux_distro_reset)) }
+            },
+            dismissButton = {
+                TextButton(
+                    modifier = Modifier.automationIds().testTag("dialog_cancel"),
+                    onClick = { confirmReset = null },
+                ) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
 
     confirmRemove?.let { distro ->
         AlertDialog(
@@ -109,7 +137,7 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
             .automationIds()
             .testTag("linux_distros_screen"),
     ) {
-        Header(onBack)
+        Header(onBack, editing = editing, onEdit = { editing = !editing })
 
         Column(
             modifier = Modifier
@@ -144,6 +172,13 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
                         LinuxDistros.setDefault(context, distro.id)
                         DistroWork.bump()
                     },
+                    editing = editing,
+                    running = sessions.any { it.distroId == distro.id } || consoles.any { it.distroId == distro.id },
+                    onStop = {
+                        LinuxSessions.stopDistro(context, distro.id)
+                        consoles.filter { it.distroId == distro.id }.forEach { LinuxVtService.restartConsole(context, it.vt) }
+                    },
+                    onReset = { confirmReset = distro },
                 )
             }
 
@@ -166,6 +201,11 @@ private fun DistroRow(
     onInstall: () -> Unit,
     onRemove: () -> Unit,
     onMakeDefault: () -> Unit,
+    editing: Boolean,
+    /** Whether any session or console shell runs in it. */
+    running: Boolean,
+    onStop: () -> Unit,
+    onReset: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag("distro_${distro.id}")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -193,8 +233,20 @@ private fun DistroRow(
                     )
                 }
             }
+            if (installed && editing) {
+                TextButton(
+                    modifier = Modifier.testTag("distro_stop_${distro.id}"),
+                    enabled = running,
+                    onClick = onStop,
+                ) { Text(stringResource(R.string.linux_distro_stop)) }
+                OutlinedButton(
+                    modifier = Modifier.padding(end = 8.dp).testTag("distro_reset_${distro.id}"),
+                    enabled = !busy,
+                    onClick = onReset,
+                ) { Text(stringResource(R.string.linux_distro_reset)) }
+            }
             if (installed) {
-                if (!isDefault && distro.supported) {
+                if (!isDefault && distro.supported && !editing) {
                     TextButton(
                         modifier = Modifier.testTag("distro_default_${distro.id}"),
                         enabled = !busy,
@@ -461,7 +513,7 @@ private fun Divider() {
 }
 
 @Composable
-private fun Header(onBack: () -> Unit) {
+private fun Header(onBack: () -> Unit, editing: Boolean, onEdit: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -479,8 +531,21 @@ private fun Header(onBack: () -> Unit) {
             text = stringResource(R.string.linux_distros_title),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 8.dp),
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
+        if (editing) {
+            TextButton(onClick = onEdit, modifier = Modifier.testTag("distros_edit")) {
+                Text(stringResource(R.string.linux_apps_edit_done))
+            }
+        } else {
+            IconButton(onClick = onEdit, modifier = Modifier.size(44.dp).testTag("distros_edit")) {
+                Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = stringResource(R.string.linux_apps_edit),
+                    tint = Color.White.copy(alpha = 0.8f),
+                )
+            }
+        }
     }
 }
 

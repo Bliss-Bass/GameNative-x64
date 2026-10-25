@@ -16,7 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -25,11 +25,13 @@ import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,6 +71,7 @@ import app.gamenative.linux.LinuxDistroCatalog
 import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
+import app.gamenative.linux.LinuxAppUninstaller
 import app.gamenative.linux.LinuxDisplayScale
 import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
@@ -100,8 +103,12 @@ fun LinuxAppsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
-    var confirmReset by remember { mutableStateOf(false) }
-    var resetting by remember { mutableStateOf(false) }
+
+    // Edit mode: apps are selected rather than launched, and act together from the bar below.
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(emptySet<Int>()) }
+    var uninstall by remember { mutableStateOf<UninstallRequest?>(null) }
+    var working by remember { mutableStateOf<String?>(null) }
 
     // Which applications are up. Collected rather than read once: a session can end on its own
     // when the last window in it exits, and the row's controls must not outlive it.
@@ -128,33 +135,30 @@ fun LinuxAppsScreen(
         withContext(Dispatchers.IO) { LinuxAppReconciler.reconcile(context, found) }
     }
 
-    if (confirmReset) {
-        AlertDialog(
-            onDismissRequest = { if (!resetting) confirmReset = false },
-            title = { Text(stringResource(R.string.linux_apps_reset_title)) },
-            text = { Text(stringResource(R.string.linux_apps_reset_message)) },
-            confirmButton = {
-                TextButton(
-                    enabled = !resetting,
-                    onClick = {
-                        resetting = true
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                LinuxSessions.stopAll(context)
-                                LinuxRootfs.uninstall(context)
-                            }
-                            resetting = false
-                            confirmReset = false
-                            refreshKey++
+    uninstall?.let { request ->
+        UninstallDialog(
+            request = request,
+            onDismiss = { uninstall = null },
+            onConfirm = {
+                uninstall = null
+                working = context.getString(R.string.linux_apps_uninstalling)
+                scope.launch {
+                    request.apps.forEach { app ->
+                        LinuxSessions.stop(context, LinuxSessions.keyFor(app.entryId, app.launchArgv))
+                    }
+                    LinuxAppUninstaller.uninstall(context, request.plan)
+                        .onSuccess {
+                            SnackbarManager.show(
+                                context.getString(R.string.linux_apps_uninstalled, request.apps.joinToString { it.name }),
+                            )
                         }
-                    },
-                ) {
-                    Text(stringResource(R.string.linux_apps_reset_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !resetting, onClick = { confirmReset = false }) {
-                    Text(stringResource(R.string.cancel))
+                        .onFailure {
+                            SnackbarManager.show(context.getString(R.string.linux_apps_uninstall_failed, it.message ?: it.toString()))
+                        }
+                    working = null
+                    editing = false
+                    selected = emptySet()
+                    refreshKey++
                 }
             },
         )
@@ -172,34 +176,68 @@ fun LinuxAppsScreen(
         val installed = remember(refreshKey) { LinuxDistros.integrated(context).isNotEmpty() }
         Header(
             onBack = onBack,
-            onRefresh = if (installed) {{ refreshKey++ }} else null,
-            onReset = if (LinuxRootfs.isInstalled(context) && !resetting) {{ confirmReset = true }} else null,
+            onRefresh = if (installed && !editing) {{ refreshKey++ }} else null,
             running = sessions.size,
             onStopAll = { LinuxSessions.stopAll(context) },
+            editing = editing,
+            selectedCount = selected.size,
+            onEdit = if (installed && !apps.isNullOrEmpty()) {
+                {
+                    editing = !editing
+                    selected = emptySet()
+                }
+            } else {
+                null
+            },
         )
 
-        if (resetting) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Text(
-                        text = stringResource(R.string.linux_apps_resetting),
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(top = 16.dp),
-                    )
-                }
+        working?.let { message ->
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp).testTag("linux_apps_working"))
             }
-            return@Column
         }
 
         if (installed && !storageGranted) {
             StorageBanner(onGrant = { LinuxStorage.requestAccess(context) })
         }
 
-        if (installed) {
+        if (installed && !editing) {
             ScaleRow()
             SessionBackendRow()
             SessionModeRow()
+        }
+
+        val chosen = apps.orEmpty().filter { it.id in selected }
+        if (editing) {
+            EditBar(
+                anyRunning = chosen.any { app ->
+                    sessions.any { it.key == LinuxSessions.keyFor(app.entryId, app.launchArgv) }
+                },
+                stubsSupported = LinuxAppStubs.isSupported(context),
+                enabled = chosen.isNotEmpty() && working == null,
+                onStop = {
+                    chosen.forEach { LinuxSessions.stop(context, LinuxSessions.keyFor(it.entryId, it.launchArgv)) }
+                },
+                onRemoveFromDrawer = {
+                    scope.launch {
+                        chosen.forEach { app ->
+                            if (withContext(Dispatchers.IO) { LinuxAppStubs.isInstalled(context, app) }) {
+                                removeFromDrawer(context, app)
+                            }
+                        }
+                        refreshKey++
+                    }
+                },
+                onUninstall = {
+                    working = context.getString(R.string.linux_apps_checking)
+                    scope.launch {
+                        val plan = LinuxAppUninstaller.plan(context, chosen)
+                        working = null
+                        uninstall = UninstallRequest(chosen, plan)
+                    }
+                },
+            )
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -242,7 +280,14 @@ fun LinuxAppsScreen(
                         AppRow(
                             app = app,
                             session = session,
-                            onClick = { onLaunch(app) },
+                            onClick = {
+                                if (editing) {
+                                    selected = if (app.id in selected) selected - app.id else selected + app.id
+                                } else {
+                                    onLaunch(app)
+                                }
+                            },
+                            selected = (app.id in selected).takeIf { editing },
                             onStop = { LinuxSessions.stop(context, it.key) },
                             onRestart = { LinuxSessions.restart(context, it.key) },
                             onPin = { scope.launch { createLinuxAppShortcut(context, app) } },
@@ -268,6 +313,98 @@ fun LinuxAppsScreen(
             }
         }
     }
+}
+
+/** Apps the user chose to uninstall, and what that will remove. */
+private data class UninstallRequest(
+    val apps: List<LinuxAppScanner.LinuxApp>,
+    val plan: LinuxAppUninstaller.Plan,
+)
+
+/** What edit mode does with the selected apps. */
+@Composable
+private fun EditBar(
+    anyRunning: Boolean,
+    stubsSupported: Boolean,
+    enabled: Boolean,
+    onStop: () -> Unit,
+    onRemoveFromDrawer: () -> Unit,
+    onUninstall: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(
+            enabled = enabled && anyRunning,
+            onClick = onStop,
+            modifier = Modifier.testTag("linux_apps_action_stop"),
+        ) { Text(stringResource(R.string.linux_apps_action_stop)) }
+        if (stubsSupported) {
+            TextButton(
+                enabled = enabled,
+                onClick = onRemoveFromDrawer,
+                modifier = Modifier.testTag("linux_apps_action_undrawer"),
+            ) { Text(stringResource(R.string.linux_apps_action_undrawer)) }
+        }
+        Button(
+            enabled = enabled,
+            onClick = onUninstall,
+            modifier = Modifier.padding(start = 8.dp).testTag("linux_apps_action_uninstall"),
+        ) { Text(stringResource(R.string.linux_apps_action_uninstall)) }
+    }
+}
+
+/**
+ * Says by name what will go before anything does: removing a package removes every app it ships,
+ * which may be more than the ones selected.
+ */
+@Composable
+private fun UninstallDialog(request: UninstallRequest, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val plan = request.plan
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.linux_apps_uninstall_title)) },
+        text = {
+            Column {
+                if (plan.isEmpty) {
+                    Text(stringResource(R.string.linux_apps_uninstall_nothing))
+                }
+                plan.packages.filterValues { it.isNotEmpty() }.forEach { (distroId, names) ->
+                    Text(
+                        stringResource(R.string.linux_apps_uninstall_packages, LinuxDistroCatalog.nameOf(distroId), names.joinToString()),
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                if (plan.files.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.linux_apps_uninstall_files, plan.files.joinToString { it.name }),
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                if (plan.unknown.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.linux_apps_uninstall_unknown, plan.unknown.joinToString { it.name }),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PluviaTheme.colors.textMuted,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !plan.isEmpty,
+                onClick = onConfirm,
+                modifier = Modifier.automationIds().testTag("dialog_confirm"),
+            ) { Text(stringResource(R.string.linux_apps_uninstall_confirm)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.automationIds().testTag("dialog_cancel")) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -515,6 +652,8 @@ private fun AppRow(
     app: LinuxAppScanner.LinuxApp,
     session: LinuxSessions.Snapshot?,
     onClick: () -> Unit,
+    /** Null outside edit mode; otherwise whether this app is selected. */
+    selected: Boolean?,
     onStop: (LinuxSessions.Snapshot) -> Unit,
     onRestart: (LinuxSessions.Snapshot) -> Unit,
     onPin: () -> Unit,
@@ -534,6 +673,13 @@ private fun AppRow(
             .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selected != null) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onClick() },
+                modifier = Modifier.testTag("linux_app_select_$tagKey"),
+            )
+        }
         AppIcon(iconPath = app.iconPath, distroId = app.distroId)
 
         Column(
@@ -574,6 +720,9 @@ private fun AppRow(
                 )
             }
         }
+
+        // In edit mode the row is a selection; what to do with it is in the bar above the list.
+        if (selected != null) return@Row
 
         // Only while there is a session to act on: a stop button for something that is not
         // running would be furniture, and a restart would be a launch by another name.
@@ -655,9 +804,12 @@ private fun AppIcon(iconPath: String?, distroId: String) {
 private fun Header(
     onBack: () -> Unit,
     onRefresh: (() -> Unit)?,
-    onReset: (() -> Unit)?,
     running: Int,
     onStopAll: () -> Unit,
+    editing: Boolean,
+    selectedCount: Int,
+    /** Null when there is nothing to edit. */
+    onEdit: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -673,13 +825,33 @@ private fun Header(
             )
         }
         Text(
-            text = stringResource(R.string.linux_apps_title),
+            text = if (editing) {
+                stringResource(R.string.linux_apps_selected, selectedCount)
+            } else {
+                stringResource(R.string.linux_apps_title)
+            },
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 8.dp),
         )
+
+        if (onEdit != null) {
+            if (editing) {
+                TextButton(onClick = onEdit, modifier = Modifier.testTag("linux_apps_edit")) {
+                    Text(stringResource(R.string.linux_apps_edit_done))
+                }
+            } else {
+                IconButton(onClick = onEdit, modifier = Modifier.size(44.dp).testTag("linux_apps_edit")) {
+                    Icon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = stringResource(R.string.linux_apps_edit),
+                        tint = Color.White.copy(alpha = 0.8f),
+                    )
+                }
+            }
+        }
 
         // Held sessions are otherwise invisible from here: the list shows what is installed, and
         // a lifetime the user cannot see or end is not one they can be asked to choose.
@@ -699,20 +871,10 @@ private fun Header(
         }
 
         if (onRefresh != null) {
-            IconButton(onClick = onRefresh, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = onRefresh, modifier = Modifier.size(44.dp).testTag("linux_apps_refresh")) {
                 Icon(
                     imageVector = Icons.Filled.Refresh,
                     contentDescription = stringResource(R.string.linux_apps_refresh),
-                    tint = Color.White.copy(alpha = 0.8f),
-                )
-            }
-        }
-
-        if (onReset != null) {
-            IconButton(onClick = onReset, modifier = Modifier.size(44.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.DeleteForever,
-                    contentDescription = stringResource(R.string.linux_apps_reset),
                     tint = Color.White.copy(alpha = 0.8f),
                 )
             }

@@ -278,7 +278,7 @@ object LinuxRootfs {
      * that no longer exists.
      */
     suspend fun uninstall(context: Context) {
-        LinuxAppReconciler.retireAll(context)
+        LinuxAppReconciler.retireDistro(context, LinuxDistroCatalog.UBUNTU)
 
         stampFile(context).delete()
         aptPolicyStampFile(context).delete()

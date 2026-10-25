@@ -267,6 +267,41 @@ object LinuxDistros {
     }
 
     /**
+     * Reinstalls [id] from its image, discarding everything installed and changed in it since.
+     *
+     * Unlike [uninstall] followed by [install], the user's choices about the distro stay: it is
+     * still the default, its consoles stay assigned to it, and the desktop still opens in it.
+     * Its sessions are stopped first, and its consoles get fresh shells afterwards.
+     */
+    suspend fun reset(
+        context: Context,
+        id: String,
+        onProgress: (LinuxRootfs.Progress) -> Unit = {},
+    ): Result<Unit> {
+        val distro = LinuxDistroCatalog.byId(id) ?: return Result.failure(IOException("Unknown distro $id"))
+        LinuxSessions.stopDistro(context, id)
+        val result = if (id == LinuxDistroCatalog.UBUNTU) {
+            LinuxRootfs.uninstall(context)
+            LinuxRootfs.install(context, onProgress)
+        } else {
+            withContext(Dispatchers.IO) {
+                installLock.withLock {
+                    // Without its stamp the install below does not take the rootfs as current.
+                    stampFile(context, id).delete()
+                    runCatching { installLocked(context, distro, onProgress) }
+                        .onFailure { Timber.e(it, "[LinuxDistros]: %s reset failed", id) }
+                }
+            }
+        }
+        if (result.isSuccess) {
+            Timber.i("[LinuxDistros]: reset %s", id)
+            LinuxVtService.reloadIfSupported(context)
+            LinuxAppReconciler.request(context)
+        }
+        return result
+    }
+
+    /**
      * Removes [id]'s rootfs. Consoles assigned to it become unassigned, so they follow the default
      * distro, and it stops being the default itself and the desktop's distro.
      */
@@ -280,6 +315,8 @@ object LinuxDistros {
                     RootfsArchive.deleteTree(File(distrosDir(context), id))
                 }
             }
+            // With the rootfs gone the scan no longer finds its apps, so their entries go.
+            LinuxAppReconciler.request(context)
         }
         if (prefs(context).getString(KEY_DEFAULT, null) == id) prefs(context).edit().remove(KEY_DEFAULT).apply()
         LinuxDesktopSessions.forget(context, id)

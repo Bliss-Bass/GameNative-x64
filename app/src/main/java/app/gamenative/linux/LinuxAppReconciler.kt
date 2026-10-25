@@ -38,23 +38,16 @@ object LinuxAppReconciler {
      */
     suspend fun reconcile(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
         runCatching {
-            // A missing userland means every entry is stale, which is different from a scan that
-            // found nothing: it is why the scan result alone is not enough to go on.
-            val live = if (LinuxRootfs.isInstalled(context)) apps else emptyList()
-
-            reconcileStubs(context, live)
-            withContext(Dispatchers.Main) { retireLinuxShortcuts(context, live) }
+            // The scan covers only installed distros, so a distro that is gone contributes no
+            // live entries and everything published from it is retired.
+            reconcileStubs(context, apps)
+            withContext(Dispatchers.Main) { retireLinuxShortcuts(context, apps) }
         }.onFailure { Timber.w(it, "[LinuxAppReconciler]: could not reconcile") }
     }
 
-    /** Scan the userland, then reconcile. Shared by the Linux Apps screen and session hooks. */
+    /** Scan the userlands, then reconcile. Shared by the Linux Apps screen and session hooks. */
     suspend fun scanAndReconcile(context: Context) {
-        if (!LinuxRootfs.isInstalled(context)) {
-            reconcile(context, emptyList())
-            return
-        }
-        val apps = LinuxAppScanner.scan(context)
-        reconcile(context, apps)
+        reconcile(context, LinuxAppScanner.scan(context))
     }
 
     /**
@@ -71,8 +64,15 @@ object LinuxAppReconciler {
         }
     }
 
-    /** Takes back everything we have published, for when the userland itself is going away. */
+    /** Takes back everything we have published. */
     suspend fun retireAll(context: Context) = reconcile(context, emptyList())
+
+    /**
+     * Takes back what was published from [distroId], for when it is going away; every other
+     * distro's entries stay. Before its rootfs goes, while the scan can still tell them apart.
+     */
+    suspend fun retireDistro(context: Context, distroId: String) =
+        reconcile(context, LinuxAppScanner.scan(context).filter { it.distroId != distroId })
 
     /**
      * Whether silent auto-publish is available: trampoline packaged and the privileged installer

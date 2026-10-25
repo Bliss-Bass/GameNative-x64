@@ -219,6 +219,9 @@ object LinuxAppScanner {
     /** ProcessHelper treats a backslash-space as one word. */
     private fun escapeGuestWord(path: String): String = path.replace(" ", "\\ ")
 
+    /** The path [escapeGuestWord] wrote into an AppImage's command. */
+    internal fun unescapeExecWord(word: String): String = word.replace("\\ ", " ")
+
     private fun escapeDesktopExec(path: String): String =
         "\"" + path.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
