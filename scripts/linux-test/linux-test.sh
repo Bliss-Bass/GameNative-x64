@@ -371,6 +371,17 @@ test_apps() {
     # Rows are tagged linux_app_<distro>__<desktop entry>; buttons put their verb first.
     entries=$(grep -o "resource-id=\"linux_app_${d}__[^\"]*\"" "$W/ui.xml" | sed "s/resource-id=\"linux_app_${d}__//; s/\"\$//")
     if [ -z "$entries" ]; then
+        # A fresh or reset distro has no apps yet: install XTerm and look again.
+        back_to_android
+        await_terminal "$d"
+        run_probe "$d" xterm
+        back_to_android
+        am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+        sleep 4
+        tap_id linux_apps_refresh linux_apps_screen; sleep 4; ui_dump
+        entries=$(grep -o "resource-id=\"linux_app_${d}__[^\"]*\"" "$W/ui.xml" | sed "s/resource-id=\"linux_app_${d}__//; s/\"\$//")
+    fi
+    if [ -z "$entries" ]; then
         evidence "$d" apps "$since"
         result "$d" apps FAIL 0 "Linux Apps lists no $d apps"; back_to_android; return 1
     fi
@@ -507,10 +518,24 @@ test_manage() {
     am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
     sleep 4
     # XTerm stays up on its own; a panel like Tint2 exits without a window manager.
-    name=""
-    for candidate in debian-xterm xterm debian-uxterm uxterm; do
-        if ui_find "linux_app_${d}__$candidate" linux_apps_screen >/dev/null; then name=$candidate; break; fi
-    done
+    find_xterm() {
+        name=""
+        for candidate in debian-xterm xterm debian-uxterm uxterm; do
+            if ui_find "linux_app_${d}__$candidate" linux_apps_screen >/dev/null; then name=$candidate; return 0; fi
+        done
+        return 1
+    }
+    if ! find_xterm; then
+        # A fresh or reset distro has none yet.
+        back_to_android
+        await_terminal "$d"
+        run_probe "$d" xterm
+        back_to_android
+        am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+        sleep 4
+        tap_id linux_apps_refresh linux_apps_screen; sleep 4
+        find_xterm
+    fi
     if [ -z "$name" ]; then result "$d" running-listed FAIL 0 "no $d XTerm to open"; return 1; fi
     open_app "$d" "$name" manage-open 5 || return 1
     if [ "$d" = ubuntu ]; then key=$name; else key="$d:$name"; fi
@@ -692,6 +717,10 @@ if [ -f "$W/run.pid" ] && kill -0 "$(cat "$W/run.pid")" 2>/dev/null; then
 fi
 echo $$ > "$W/run.pid"
 log "Linux test run: user=$USER_ID distros=[$DISTROS] tests=[$TESTS] keep=$KEEP"
+# Package installs under PRoot flood the log with SELinux audit lines; with a small ring buffer
+# the capture below falls behind and lines it waits for are pruned unread. Restored on exit.
+LOG_SIZE=$(logcat -b main -g 2>/dev/null | sed -n 's/.*ring buffer is \([0-9]*\) *\([KM]\)i*B.*/\1\2/p' | head -n 1)
+logcat -b main -G 16M 2>/dev/null && log "main log buffer 16M (was ${LOG_SIZE:-unknown})"
 # Only the lines the tests read, so a long run does not fill the disk.
 logcat -v threadtime -T 1 2>/dev/null |
     grep --line-buffered -E "app\.gamenative|proot|ActivityTaskManager|AndroidRuntime" > "$RUN/logcat.txt" &
@@ -703,7 +732,7 @@ DOCK_PAUSED=0
 if dumpsys notification 2>/dev/null | grep -q "$DOCK_LISTENER (user: $USER_ID"; then
     cmd notification disallow_listener "$DOCK_LISTENER" "$USER_ID" && DOCK_PAUSED=1 && log "paused SmartDock notification popups"
 fi
-trap 'kill $LOGCAT_PID 2>/dev/null; rm -f "$W/run.pid"; [ $DOCK_PAUSED -eq 1 ] && cmd notification allow_listener "$DOCK_LISTENER" "$USER_ID"' EXIT
+trap 'kill $LOGCAT_PID 2>/dev/null; rm -f "$W/run.pid"; [ -n "$LOG_SIZE" ] && logcat -b main -G "$LOG_SIZE"; [ $DOCK_PAUSED -eq 1 ] && cmd notification allow_listener "$DOCK_LISTENER" "$USER_ID"' EXIT
 trap 'exit 1' INT TERM HUP
 svc power stayon true
 wake

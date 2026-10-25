@@ -187,6 +187,13 @@ t_htop() {
     echo "installed htop"
 }
 
+# XTerm, for test G's session checks in a distro that has none (a fresh or reset one).
+t_xterm() {
+    pm_refresh || echo "refresh failed; trying the install anyway"
+    pm_install xterm || { echo "installing xterm failed"; return 1; }
+    echo "installed xterm"
+}
+
 # A file left in the distro before test G resets it, and its absence afterwards.
 t_mark() { echo marked > /root/.gn-reset-marker && echo "left /root/.gn-reset-marker"; }
 t_unmarked() {
@@ -240,7 +247,7 @@ run_one() {
     rm -f "$OUT/$test.done" "$OUT/$test.result"
     start=$(date +%s)
     case "$test" in
-        info|net|pkg|pkgdiag|user|terminal|srcs|htop|mark|unmarked) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        info|net|pkg|pkgdiag|user|terminal|srcs|htop|xterm|mark|unmarked) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
         br_*) t_browser "${test#br_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
         rmbr_*) t_rmbrowser "${test#rmbr_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
         *) echo "unknown test $test" > "$OUT/$test.log"; rc=1 ;;
