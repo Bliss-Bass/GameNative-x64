@@ -545,6 +545,83 @@ test_manage() {
         result "$d" running-stop PASS 6 "$key stopped from Running"
     fi
     back_to_android
+
+    # Uninstall through edit mode: htop, installed from the terminal for the purpose.
+    await_terminal "$d"
+    run_probe "$d" htop
+    back_to_android
+    grep -q "^$d	probe-htop	PASS" "$RUN/results.tsv" || return 1
+    since=$(now); t0=$(date +%s)
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4
+    tap_id linux_apps_refresh linux_apps_screen; sleep 4
+    tap_id linux_apps_edit linux_apps_screen; sleep 1
+    if ! tap_id "linux_app_select_${d}__htop" linux_apps_screen; then
+        evidence "$d" app-uninstall "$since"
+        result "$d" app-uninstall FAIL 0 "htop not selectable in edit mode"; back_to_android; return 1
+    fi
+    tap_id linux_apps_action_uninstall linux_apps_screen
+    waited=0
+    while [ $waited -lt 120 ]; do
+        ui_dump; ui_has_id dialog_confirm && break
+        sleep 3; waited=$((waited + 3))
+    done
+    if ! c=$(ui_center_id dialog_confirm); then
+        evidence "$d" app-uninstall "$since"
+        result "$d" app-uninstall FAIL "$(( $(date +%s) - t0 ))" "no uninstall confirmation"; back_to_android; return 1
+    fi
+    set -- $c; input tap "$1" "$2"
+    wait_log "$since" "\[LinuxAppUninstaller\]: removed \[htop\] from $d" "\[LinuxAppUninstaller\]: uninstall failed" 600
+    rc=$?
+    sleep 4
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4
+    secs=$(( $(date +%s) - t0 ))
+    if [ $rc -ne 0 ]; then
+        evidence "$d" app-uninstall "$since"
+        result "$d" app-uninstall FAIL "$secs" "uninstall did not report removing htop"
+    elif ui_find "linux_app_${d}__htop" linux_apps_screen >/dev/null; then
+        evidence "$d" app-uninstall "$since"
+        result "$d" app-uninstall FAIL "$secs" "htop removed but still listed"
+    else
+        result "$d" app-uninstall PASS "$secs" "htop uninstalled from Linux Apps edit mode"
+    fi
+    back_to_android
+
+    # Reset through the Linux Distros edit mode: a file left in the distro is gone afterwards.
+    await_terminal "$d"
+    run_probe "$d" mark
+    back_to_android
+    grep -q "^$d	probe-mark	PASS" "$RUN/results.tsv" || return 1
+    since=$(now); t0=$(date +%s)
+    open_distros
+    tap_id distros_edit linux_distros_screen; sleep 1
+    if ! tap_id "distro_reset_$d" linux_distros_screen; then
+        evidence "$d" distro-reset "$since"
+        result "$d" distro-reset FAIL 0 "no Reset in edit mode"; back_to_android; return 1
+    fi
+    sleep 2; ui_dump
+    if ! c=$(ui_center_id dialog_confirm); then
+        evidence "$d" distro-reset "$since"
+        result "$d" distro-reset FAIL 0 "no reset confirmation"; back_to_android; return 1
+    fi
+    set -- $c; input tap "$1" "$2"
+    wait_log "$since" "\[LinuxDistros\]: reset $d" "\[LinuxDistros\]: $d reset failed|\[LinuxDistrosScreen\]: $d failed" 5400
+    rc=$?
+    evidence "$d" distro-reset "$since"
+    tap_id distros_edit linux_distros_screen
+    back_to_android
+    if [ $rc -ne 0 ]; then
+        result "$d" distro-reset FAIL "$(( $(date +%s) - t0 ))" "reset did not finish"; return 1
+    fi
+    await_terminal "$d"
+    run_probe "$d" unmarked
+    back_to_android
+    if grep -q "^$d	probe-unmarked	PASS" "$RUN/results.tsv"; then
+        result "$d" distro-reset PASS "$(( $(date +%s) - t0 ))" "reset from Linux Distros edit mode; reinstalled clean"
+    else
+        result "$d" distro-reset FAIL "$(( $(date +%s) - t0 ))" "reset finished but the distro kept its files"
+    fi
 }
 
 # toggle_stub <entry> <drawer|undrawer> <up|down>: taps the row's drawer button and waits up to a

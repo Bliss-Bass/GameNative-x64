@@ -53,6 +53,11 @@ The run is started detached on the device and survives a dropped adb connection;
   (skipped where stubs need the user's confirmation).
 - **G** managing what runs: opens an app from Linux Apps, finds it under Running on the Linux
   Distros screen, restarts it from there (waits for the session to open again) and stops it.
+  Then installs `htop` from the terminal and uninstalls it through the Linux Apps edit mode
+  (select, Uninstall, confirm the package list), checking the package is gone and the row too.
+  Last, leaves a marker file in the distro and resets the distro through the Linux Distros edit
+  mode (Edit, Reset, confirm); the marker must be gone and the terminal must still work. This
+  reinstalls the distro, so later tests (D, F) install what they need again.
 
 ## Notes
 

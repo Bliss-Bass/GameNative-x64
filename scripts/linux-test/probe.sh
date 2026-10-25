@@ -178,6 +178,22 @@ t_browser() {
     echo "installed $pkg ($version), entries $(tr '\n' ' ' < "$OUT/br_$b.entry")"
 }
 
+# Installs htop, which every supported distro packages with a desktop entry, for test G to
+# uninstall again through Linux Apps.
+t_htop() {
+    pm_refresh || echo "refresh failed; trying the install anyway"
+    pm_install htop || { echo "installing htop failed"; return 1; }
+    [ -f /usr/share/applications/htop.desktop ] || { echo "htop installed no desktop entry"; return 1; }
+    echo "installed htop"
+}
+
+# A file left in the distro before test G resets it, and its absence afterwards.
+t_mark() { echo marked > /root/.gn-reset-marker && echo "left /root/.gn-reset-marker"; }
+t_unmarked() {
+    if [ -e /root/.gn-reset-marker ]; then echo "marker survived the reset"; return 1; fi
+    echo "marker gone: the distro was reinstalled"
+}
+
 pkg_installed() {
     case "$PM" in
         apt) dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed' ;;
@@ -224,7 +240,7 @@ run_one() {
     rm -f "$OUT/$test.done" "$OUT/$test.result"
     start=$(date +%s)
     case "$test" in
-        info|net|pkg|pkgdiag|user|terminal|srcs) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
+        info|net|pkg|pkgdiag|user|terminal|srcs|htop|mark|unmarked) "t_$test" > "$OUT/$test.log" 2>&1; rc=$? ;;
         br_*) t_browser "${test#br_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
         rmbr_*) t_rmbrowser "${test#rmbr_}" > "$OUT/$test.log" 2>&1; rc=$? ;;
         *) echo "unknown test $test" > "$OUT/$test.log"; rc=1 ;;
