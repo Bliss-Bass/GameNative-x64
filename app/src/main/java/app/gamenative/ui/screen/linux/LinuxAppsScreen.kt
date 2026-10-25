@@ -70,6 +70,7 @@ import app.gamenative.linux.LinuxAppReconciler
 import app.gamenative.linux.LinuxAppScanner
 import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.linux.LinuxDisplayScale
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.linux.LinuxStorage
@@ -167,11 +168,12 @@ fun LinuxAppsScreen(
             .automationIds()
             .testTag("linux_apps_screen"),
     ) {
-        val installed = LinuxRootfs.isInstalled(context)
+        // Apps come from every supported distro, so any one of them installed is enough.
+        val installed = remember(refreshKey) { LinuxDistros.integrated(context).isNotEmpty() }
         Header(
             onBack = onBack,
             onRefresh = if (installed) {{ refreshKey++ }} else null,
-            onReset = if (installed && !resetting) {{ confirmReset = true }} else null,
+            onReset = if (LinuxRootfs.isInstalled(context) && !resetting) {{ confirmReset = true }} else null,
             running = sessions.size,
             onStopAll = { LinuxSessions.stopAll(context) },
         )
@@ -224,6 +226,7 @@ fun LinuxAppsScreen(
 
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                     val showDistro = found.map { it.distroId }.distinct().size > 1
+                    item(key = "running") { LinuxRunningSection() }
                     items(found, key = { it.id }) { app ->
                         val session = sessions.firstOrNull {
                             it.key == LinuxSessions.keyFor(app.entryId, app.launchArgv)

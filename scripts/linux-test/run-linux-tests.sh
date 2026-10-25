@@ -11,7 +11,8 @@ usage: run-linux-tests.sh -s <serial> --yes [options]
   --user <id>          Android user GameNative runs in (default 0; the Googlebook uses 10)
   --distros "<ids>"    default "ubuntu debian archlinux"
   --tests "<letters>"  default "A B C" (A install/remove, B shell basics, C terminal,
-                       D desktop session, E browsers, F Linux Apps and app windows)
+                       D desktop session, E browsers, F Linux Apps and app windows,
+                       G managing what runs)
   --probe "<tests>"    run these probe tests instead of B's set (e.g. "pkgdiag pkg")
   --keep               leave the distros installed at the end
   --no-install         only test distros that are already installed

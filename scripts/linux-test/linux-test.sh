@@ -498,6 +498,55 @@ test_browsers() {
     back_to_android
 }
 
+# G: managing what runs. An app opened from Linux Apps is listed under Running on Linux Distros,
+# restarts from there and stops from there.
+test_manage() {
+    d=$1; since=$(now)
+    status "RUNNING $d manage"
+    clear_stub_tasks
+    am start --user "$USER_ID" -n "$ACT" -a app.gamenative.action.LINUX_APPS >/dev/null 2>&1
+    sleep 4
+    # XTerm stays up on its own; a panel like Tint2 exits without a window manager.
+    name=""
+    for candidate in debian-xterm xterm debian-uxterm uxterm; do
+        if ui_find "linux_app_${d}__$candidate" linux_apps_screen >/dev/null; then name=$candidate; break; fi
+    done
+    if [ -z "$name" ]; then result "$d" running-listed FAIL 0 "no $d XTerm to open"; return 1; fi
+    open_app "$d" "$name" manage-open 5 || return 1
+    if [ "$d" = ubuntu ]; then key=$name; else key="$d:$name"; fi
+    tag=$(echo "$key" | sed 's/[^A-Za-z0-9.-]/_/g')
+
+    open_distros
+    if ui_find "linux_running_$tag" linux_distros_screen >/dev/null; then
+        result "$d" running-listed PASS 0 "$key listed under Running"
+    else
+        evidence "$d" running-listed "$since"
+        result "$d" running-listed FAIL 0 "$key not listed under Running on Linux Distros"; return 1
+    fi
+
+    restarted=$(now)
+    tap_id "linux_running_restart_$tag" linux_distros_screen
+    wait_log "$restarted" "\[LinuxSessions\]: opening $key " "\[LinuxSessions\]: could not open $key" 120
+    rc=$?
+    sleep 5; open_distros
+    if [ $rc -eq 0 ] && ui_find "linux_running_$tag" linux_distros_screen >/dev/null; then
+        result "$d" running-restart PASS 0 "$key restarted from Running"
+    else
+        evidence "$d" running-restart "$restarted"
+        result "$d" running-restart FAIL 0 "$key did not come back after Restart"
+    fi
+
+    tap_id "linux_running_stop_$tag" linux_distros_screen
+    sleep 6; ui_dump
+    if ui_has_id "linux_running_$tag"; then
+        evidence "$d" running-stop "$since"
+        result "$d" running-stop FAIL 6 "$key still listed after Stop"
+    else
+        result "$d" running-stop PASS 6 "$key stopped from Running"
+    fi
+    back_to_android
+}
+
 # toggle_stub <entry> <drawer|undrawer> <up|down>: taps the row's drawer button and waits up to a
 # minute for the number of installed stub packages to go up or down.
 toggle_stub() {
@@ -595,6 +644,7 @@ for d in $DISTROS; do
     if has_test D; then test_desktop "$d"; fi
     if has_test E; then test_browsers "$d"; fi
     if has_test F; then test_apps "$d"; fi
+    if has_test G; then test_manage "$d"; fi
     if has_test A && [ $KEEP -eq 0 ]; then test_remove "$d"; fi
 done
 

@@ -182,7 +182,7 @@ fun LinuxDesktopScreen(
     }
 
     DisposableEffect(key) {
-        onDispose { LinuxSessions.detach(context, key) }
+        onDispose { session?.let { LinuxSessions.detach(context, key, it) } }
     }
 
     // Back opens the menu rather than closing the window; closing is in the menu and the caption.

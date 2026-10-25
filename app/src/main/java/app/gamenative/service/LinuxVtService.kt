@@ -15,6 +15,10 @@ import app.gamenative.linux.LinuxProgramLauncher
 import app.gamenative.linux.LinuxVtConsoles
 import app.gamenative.platform.PlatformCapabilities
 import java.io.File
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import timber.log.Timber
 
 /**
@@ -61,6 +65,8 @@ class LinuxVtService : Service() {
             reload()
             // The watcher holds its console open; move it off one that was just turned off.
             if (watchedVt !in inUse) watcher?.destroy()
+        } else if (intent?.action == ACTION_RESTART_CONSOLE) {
+            endShell(intent.getIntExtra(EXTRA_VT, -1))
         }
         // Sticky: the consoles should come back if Android kills the process.
         return START_STICKY
@@ -143,6 +149,7 @@ class LinuxVtService : Service() {
             .onFailure { Timber.e(it, "[LinuxVtService]: could not start tty%d", vt) }
             .getOrNull() ?: return
         shells[vt] = process
+        publish(vt, ConsoleShell(vt, assignment.distroId, assignment.user, shell))
         Timber.i("[LinuxVtService]: tty%d: %s %s as %s", vt, assignment.distroId, shell, assignment.user)
 
         Thread({
@@ -150,7 +157,12 @@ class LinuxVtService : Service() {
             process.inputStream.bufferedReader().forEachLine { Timber.w("[LinuxVtService]: tty%d: %s", vt, it) }
             val status = process.waitFor()
             Timber.i("[LinuxVtService]: tty%d shell exited (%d)", vt, status)
-            synchronized(this) { if (shells[vt] === process) shells.remove(vt) }
+            synchronized(this) {
+                if (shells[vt] === process) {
+                    shells.remove(vt)
+                    publish(vt, null)
+                }
+            }
             // Like getty, a console left showing an exited shell gets a new one.
             Thread.sleep(RESPAWN_DELAY_MS)
             if (running && activeVt == vt) ensureShell(vt)
@@ -166,11 +178,16 @@ class LinuxVtService : Service() {
      */
     @Synchronized
     private fun reload() {
-        for ((vt, process) in shells.toList()) {
-            shells.remove(vt)
-            val pid = LinuxProgramLauncher.pidOf(process)
-            if (pid > 0) GuestProcesses.end(process, pid, "Linux console tty$vt") else process.destroyForcibly()
-        }
+        for (vt in shells.keys.toList()) endShell(vt)
+    }
+
+    /** Ends [vt]'s shell; it comes back at once if that console is showing, else when it is next. */
+    @Synchronized
+    private fun endShell(vt: Int) {
+        val process = shells.remove(vt) ?: return
+        publish(vt, null)
+        val pid = LinuxProgramLauncher.pidOf(process)
+        if (pid > 0) GuestProcesses.end(process, pid, "Linux console tty$vt") else process.destroyForcibly()
     }
 
     private fun startForegroundWithType() {
@@ -199,6 +216,7 @@ class LinuxVtService : Service() {
                 if (pid > 0) GuestProcesses.end(process, pid, "Linux console tty$vt") else process.destroyForcibly()
             }
             shells.clear()
+            _consoles.value = emptyList()
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
@@ -212,6 +230,31 @@ class LinuxVtService : Service() {
         private const val RESPAWN_DELAY_MS = 1_000L
 
         private const val ACTION_RELOAD = "app.gamenative.action.RELOAD_LINUX_VT"
+        private const val ACTION_RESTART_CONSOLE = "app.gamenative.action.RESTART_LINUX_VT"
+        private const val EXTRA_VT = "vt"
+
+        /** A console with a shell running on it. */
+        data class ConsoleShell(val vt: Int, val distroId: String, val user: String, val shell: String)
+
+        private val _consoles = MutableStateFlow<List<ConsoleShell>>(emptyList())
+
+        /** The consoles' running shells, for the UI to list and restart. */
+        val consoles: StateFlow<List<ConsoleShell>> = _consoles.asStateFlow()
+
+        private fun publish(vt: Int, shell: ConsoleShell?) {
+            _consoles.update { list -> (list.filter { it.vt != vt } + listOfNotNull(shell)).sortedBy { it.vt } }
+        }
+
+        /** Ends [vt]'s shell so it starts again, now if the console is showing, else when it next is. */
+        fun restartConsole(context: Context, vt: Int) {
+            runCatching {
+                context.applicationContext.startForegroundService(
+                    Intent(context.applicationContext, LinuxVtService::class.java)
+                        .setAction(ACTION_RESTART_CONSOLE)
+                        .putExtra(EXTRA_VT, vt),
+                )
+            }.onFailure { Timber.w(it, "[LinuxVtService]: could not restart tty%d", vt) }
+        }
 
         /**
          * Starts the consoles when this device provides them and a distro is installed. Safe to

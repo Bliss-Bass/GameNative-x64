@@ -47,12 +47,15 @@ object LinuxSessions {
         val watched: Boolean,
         /** The program it was opened with; null for the desktop. */
         val argv: String? = null,
+        /** The distro its programs run in. */
+        val distroId: String = LinuxDistroCatalog.UBUNTU,
     )
 
     private class Held(
         val key: String,
         val label: String,
         val argv: String?,
+        val distroId: String,
         val session: LinuxSession,
         /** Remembered so a restart can bring the session back the size it was. */
         val width: Int,
@@ -142,7 +145,7 @@ object LinuxSessions {
         }
             .onSuccess { session ->
                 synchronized(held) {
-                    held[key] = Held(key, label, argv, session, width, height, densityDpi)
+                    held[key] = Held(key, label, argv, target?.distroId ?: appDistro, session, width, height, densityDpi)
                 }
                 withContext(Dispatchers.IO) { argv?.let { session.run(it) } }
                 publish()
@@ -183,10 +186,13 @@ object LinuxSessions {
      *
      * This is where the mode does its work: the session either goes with the window it was
      * opened from, or stays up until something asks it to stop.
+     *
+     * Only for the [session] that window showed: after a restart the key names a new session,
+     * which the old window closing must neither count down nor stop.
      */
-    fun detach(context: Context, key: String) {
+    fun detach(context: Context, key: String, session: LinuxSession) {
         val stop = synchronized(held) {
-            val session = held[key] ?: return
+            val session = held[key]?.takeIf { it.session === session } ?: return
             session.viewers = (session.viewers - 1).coerceAtLeast(0)
             session.viewers == 0 && !PrefManager.linuxSessionMode.holdsWhenClosed
         }
@@ -209,6 +215,12 @@ object LinuxSessions {
             // Desktop (and apps that shell out to apt) may have changed .desktop entries.
             LinuxAppReconciler.request(context)
         }
+    }
+
+    /** Stops every session running in [distroId], before it is reset or removed. */
+    fun stopDistro(context: Context, distroId: String) {
+        val keys = synchronized(held) { held.values.filter { it.distroId == distroId }.map { it.key } }
+        keys.forEach { stop(context, it) }
     }
 
     fun stopAll(context: Context) {
@@ -274,7 +286,7 @@ object LinuxSessions {
 
     private fun publish() {
         _sessions.value = synchronized(held) {
-            held.values.map { Snapshot(it.key, it.label, it.session.display, it.viewers > 0, it.argv) }
+            held.values.map { Snapshot(it.key, it.label, it.session.display, it.viewers > 0, it.argv, it.distroId) }
         }
     }
 }

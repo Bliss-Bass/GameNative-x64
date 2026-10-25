@@ -51,6 +51,8 @@ The run is started detached on the device and survives a dropped adb connection;
 - **F** Linux Apps (`ACTION_LINUX_APPS`): lists the distro's apps, cold-launches one (XTerm when
   present) in its own window, stops it from its row, and on Bass removes and re-adds its drawer stub
   (skipped where stubs need the user's confirmation).
+- **G** managing what runs: opens an app from Linux Apps, finds it under Running on the Linux
+  Distros screen, restarts it from there (waits for the session to open again) and stops it.
 
 ## Notes
 

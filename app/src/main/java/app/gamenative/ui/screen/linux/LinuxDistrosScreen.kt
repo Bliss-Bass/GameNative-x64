@@ -126,6 +126,8 @@ fun LinuxDistrosScreen(onBack: () -> Unit) {
                 )
             }
 
+            LinuxRunningSection()
+
             Section(R.string.linux_distros_section, R.string.linux_distros_section_hint)
             val defaultId = remember(version) { LinuxDistros.defaultId(context) }
             LinuxDistroCatalog.all.forEach { distro ->

@@ -2586,6 +2586,13 @@
     <string name="linux_session_running">Running on display :%1$d</string>
     <string name="linux_session_stop">Stop this app</string>
     <string name="linux_session_restart">Restart this app</string>
+    <string name="linux_running_title">Running</string>
+    <string name="linux_running_desktop">Desktop</string>
+    <string name="linux_running_window_open">Display :%1$d · window open</string>
+    <string name="linux_running_background">Display :%1$d · running in the background</string>
+    <string name="linux_running_console">Console F%1$d</string>
+    <string name="linux_running_restart">Restart</string>
+    <string name="linux_running_stop">Stop</string>
     <string name="linux_scale_title">App size</string>
     <string name="linux_scale_subtitle">Relative to Android\'s own UI. GTK apps resize right away; restart other apps to apply.</string>
     <string name="linux_scale_value">%1$d%%</string>
