@@ -131,6 +131,12 @@ object LinuxProgramLauncher {
             put("MOZ_DISABLE_CONTENT_SANDBOX", "1")
             put("MOZ_DISABLE_GMP_SANDBOX", "1")
             put("MOZ_DISABLE_RDD_SANDBOX", "1")
+            // Firefox seals its shared memory and maps another process's only when the seal is
+            // there. On Android 17 the seal does not hold for a PRoot guest, so every tab's
+            // content process is refused ("Shared memory PlatformHandle is not safe to map") and
+            // crashes. Without seals Firefox checks the size instead, which is what the
+            // sandbox-less guest relies on anyway.
+            put("MOZ_SHM_NO_SEALS", "1")
             // Utility process is where Firefox 15x may try media codecs; its sandbox blocks
             // dlopen of system libavcodec, so AAC (YouTube) fails with "no decoder found"
             // even when ffmpeg is installed and the RDD process has already mapped it.
