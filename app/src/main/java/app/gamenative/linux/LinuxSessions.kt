@@ -7,6 +7,7 @@ import app.gamenative.enums.LinuxSessionMode
 import app.gamenative.service.LinuxSessionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -133,7 +134,27 @@ object LinuxSessions {
         val target = if (argv == null) LinuxDesktopSessions.target(context) else null
         val appDistro = LinuxAppIds.distroOf(key)
         Timber.i("[LinuxSessions]: opening %s with backend %s at %d%% (%s)", key, backend.key, scale, target ?: appDistro)
-        return@withLock when {
+        // Not cancellable once started: a window whose size settles twice restarts the effect
+        // that opened it, and a session started but never registered would run on unseen,
+        // holding its display, while the retry started a second one.
+        return@withLock withContext(NonCancellable) { openLocked(context, key, label, argv, width, height, densityDpi, mode, backend, scale, target, appDistro) }
+    }
+
+    private suspend fun openLocked(
+        context: Context,
+        key: String,
+        label: String,
+        argv: String?,
+        width: Int,
+        height: Int,
+        densityDpi: Int,
+        mode: LinuxDesktopConfig.Mode,
+        backend: LinuxDisplayBackend,
+        scale: Int,
+        target: LinuxDesktopSessions.Target?,
+        appDistro: String,
+    ): Result<LinuxSession> {
+        return when {
             target != null && !target.isBuiltIn ->
                 LinuxDisplaySession.start(context, width, height, densityDpi, scale, mode, target)
             target == null && appDistro != LinuxDistroCatalog.UBUNTU ->
