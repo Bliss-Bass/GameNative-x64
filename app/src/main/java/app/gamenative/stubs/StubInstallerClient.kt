@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import java.io.File
 import kotlin.coroutines.resume
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
@@ -28,6 +29,8 @@ import timber.log.Timber
 object StubInstallerClient {
 
     private const val ACTION = "app.gamenative.stubs.StubInstaller"
+    private const val LIST_RETRIES = 3
+    private const val LIST_RETRY_DELAY_MS = 500L
     private const val PACKAGE = "app.gamenative.stubinstaller"
 
     /**
@@ -74,8 +77,17 @@ object StubInstallerClient {
         val intent = intent(context) ?: return null
 
         return connect(context, intent) { installer ->
-            runCatching { installer.installedStubs() }
-                .onFailure { Timber.e(it, "[StubInstaller]: could not list stubs") }
+            // The installer reads the package list in chunks, which fails while packages are
+            // being installed or removed, as they are in a burst of stub changes. It passes once
+            // the burst has.
+            var attempt = 0
+            var listed = runCatching { installer.installedStubs() }
+            while (listed.isFailure && attempt < LIST_RETRIES) {
+                attempt++
+                delay(LIST_RETRY_DELAY_MS)
+                listed = runCatching { installer.installedStubs() }
+            }
+            listed.onFailure { Timber.e(it, "[StubInstaller]: could not list stubs") }
                 .getOrNull()
         }
     }
