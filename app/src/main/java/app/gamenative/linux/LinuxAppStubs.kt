@@ -1,6 +1,9 @@
 package app.gamenative.linux
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import app.gamenative.stubs.StubIcons
 import app.gamenative.stubs.StubRegistry
 import app.gamenative.stubs.Stubs
@@ -38,6 +41,8 @@ object LinuxAppStubs {
     const val STUB_FORMAT = 3
     const val ROOTED_FORMAT = 2
 
+    private const val STUB_INSTALLER_PACKAGE = "app.gamenative.stubinstaller"
+
     fun packageNameFor(app: LinuxAppScanner.LinuxApp): String = LinuxAppIds.stubPackage(app.entryId)
 
     /** Whether a stub can be built at all, which needs a userland as well as the trampoline. */
@@ -51,7 +56,7 @@ object LinuxAppStubs {
      * pass to hash it would cost more than the change is worth, and a package that replaces an
      * icon replaces the file.
      */
-    fun contentFingerprint(context: Context, app: LinuxAppScanner.LinuxApp): String {
+    fun contentFingerprint(context: Context, app: LinuxAppScanner.LinuxApp, format: Int = STUB_FORMAT): String {
         val icon = app.iconPath?.let { File(LinuxDistros.rootfsOf(context, app.distroId), it.removePrefix("/")) }
 
         val summary = listOf(
@@ -61,7 +66,7 @@ object LinuxAppStubs {
             // republishes itself through the reconcile pass rather than needing a migration.
             app.entryId,
             // Republishes every stub built for an older trampoline behaviour.
-            STUB_FORMAT.toString(),
+            format.toString(),
             app.iconPath.orEmpty(),
             icon?.length()?.toString().orEmpty(),
             icon?.lastModified()?.toString().orEmpty(),
@@ -112,6 +117,54 @@ object LinuxAppStubs {
     }
 
     /** Whether a stub for [app] is currently installed. */
+    /** The [STUB_FORMAT] [entryId]'s installed stub was built for, or null when none is visible. */
+    fun installedFormat(context: Context, entryId: String): Int? = runCatching {
+        val component = ComponentName(LinuxAppIds.stubPackage(entryId), Stubs.TRAMPOLINE_CLASS)
+        context.packageManager.getActivityInfo(component, PackageManager.GET_META_DATA)
+            .metaData?.getString(META_FORMAT)?.toIntOrNull() ?: 1
+    }.getOrNull()
+
+    /**
+     * Whether [packageName] is the stub this app (or the ROM's installer for it) put on the device
+     * for [entryId]: the package that entry's stub is named, installed by one of the two.
+     * Nothing else can hold that name with that installer of record, so a launch from it can be
+     * trusted even when the registry has lost its record.
+     */
+    fun isOurStub(context: Context, packageName: String, entryId: String): Boolean {
+        if (packageName != LinuxAppIds.stubPackage(entryId)) return false
+        val installer = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context.packageManager.getInstallSourceInfo(packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getInstallerPackageName(packageName)
+            }
+        }.getOrNull()
+        return installer == context.packageName || installer == STUB_INSTALLER_PACKAGE
+    }
+
+    /**
+     * Records a stub that is installed but not in the registry, as it was built, so it is
+     * trusted again and republished only if what it shows has changed.
+     */
+    fun adopt(context: Context, app: LinuxAppScanner.LinuxApp) {
+        val packageName = packageNameFor(app)
+        val versionCode = runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(packageName, 0).versionCode
+        }.getOrDefault(1)
+        val format = installedFormat(context, app.entryId) ?: STUB_FORMAT
+        StubRegistry.linux.record(
+            context,
+            StubRegistry.Record(
+                entryId = app.entryId,
+                packageName = packageName,
+                versionCode = versionCode,
+                fingerprint = contentFingerprint(context, app, format),
+            ),
+        )
+    }
+
     suspend fun isInstalled(context: Context, app: LinuxAppScanner.LinuxApp): Boolean =
         packageNameFor(app) in Stubs.installed(context, listOf(packageNameFor(app)))
 

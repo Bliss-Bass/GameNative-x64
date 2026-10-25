@@ -3,6 +3,8 @@ package app.gamenative.ui
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import app.gamenative.linux.LinuxAppReconciler
+import app.gamenative.linux.LinuxAppStubs
 import app.gamenative.stubs.StubRegistry
 import timber.log.Timber
 
@@ -28,10 +30,18 @@ class LinuxWindowEntryActivity : Activity() {
         val registered = entryId?.takeIf { it.isNotBlank() }
             ?.let { StubRegistry.linux.of(this, it)?.packageName }
 
-        if (argv.isNullOrBlank() || caller == null || caller != registered) {
+        // A stub can outlive its record: a reconcile pass that ran while Android was replacing the
+        // package saw it as gone. It is still ours if it is the entry's stub and we installed it.
+        val trusted = caller != null && entryId != null &&
+            (caller == registered || (registered == null && LinuxAppStubs.isOurStub(this, caller, entryId)))
+        if (argv.isNullOrBlank() || !trusted) {
             Timber.w("[LinuxWindowEntryActivity]: refused %s for entry %s (registered %s)", caller, entryId, registered)
             finish()
             return
+        }
+        if (registered == null) {
+            Timber.i("[LinuxWindowEntryActivity]: %s has no record; adopting it on the next scan", caller)
+            LinuxAppReconciler.request(this)
         }
 
         val window = LinuxSessionActivity.intent(this, argv, entryId, intent.getStringExtra(EXTRA_LABEL))

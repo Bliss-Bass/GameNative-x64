@@ -8,7 +8,10 @@ import app.gamenative.utils.retireLinuxShortcuts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -37,13 +40,19 @@ object LinuxAppReconciler {
      * see the change -- without a background pass removing things while they were not looking.
      */
     suspend fun reconcile(context: Context, apps: List<LinuxAppScanner.LinuxApp>) {
-        runCatching {
-            // The scan covers only installed distros, so a distro that is gone contributes no
-            // live entries and everything published from it is retired.
-            reconcileStubs(context, apps)
-            withContext(Dispatchers.Main) { retireLinuxShortcuts(context, apps) }
-        }.onFailure { Timber.w(it, "[LinuxAppReconciler]: could not reconcile") }
+        // One pass at a time: two republishing the same stub at once fail as a duplicate package,
+        // and one may see the other's half-replaced package as gone.
+        passLock.withLock {
+            runCatching {
+                // The scan covers only installed distros, so a distro that is gone contributes no
+                // live entries and everything published from it is retired.
+                reconcileStubs(context, apps)
+                withContext(Dispatchers.Main) { retireLinuxShortcuts(context, apps) }
+            }.onFailure { Timber.w(it, "[LinuxAppReconciler]: could not reconcile") }
+        }
     }
+
+    private val passLock = Mutex()
 
     /** Scan the userlands, then reconcile. Shared by the Linux Apps screen and session hooks. */
     suspend fun scanAndReconcile(context: Context) {
@@ -74,6 +83,13 @@ object LinuxAppReconciler {
     suspend fun retireDistro(context: Context, distroId: String) =
         reconcile(context, LinuxAppScanner.scan(context).filter { it.distroId != distroId })
 
+    private suspend fun <T> afterAWhile(block: suspend () -> T): T {
+        delay(RECHECK_DELAY_MS)
+        return block()
+    }
+
+    private const val RECHECK_DELAY_MS = 3_000L
+
     /**
      * Whether silent auto-publish is available: trampoline packaged and the privileged installer
      * on device. Without the installer, each stub would need a user install prompt, which is not
@@ -92,9 +108,14 @@ object LinuxAppReconciler {
             Stubs.installed(context, records.map { it.packageName })
         }
 
+        val autoPublish = canAutoPublish(context)
         for (record in records) {
             // Removed by the user in Settings. Suppress so auto-publish does not put it back.
-            if (record.packageName !in installed) {
+            // Asked twice, apart: while Android replaces a package it is briefly absent, and
+            // forgetting a stub then leaves it installed with nothing that will open its window.
+            if (record.packageName !in installed &&
+                record.packageName !in afterAWhile { Stubs.installed(context, listOf(record.packageName)) }
+            ) {
                 Timber.i("[LinuxAppReconciler]: %s is gone from the device, suppressing it", record.packageName)
                 StubRegistry.linux.forget(context, record.entryId)
                 StubRegistry.linux.suppress(context, record.entryId)
@@ -110,13 +131,39 @@ object LinuxAppReconciler {
             }
 
             if (LinuxAppStubs.contentFingerprint(context, app) != record.fingerprint) {
+                // Replacing a stub's package closes the window it hosts; wait for the app to stop.
+                if (LinuxSessions.isRunning(LinuxSessions.keyFor(app.entryId, app.launchArgv))) {
+                    Timber.i("[LinuxAppReconciler]: %s changed but is running; republishing later", record.entryId)
+                    continue
+                }
+                // Where every reinstall is a prompt, a newer stub format alone is not worth one:
+                // older stubs still open their windows.
+                val format = LinuxAppStubs.installedFormat(context, app.entryId)
+                if (!autoPublish && format != null && format >= LinuxAppStubs.ROOTED_FORMAT &&
+                    LinuxAppStubs.contentFingerprint(context, app, format) == record.fingerprint
+                ) {
+                    continue
+                }
                 Timber.i("[LinuxAppReconciler]: %s changed, republishing its entry", record.entryId)
                 LinuxAppStubs.add(context, app)
                     .onFailure { Timber.w(it, "[LinuxAppReconciler]: could not republish %s", record.entryId) }
             }
         }
 
-        if (!canAutoPublish(context)) return
+        // Stubs installed without a record (lost as above, before that was guarded against) are
+        // taken back into the registry rather than left unable to open their windows.
+        val recorded = records.map { it.entryId }.toSet()
+        val unrecorded = apps.filter { it.entryId !in recorded }.associateBy { LinuxAppStubs.packageNameFor(it) }
+        if (unrecorded.isNotEmpty()) {
+            for (packageName in Stubs.installed(context, unrecorded.keys)) {
+                val app = unrecorded.getValue(packageName)
+                if (!LinuxAppStubs.isOurStub(context, packageName, app.entryId)) continue
+                Timber.i("[LinuxAppReconciler]: adopting %s, installed without a record", packageName)
+                LinuxAppStubs.adopt(context, app)
+            }
+        }
+
+        if (!autoPublish) return
 
         for (app in apps) {
             if (StubRegistry.linux.of(context, app.entryId) != null) continue
