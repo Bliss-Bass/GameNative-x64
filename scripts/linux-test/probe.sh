@@ -139,6 +139,7 @@ browser_pkg() {
         firefox:*) echo firefox ;;
         chromium:*) echo chromium ;;
         chrome:ubuntu | chrome:debian) echo google-chrome-stable ;;
+        chromebeta:ubuntu | chromebeta:debian) echo google-chrome-beta ;;
     esac
 }
 
@@ -148,6 +149,7 @@ browser_bin() {
         firefox:*) echo firefox ;;
         chromium:*) echo chromium ;;
         chrome:*) echo google-chrome-stable ;;
+        chromebeta:*) echo google-chrome-beta ;;
     esac
 }
 

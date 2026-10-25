@@ -36,10 +36,10 @@ object LinuxProgramLauncher {
      * from each distro's own launcher config ([LinuxBrowserSetup]); this covers a launch that
      * reaches the binary before that config exists.
      */
-    private val ROOT_SANDBOX_BINS = setOf(
-        "cursor", "code", "code-oss", "electron",
-        "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
-    )
+    private val ROOT_SANDBOX_BINS = setOf("cursor", "code", "code-oss", "electron")
+
+    /** Chromium-based browsers in every channel: google-chrome-beta, chromium-browser and so on. */
+    private val ROOT_SANDBOX_PREFIXES = listOf("google-chrome", "chromium", "brave-browser", "microsoft-edge", "vivaldi")
 
     private fun nativeLibraryDir(context: Context): String = context.applicationInfo.nativeLibraryDir
 
@@ -207,7 +207,7 @@ object LinuxProgramLauncher {
         val tokens = argv.trim().split(WHITESPACE).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return argv
         val name = tokens.first().substringAfterLast('/')
-        if (name !in ROOT_SANDBOX_BINS) return argv
+        if (name !in ROOT_SANDBOX_BINS && ROOT_SANDBOX_PREFIXES.none { name.startsWith(it) }) return argv
         if (tokens.any { it == "--no-sandbox" }) return argv
         return argv.trim() + " --no-sandbox"
     }

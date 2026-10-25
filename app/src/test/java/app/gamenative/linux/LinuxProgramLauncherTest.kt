@@ -31,6 +31,11 @@ class LinuxProgramLauncherTest {
             "/usr/bin/google-chrome-stable --no-sandbox",
             LinuxProgramLauncher.argvForRootGuest("/usr/bin/google-chrome-stable"),
         )
+        assertEquals(
+            "/usr/bin/google-chrome-beta --no-sandbox",
+            LinuxProgramLauncher.argvForRootGuest("/usr/bin/google-chrome-beta"),
+        )
+        assertEquals("brave-browser-stable --no-sandbox", LinuxProgramLauncher.argvForRootGuest("brave-browser-stable"))
     }
 
     @Test

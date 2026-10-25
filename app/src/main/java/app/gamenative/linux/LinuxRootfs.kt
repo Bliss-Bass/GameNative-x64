@@ -7,6 +7,7 @@ import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -43,7 +44,7 @@ object LinuxRootfs {
      * Bump when the default browser sources below change. Kept apart from
      * [APT_POLICY_VERSION], whose bump also re-runs the snap purge.
      */
-    private const val BROWSER_SOURCES_VERSION = 1
+    private const val BROWSER_SOURCES_VERSION = 2
 
     // Chromium as a real deb: Ubuntu only ships it as a snap stub, which cannot run here.
     private const val XTRADEB_KEY_URL =
@@ -64,7 +65,12 @@ object LinuxRootfs {
 
     // Sourced by Debian's /usr/bin/chromium launcher, which the PPA build ships.
     private const val CHROMIUM_FLAGS_PATH = "etc/chromium.d/gamenative"
-    private const val CHROME_LAUNCHER = "/opt/google/chrome/google-chrome"
+    /** Each Chrome channel's launcher script, which the /usr/bin names link to. */
+    private val CHROME_LAUNCHERS = listOf(
+        "/opt/google/chrome/google-chrome",
+        "/opt/google/chrome-beta/google-chrome-beta",
+        "/opt/google/chrome-unstable/google-chrome-unstable",
+    )
     // Ending a session stops the guest from outside, which Chromium records as a crash; without
     // the last flag every launch opens with a "Restore pages?" bubble.
     internal const val CHROMIUM_FAMILY_FLAGS = "--no-sandbox --test-type --hide-crash-restore-bubble"
@@ -253,6 +259,14 @@ object LinuxRootfs {
         context: Context,
         onProgress: (Progress) -> Unit = {},
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        // One at a time: two windows opening together would otherwise run apt and dpkg-divert
+        // side by side, and one of them loses dpkg's lock.
+        sessionSetupLock.withLock { ensureDisplaySessionLocked(context, onProgress) }
+    }
+
+    private val sessionSetupLock = Mutex()
+
+    private fun ensureDisplaySessionLocked(context: Context, onProgress: (Progress) -> Unit): Result<Unit> =
         runCatching {
             if (!isInstalled(context)) throw IOException("The Linux userland is not installed")
             val rootfs = rootfsDir(context)
@@ -268,7 +282,6 @@ object LinuxRootfs {
                 installDisplaySession(context, rootfs, onProgress)
             }
         }
-    }
 
     /**
      * Removes the userland, and everything published from it.
@@ -409,35 +422,39 @@ object LinuxRootfs {
      * place. Written only once the diversion exists, or it would overwrite Chrome's script.
      */
     internal fun ensureChromeLaunchWrapper(rootfs: File) {
-        if (!isChromeDiverted(rootfs)) return
-        val wrapper = File(rootfs, CHROME_LAUNCHER.removePrefix("/"))
-        wrapper.parentFile?.mkdirs()
-        wrapper.writeText(
-            """|#!/bin/sh
-            |# Written by GameNative. See LinuxRootfs.ensureChromeLaunchWrapper.
-            |exec $CHROME_LAUNCHER.real $CHROMIUM_FAMILY_FLAGS "${'$'}@"
-            |""".trimMargin(),
-        )
-        wrapper.setExecutable(true, false)
+        for (launcher in CHROME_LAUNCHERS) {
+            if (!isChromeDiverted(rootfs, launcher)) continue
+            val wrapper = File(rootfs, launcher.removePrefix("/"))
+            wrapper.parentFile?.mkdirs()
+            wrapper.writeText(
+                """|#!/bin/sh
+                |# Written by GameNative. See LinuxRootfs.ensureChromeLaunchWrapper.
+                |exec $launcher.real $CHROMIUM_FAMILY_FLAGS "${'$'}@"
+                |""".trimMargin(),
+            )
+            wrapper.setExecutable(true, false)
+        }
     }
 
     /** dpkg keeps diversions as (path, diverted-to, package) line triples. */
-    private fun isChromeDiverted(rootfs: File): Boolean {
+    private fun isChromeDiverted(rootfs: File, launcher: String): Boolean {
         val lines = File(rootfs, "var/lib/dpkg/diversions").takeIf { it.isFile }
             ?.readLines() ?: return false
-        return lines.chunked(3).any { it.size >= 2 && it[0] == CHROME_LAUNCHER && it[1] == "$CHROME_LAUNCHER.real" }
+        return lines.chunked(3).any { it.size >= 2 && it[0] == launcher && it[1] == "$launcher.real" }
     }
 
     internal fun registerChromeDiversion(context: Context, rootfs: File) {
-        if (isChromeDiverted(rootfs)) return
-        val divert = LinuxProgramLauncher.runWithOutput(
-            context,
-            "dpkg-divert --local --rename --divert $CHROME_LAUNCHER.real --add $CHROME_LAUNCHER",
-            extraEnv = APT_ENV,
-            timeoutSeconds = 60,
-            rootfs = rootfs,
-        )
-        Timber.i("[LinuxRootfs]: chrome diversion: %s", divert.trim())
+        for (launcher in CHROME_LAUNCHERS) {
+            if (isChromeDiverted(rootfs, launcher)) continue
+            val divert = LinuxProgramLauncher.runWithOutput(
+                context,
+                "dpkg-divert --local --rename --divert $launcher.real --add $launcher",
+                extraEnv = APT_ENV,
+                timeoutSeconds = 60,
+                rootfs = rootfs,
+            )
+            Timber.i("[LinuxRootfs]: chrome diversion: %s", divert.trim())
+        }
         // --rename moved an installed Chrome's script aside; put the wrapper in its place now
         // rather than at the next session start.
         ensureChromeLaunchWrapper(rootfs)
