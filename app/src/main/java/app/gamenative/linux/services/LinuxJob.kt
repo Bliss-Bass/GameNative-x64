@@ -1,5 +1,6 @@
 package app.gamenative.linux.services
 
+import app.gamenative.linux.LinuxDistroCatalog
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -23,6 +24,8 @@ data class LinuxJob(
     val env: Map<String, String>,
     val restart: Restart,
     val logMaxBytes: Long,
+    /** The distro it runs in: Ubuntu, Debian or Arch. Ubuntu when unset, where jobs always ran. */
+    val distro: String = LinuxDistroCatalog.UBUNTU,
 ) {
 
     enum class Type(val key: String) {
@@ -111,6 +114,10 @@ data class LinuxJob(
             }
 
             val logKb = o.optJSONObject("logs")?.optLong("maxKb", DEFAULT_LOG_KB) ?: DEFAULT_LOG_KB
+            val distro = o.optString("distro").ifBlank { LinuxDistroCatalog.UBUNTU }
+            val known = LinuxDistroCatalog.byId(distro) ?: throw IllegalArgumentException("job $id: unknown distro \"$distro\"")
+            // Experimental distros get the terminal and nothing else; jobs are one of the integrations.
+            require(known.supported) { "job $id: ${known.displayName} is experimental and cannot run jobs" }
 
             return LinuxJob(
                 id = id,
@@ -127,6 +134,7 @@ data class LinuxJob(
                     windowMs = restart.optLong("windowSec", DEFAULT_WINDOW_SEC).coerceIn(10, 3600) * 1000,
                 ),
                 logMaxBytes = logKb.coerceIn(16, MAX_LOG_KB) * 1024,
+                distro = distro,
             )
         }
     }

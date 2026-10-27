@@ -43,8 +43,9 @@ object LinuxProgramLauncher {
 
     private fun nativeLibraryDir(context: Context): String = context.applicationInfo.nativeLibraryDir
 
+    /** Whether programs can run at all: PRoot is here and some supported distro is installed. */
     fun isAvailable(context: Context): Boolean =
-        LinuxRootfs.isInstalled(context) && File(nativeLibraryDir(context), PROOT).canExecute()
+        LinuxDistros.integrated(context).isNotEmpty() && File(nativeLibraryDir(context), PROOT).canExecute()
 
     /**
      * Builds the full argument vector -- PRoot itself at index 0 -- that runs [guestArgv]

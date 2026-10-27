@@ -10,7 +10,8 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.RemoteCallbackList
 import app.gamenative.R
-import app.gamenative.linux.LinuxRootfs
+import app.gamenative.linux.LinuxAppIds
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.service.NotificationHelper
 import app.gamenative.ui.LinuxSessionActivity
 import kotlinx.coroutines.CoroutineScope
@@ -196,14 +197,17 @@ class LinuxJobService : Service() {
         override fun installEnvironment(): Boolean = asSelf { EnvironmentInstaller.install(this@LinuxJobService) }
 
         override fun terminalIntent(): PendingIntent? = asSelf {
-            if (!LinuxRootfs.isInstalled(this@LinuxJobService) || !LinuxRootfs.hasDisplaySession(this@LinuxJobService)) {
+            if (LinuxDistros.integrated(this@LinuxJobService).isEmpty()) {
                 null
             } else {
-                // One terminal document: the launcher entry brings it back rather than stacking more.
+                // In the default distro, whichever that is; the window brings in XTerm there if
+                // it is missing. One terminal document per distro: the launcher entry brings it
+                // back rather than stacking more.
+                val key = LinuxAppIds.qualify(LinuxDistros.defaultId(this@LinuxJobService), TERMINAL_SESSION)
                 PendingIntent.getActivity(
                     this@LinuxJobService,
                     TERMINAL_REQUEST_CODE,
-                    LinuxSessionActivity.intent(this@LinuxJobService, "xterm", TERMINAL_SESSION, getString(R.string.linux_terminal_label)),
+                    LinuxSessionActivity.intent(this@LinuxJobService, "xterm", key, getString(R.string.linux_terminal_label)),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
             }
@@ -221,7 +225,11 @@ class LinuxJobService : Service() {
     }
 
     companion object {
-        const val API_VERSION = 2
+        /**
+         * 3: jobs take a "distro" (Ubuntu, Debian or Arch; Ubuntu when unset), status and the
+         * untracked list report one, and environment() lists the distros and the default one.
+         */
+        const val API_VERSION = 3
 
         private const val TERMINAL_SESSION = "linux-terminal"
         private const val TERMINAL_REQUEST_CODE = 0x7e57

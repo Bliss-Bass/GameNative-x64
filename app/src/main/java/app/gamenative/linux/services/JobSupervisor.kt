@@ -4,8 +4,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.os.SystemClock
 import app.gamenative.linux.GuestProcesses
+import app.gamenative.linux.LinuxAppIds
+import app.gamenative.linux.LinuxDistroCatalog
+import app.gamenative.linux.LinuxDistros
 import app.gamenative.linux.LinuxProgramLauncher
-import app.gamenative.linux.LinuxRootfs
 import app.gamenative.linux.LinuxSessions
 import app.gamenative.ui.LinuxSessionActivity
 import java.io.File
@@ -37,6 +39,7 @@ object JobSupervisor {
 
     /** Where each job's generated script lives, inside the guest. */
     const val SCRIPT_DIR = "/var/lib/linux-services"
+    private const val SESSION_PREFIX = "linux-job-"
 
     /** A run at least this long is taken as a success, and the backoff starts over. */
     private const val STABLE_RUN_MS = 60_000L
@@ -236,7 +239,7 @@ object JobSupervisor {
 
         LinuxSessions.sessions.value.forEach { s ->
             val argv = s.argv ?: return@forEach
-            if (s.key.startsWith(sessionKey(""))) return@forEach
+            if (isJobSession(s.key)) return@forEach
             if (programName(argv) in TERMINALS) return@forEach
             // A launcher script often execs the real binary under another path, so fall back from
             // the exact command to the program name.
@@ -256,6 +259,7 @@ object JobSupervisor {
                 put("name", s.label)
                 put("command", argv)
                 put("type", LinuxJob.Type.GUI.key)
+                put("distro", s.distroId)
             }, listOfNotNull(top))
         }
 
@@ -276,6 +280,7 @@ object JobSupervisor {
                     put("name", programName(first.getString("cmdline")))
                     put("command", command)
                     put("type", LinuxJob.Type.SERVICE.key)
+                    distroOf(first, byPid)?.let { put("distro", it) }
                     guestCwd(first.getInt("pid"))?.let { put("workdir", it) }
                 }, sorted)
             }
@@ -288,6 +293,19 @@ object JobSupervisor {
 
     private fun programName(command: String): String =
         command.trim().substringBefore(' ').substringAfterLast('/')
+
+    /** The distro [process] runs in, read from the `--rootfs=` of the PRoot it runs under. */
+    private fun distroOf(process: JSONObject, byPid: Map<Int, JSONObject>): String? {
+        var current: JSONObject? = process
+        var hops = 0
+        while (current != null && hops++ < 64) {
+            ROOTFS_ARG.find(current.getString("cmdline"))?.let { return it.groupValues[1] }
+            current = byPid[current.getInt("ppid")]
+        }
+        return null
+    }
+
+    private val ROOTFS_ARG = Regex("--rootfs=\\S*/distros/([a-z0-9]+)/rootfs")
 
     /** PRoot emulates chdir, so /proc/<pid>/cwd is always the rootfs; the shell's exported PWD is the guest one. */
     private fun guestCwd(pid: Int): String? = runCatching {
@@ -306,8 +324,17 @@ object JobSupervisor {
         return pendingIntentFor(job)
     }
 
-    /** The [LinuxSessions] key a GUI job's session is filed under. */
-    fun sessionKey(id: String): String = "linux-job-$id"
+    /**
+     * The [LinuxSessions] key a GUI job's session is filed under. Qualified by distro like an
+     * app's, which is what opens the window in the job's distro.
+     */
+    fun sessionKey(job: LinuxJob): String = LinuxAppIds.qualify(job.distro, "$SESSION_PREFIX${job.id}")
+
+    private fun isJobSession(key: String): Boolean = LinuxAppIds.entryOf(key).startsWith(SESSION_PREFIX)
+
+    /** [job]'s rootfs, or null when its distro is not installed. */
+    private fun rootfsOf(job: LinuxJob): File? =
+        LinuxDistros.installedRootfs(appContext, job.distro)?.takeIf { LinuxDistros.isIntegrated(appContext, job.distro) }
 
     private fun launch(runner: Runner) {
         val job = runner.job
@@ -321,8 +348,8 @@ object JobSupervisor {
         }
         publish(runner)
 
-        if (!LinuxProgramLauncher.isAvailable(appContext)) {
-            fail(runner, "The Linux environment is not installed")
+        if (rootfsOf(job) == null) {
+            fail(runner, "${LinuxDistroCatalog.nameOf(job.distro)} is not installed")
             return
         }
         runCatching { writeScript(job) }.onFailure {
@@ -333,7 +360,7 @@ object JobSupervisor {
         if (job.type.hasWindow) {
             // Already open from an earlier launch: the request below only brings it forward, and
             // no session change is coming to say it is running.
-            if (LinuxSessions.isRunning(sessionKey(job.id))) {
+            if (LinuxSessions.isRunning(sessionKey(job))) {
                 synchronized(runners) {
                     runner.sessionSeen = true
                     runner.state = State.RUNNING
@@ -367,17 +394,19 @@ object JobSupervisor {
     }
 
     private fun startService(job: LinuxJob): Process {
+        val rootfs = rootfsOf(job) ?: throw IllegalStateException("${LinuxDistroCatalog.nameOf(job.distro)} is not installed")
         val argv = LinuxProgramLauncher.buildArgv(
             appContext,
             listOf("/bin/sh", "$SCRIPT_DIR/${job.id}.sh"),
             displaySocketDir = null,
+            rootfs = rootfs,
         )
         val builder = ProcessBuilder(argv)
-            .directory(LinuxRootfs.rootfsDir(appContext))
+            .directory(rootfs)
             .redirectErrorStream(true)
         builder.environment().apply {
             clear()
-            LinuxProgramLauncher.prootEnv(appContext).toStringArray().forEach { kv ->
+            LinuxProgramLauncher.prootEnv(appContext, rootfs).toStringArray().forEach { kv ->
                 val eq = kv.indexOf('=')
                 if (eq > 0) put(kv.substring(0, eq), kv.substring(eq + 1))
             }
@@ -402,7 +431,8 @@ object JobSupervisor {
      * string split on spaces, which cannot carry quoting; this way every type runs the same file.
      */
     private fun writeScript(job: LinuxJob) {
-        val dir = File(LinuxRootfs.rootfsDir(appContext), SCRIPT_DIR.removePrefix("/")).apply { mkdirs() }
+        val rootfs = rootfsOf(job) ?: throw IllegalStateException("${LinuxDistroCatalog.nameOf(job.distro)} is not installed")
+        val dir = File(rootfs, SCRIPT_DIR.removePrefix("/")).apply { mkdirs() }
         val body = buildString {
             appendLine("#!/bin/sh")
             appendLine("# Linux Services job \"${job.name}\" (${job.id}); rewritten by GameNative on every start.")
@@ -431,7 +461,7 @@ object JobSupervisor {
                 if (job.restart.policy == LinuxJob.Policy.NEVER) "xterm -hold -e /bin/sh $script" else "xterm -e /bin/sh $script"
             else -> "/bin/sh $script"
         }
-        val intent = LinuxSessionActivity.intent(appContext, argv, sessionKey(job.id), job.name)
+        val intent = LinuxSessionActivity.intent(appContext, argv, sessionKey(job), job.name)
         return PendingIntent.getActivity(
             appContext,
             job.id.hashCode(),
@@ -445,7 +475,7 @@ object JobSupervisor {
         val changed = mutableListOf<Runner>()
         synchronized(runners) {
             runners.values.filter { it.job.type.hasWindow }.forEach { runner ->
-                val open = sessionKey(runner.job.id) in keys
+                val open = sessionKey(runner.job) in keys
                 when {
                     open && !runner.sessionSeen -> {
                         runner.sessionSeen = true
@@ -560,8 +590,8 @@ object JobSupervisor {
         }
         val wasUp = process != null || sessionSeen
         if (runner.job.type.hasWindow) {
-            if (LinuxSessions.isRunning(sessionKey(runner.job.id)) || sessionSeen) {
-                LinuxSessions.stop(appContext, sessionKey(runner.job.id))
+            if (LinuxSessions.isRunning(sessionKey(runner.job)) || sessionSeen) {
+                LinuxSessions.stop(appContext, sessionKey(runner.job))
             }
         } else if (process != null) {
             GuestProcesses.end(process, pid, "job ${runner.job.id}")
@@ -580,6 +610,7 @@ object JobSupervisor {
         put("id", runner.job.id)
         put("name", runner.job.name)
         put("type", runner.job.type.key)
+        put("distro", runner.job.distro)
         put("state", runner.state.key)
         put("desired", runner.desired)
         if (runner.pid > 0) put("pid", runner.pid)

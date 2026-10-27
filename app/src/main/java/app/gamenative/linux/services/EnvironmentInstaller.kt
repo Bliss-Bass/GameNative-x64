@@ -2,6 +2,9 @@ package app.gamenative.linux.services
 
 import android.content.Context
 import android.os.StatFs
+import app.gamenative.linux.LinuxDistroCatalog
+import app.gamenative.linux.LinuxDistros
+import app.gamenative.linux.LinuxGraphics
 import app.gamenative.linux.LinuxProgramLauncher
 import app.gamenative.linux.LinuxRootfs
 import kotlinx.coroutines.CoroutineScope
@@ -11,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
 
@@ -19,7 +23,8 @@ import timber.log.Timber
  * Settings screen, its Linux Terminal launcher entry, and MDMs provisioning a device.
  *
  * Does what the Terminal screen's install button does -- [LinuxRootfs.install], then
- * [LinuxRootfs.ensureDisplaySession] -- and reports progress through [listener] instead of a
+ * [LinuxRootfs.ensureDisplaySession] -- when no supported distro is installed yet, and otherwise
+ * gets the default distro ready for windows; reports progress through [listener] instead of a
  * progress bar. While it runs, [installing] holds [LinuxJobService] in the foreground: the download
  * is over a gigabyte, and a cached app would be frozen or killed partway through it.
  */
@@ -47,11 +52,30 @@ object EnvironmentInstaller {
      * (with its step and a 0-1 fraction, or -1 when a step has no measure) or the last failure.
      */
     fun state(context: Context): JSONObject = JSONObject().apply {
-        val installed = LinuxRootfs.isInstalled(context)
+        // Any supported distro is an environment jobs can run in, not only Ubuntu.
+        val installed = LinuxDistros.integrated(context).isNotEmpty()
+        val defaultId = LinuxDistros.defaultId(context)
         put("supported", LinuxRootfs.isSupported())
         put("installed", installed)
-        put("displaySession", installed && LinuxRootfs.hasDisplaySession(context))
+        // Windows in the default distro; another distro gets what windows need when one first opens.
+        put("displaySession", installed && LinuxGraphics.isReady(context, defaultId))
         put("available", LinuxProgramLauncher.isAvailable(context))
+        put("defaultDistro", defaultId)
+        put(
+            "distros",
+            JSONArray(
+                LinuxDistroCatalog.all.map { distro ->
+                    val present = LinuxDistros.isInstalled(context, distro.id)
+                    JSONObject()
+                        .put("id", distro.id)
+                        .put("name", distro.displayName)
+                        .put("installed", present)
+                        // Jobs run only in supported distros; experimental ones are terminal-only.
+                        .put("supported", distro.supported)
+                        .put("displaySession", present && distro.supported && LinuxGraphics.isReady(context, distro.id))
+                },
+            ),
+        )
         put("installing", _installing.value)
         progress?.takeIf { _installing.value }?.let {
             put("progress", JSONObject().put("message", it.message).put("fraction", it.fraction.toDouble()))
@@ -77,8 +101,9 @@ object EnvironmentInstaller {
         progress = null
         publish(app, force = true)
         scope.launch {
-            val result = if (LinuxRootfs.isInstalled(app)) {
-                LinuxRootfs.ensureDisplaySession(app) { onProgress(app, it) }
+            val result = if (LinuxDistros.integrated(app).isNotEmpty()) {
+                // A distro is there already: get the default one ready for windows.
+                LinuxGraphics.ensure(app, LinuxDistros.defaultId(app)) { onProgress(app, it) }
             } else {
                 LinuxRootfs.install(app) { onProgress(app, it) }
                     .mapCatching { LinuxRootfs.ensureDisplaySession(app) { p -> onProgress(app, p) }.getOrThrow() }
