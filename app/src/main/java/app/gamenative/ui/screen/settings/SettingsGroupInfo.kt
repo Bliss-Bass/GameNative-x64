@@ -15,6 +15,7 @@ import app.gamenative.Constants
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.ui.component.dialog.LibrariesDialog
+import app.gamenative.utils.ProjectChannels
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.alorma.compose.settings.ui.SettingsGroup
@@ -33,6 +34,7 @@ fun SettingsGroupInfo() {
             onDismissRequest = { showLibrariesDialog = false },
         )
 
+        if (ProjectChannels.showsDonations) {
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(stringResource(R.string.settings_info_send_tip_title)) },
@@ -53,12 +55,13 @@ fun SettingsGroupInfo() {
                 PrefManager.tipped = !askForTip
             },
         )
+        }
 
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_info_source_title)) },
             subtitle = { Text(text = stringResource(R.string.settings_info_source_subtitle)) },
-            onClick = { uriHandler.openUri(Constants.Misc.GITHUB_LINK) },
+            onClick = { uriHandler.openUri(ProjectChannels.sourceUrl) },
         )
 
         SettingsMenuLink(

@@ -54,6 +54,7 @@ import app.gamenative.ui.util.ContainerConfigTransfer
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.ProjectChannels
 import app.gamenative.utils.SessionReport
 import app.gamenative.utils.DiagnosticsLog
 import app.gamenative.utils.GameCompatibilityCache
@@ -939,7 +940,7 @@ abstract class BaseAppScreen {
             onClick = {
                 val browserIntent = Intent(
                     Intent.ACTION_VIEW,
-                    ("https://discord.gg/2hKv4VfZfE").toUri(),
+                    ProjectChannels.supportUrl.toUri(),
                 )
                 context.startActivity(browserIntent)
             },

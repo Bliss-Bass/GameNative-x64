@@ -113,6 +113,7 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.DebugReportUtils
 import app.gamenative.utils.HostContainerPolicy
 import app.gamenative.utils.PlatformAuthUtils
+import app.gamenative.utils.ProjectChannels
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ManifestInstaller
 import app.gamenative.utils.GameFeedbackUtils
@@ -448,8 +449,12 @@ fun PluviaMain(
 
     // Check for updates on app start
     LaunchedEffect(Unit) {
-        if (BuildConfig.MODERN_ANDROID) return@LaunchedEffect
-        val checkedUpdateInfo = UpdateChecker.checkForUpdate(context)
+        if (BuildConfig.MODERN_ANDROID && !ProjectChannels.isOwnProject) return@LaunchedEffect
+        val checkedUpdateInfo = if (ProjectChannels.isOwnProject) {
+            ProjectChannels.checkForRelease()
+        } else {
+            UpdateChecker.checkForUpdate(context)
+        }
         if (checkedUpdateInfo != null) {
             val appVersionCode = BuildConfig.VERSION_CODE
             val serverVersionCode = checkedUpdateInfo.versionCode
@@ -990,7 +995,7 @@ fun PluviaMain(
         DialogType.DISCORD -> {
             onConfirmClick = {
                 setMessageDialogState(MessageDialogState(false))
-                uriHandler.openUri("https://discord.gg/2hKv4VfZfE")
+                uriHandler.openUri(ProjectChannels.supportUrl)
             }
             onDismissClick = {
                 setMessageDialogState(MessageDialogState(false))
@@ -1271,7 +1276,9 @@ fun PluviaMain(
             onConfirmClick = {
                 setMessageDialogState(MessageDialogState(false))
                 val updateInfo = viewModel.updateInfo.value
-                if (updateInfo != null) {
+                if (updateInfo != null && ProjectChannels.isOwnProject) {
+                    uriHandler.openUri(updateInfo.downloadUrl)
+                } else if (updateInfo != null) {
                     scope.launch {
                         viewModel.setLoadingDialogVisible(true)
                         viewModel.setLoadingDialogMessage("Downloading update...")
@@ -1510,7 +1517,7 @@ fun PluviaMain(
                     viewModel.onGameFeedbackResolved(context, null)
                 },
                 onDiscordSupport = {
-                    uriHandler.openUri("https://discord.gg/2hKv4VfZfE")
+                    uriHandler.openUri(ProjectChannels.supportUrl)
                 },
             )
 
@@ -1551,6 +1558,14 @@ fun PluviaMain(
             val submitDebugReport: () -> Unit = submit@{
                 val current = debugReportState
                 if (current.reportDir.isEmpty()) return@submit
+                if (ProjectChannels.isOwnProject) {
+                    // The share sheet opens over the issue form, so the log can be saved or
+                    // attached before the user submits.
+                    uriHandler.openUri(ProjectChannels.newIssueUrl(current.issueText, current.gameName))
+                    shareDebugLog()
+                    debugReportState = current.copy(visible = false)
+                    return@submit
+                }
                 debugReportState = current.copy(visible = true, phase = DebugReportDialogState.PHASE_SENDING)
                 scope.launch {
                     val dir = File(current.reportDir)
@@ -1630,7 +1645,8 @@ fun PluviaMain(
 
             DebugReportDialog(
                 state = debugReportState,
-                hasDiscordToken = discordTokenPresent,
+                // Reports go to GitHub on our builds, so there is no Discord account to connect.
+                hasDiscordToken = discordTokenPresent || ProjectChannels.isOwnProject,
                 onStateChange = { debugReportState = it },
                 onSend = submitDebugReport,
                 onShare = shareDebugLog,

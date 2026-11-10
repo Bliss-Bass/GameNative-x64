@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GameNative x64 wording for upstream strings that name upstream's Discord or AI support.
+     Help, reports and updates go to the project's GitHub here (see ProjectChannels). -->
+<resources>
+    <string name="get_support_on_discord">Report an issue on GitHub</string>
+    <string name="main_share_text">Check out GameNative x64 - play your PC Steam games on x86 Android PCs!\nhttps://github.com/Bliss-Bass/GameNative-x64</string>
+    <string name="main_discord_support_message">If something did not work, report it on GitHub so it can be fixed.</string>
+    <string name="main_open_discord">Report on GitHub</string>
+    <string name="game_launch_tip_17">Tip: Report issues on GitHub so we can fix them.</string>
+
+    <string name="option_ai_debug_run">Debug run</string>
+    <string name="debug_offer_title">Report this crash</string>
+    <string name="debug_offer_message">That session ended early. Run %1$s once more with debug logging to capture a log you can attach to a GitHub issue.</string>
+    <string name="debug_prerun_title">Debug run</string>
+    <string name="debug_prerun_message_1">Runs the game with debug logging. When you quit, you can open a GitHub issue and attach the log to it.</string>
+    <string name="debug_prerun_message_2">You need a GitHub account to submit the issue.</string>
+
+    <string name="debug_report_title">Debug Report</string>
+    <string name="debug_report_send">Report on GitHub</string>
+    <string name="debug_report_share_instead">Share log only</string>
+    <string name="debug_report_success_message">Your report was opened on GitHub.</string>
+</resources>

@@ -639,7 +639,7 @@ fun SystemMenu(
                             text = stringResource(R.string.help_and_support),
                             icon = Icons.AutoMirrored.Filled.Help,
                             onClick = {
-                                uriHandler.openUri("https://discord.gg/2hKv4VfZfE")
+                                uriHandler.openUri(app.gamenative.utils.ProjectChannels.supportUrl)
                             },
                         )
 

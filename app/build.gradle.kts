@@ -145,6 +145,9 @@ android {
 
         buildConfigField("boolean", "GOLD", "false")
         buildConfigField("boolean", "BLISS_PORT_DEBUG", "false")
+        // GitHub "owner/repo" whose issues, releases and source a build points users at;
+        // empty keeps upstream's channels.
+        buildConfigField("String", "PROJECT_REPO", "\"\"")
         fun secret(name: String) =
             project.findProperty(name) as String? ?: System.getenv(name) ?: ""
 
@@ -233,6 +236,7 @@ android {
             buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
             buildConfigField("String", "HOST_CPU", "\"X86_64\"")
             buildConfigField("boolean", "BLISS_PORT_DEBUG", "true")
+            buildConfigField("String", "PROJECT_REPO", "\"Bliss-Bass/GameNative-x64\"")
         }
         create("modernXr") {
             dimension = "androidApi"
