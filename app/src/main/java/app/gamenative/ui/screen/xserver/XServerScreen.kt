@@ -578,6 +578,10 @@ fun XServerScreen(
     }
     var isKeyboardVisible = false
     var areControlsVisible by remember { mutableStateOf(false) }
+    // The last input used picks the mode: a finger on the screen shows the controls we chose
+    // to show, a pointer device hides them again. A choice in the quick menu ends that.
+    var controlsAutoShown by remember { mutableStateOf(false) }
+    var controlsChosenByUser by remember { mutableStateOf(false) }
     var isDisableMouseInput by remember(container.id) { mutableStateOf(container.isDisableMouseInput) }
     var isEditMode by remember { mutableStateOf(false) }
     var gameRoot by remember { mutableStateOf<View?>(null) }
@@ -1079,20 +1083,56 @@ fun XServerScreen(
         }
     }
 
+    // Android reports a laptop's own keyboard and touchpad as internal, but on an x86_64 PC
+    // they are the main input; counting only external devices left touch controls up there.
+    fun countsAsPhysicalInput(device: InputDevice): Boolean {
+        if (device.isVirtual) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return device.isExternal || HostCpu.current().isX86_64
+    }
+
+    fun showDefaultInputControls(): Boolean {
+        val manager = PluviaApp.inputControlsManager ?: return false
+        val profiles = manager.getProfiles(false)
+        if (profiles.isEmpty()) return false
+        val profileId = container.getExtra("profileId", "0").toIntOrNull() ?: 0
+        val targetProfile = (if (profileId != 0) manager.getProfile(profileId) else null)
+            ?: manager.getProfile(0) ?: profiles.getOrNull(2) ?: profiles.first()
+        showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container)
+        return true
+    }
+
+    fun onFingerTouch() {
+        if (areControlsVisible || controlsChosenByUser || container.isTouchscreenMode) return
+        if (showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) return
+        if (showDefaultInputControls()) {
+            areControlsVisible = true
+            controlsAutoShown = true
+        }
+    }
+
+    fun onPointerInput() {
+        if (!controlsAutoShown || controlsChosenByUser || !areControlsVisible) return
+        hideInputControls()
+        areControlsVisible = false
+        controlsAutoShown = false
+    }
+
     fun scanForExternalDevices() {
         val deviceIds = InputDevice.getDeviceIds()
         hasPhysicalKeyboard = deviceIds.any { id ->
             val device = InputDevice.getDevice(id) ?: return@any false
-            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
-            Keyboard.isKeyboardDevice(device) && !device.isVirtual && isExternal
+            Keyboard.isKeyboardDevice(device) && countsAsPhysicalInput(device)
         }
         hasPhysicalMouse = deviceIds.any { id ->
             val device = InputDevice.getDevice(id) ?: return@any false
             val isMouse = device.supportsSource(InputDevice.SOURCE_MOUSE) || device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
                           device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
-            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
-            isMouse && !device.isVirtual && isExternal
+            isMouse && countsAsPhysicalInput(device)
         }
+        // Capture now rather than on the first motion, which otherwise moves the system
+        // cursor (and clicks the desktop) before the game has the pointer.
+        if (hasPhysicalMouse) tryCapturePointer()
         val controllerManager = ControllerManager.getInstance()
         controllerManager.autoAssignConnectedDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
@@ -1120,6 +1160,7 @@ fun XServerScreen(
                     if (!areControlsVisible) {
                         showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container)
                         areControlsVisible = true
+                        controlsAutoShown = true
                     }
 
                     PluviaApp.touchpadView?.postDelayed({
@@ -1134,8 +1175,7 @@ fun XServerScreen(
     fun evaluateDevice(device: InputDevice) {
         // Some devices advertise all its capabilities on onInputDeviceAdded callback
         // but some can also do basic advertise on onInputDeviceAdded and only expand on onInputDeviceChanged
-        val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
-        if (!device.isVirtual && isExternal) {
+        if (countsAsPhysicalInput(device)) {
             if (Keyboard.isKeyboardDevice(device)) {
                 hasPhysicalKeyboard = true
                 if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
@@ -1262,6 +1302,8 @@ fun XServerScreen(
                     }
                 }
                 areControlsVisible = !areControlsVisible
+                controlsChosenByUser = true
+                controlsAutoShown = false
                 true
             }
 
@@ -1973,6 +2015,13 @@ fun XServerScreen(
                     ?.dispatchTouchEvent(event) == true
                 if (overlayHandled) return@pointerInteropFilter true
 
+                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                    event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) &&
+                    event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                ) {
+                    onFingerTouch()
+                }
+
                 if (isPortrait) {
                     gameRoot?.dispatchTouchEvent(event)
                 } else {
@@ -2063,7 +2112,10 @@ fun XServerScreen(
                 PluviaApp.touchpadView?.setMoveCursorToTouchpoint(PrefManager.getBoolean("move_cursor_to_touchpoint", false))
                 // Go through tryCapturePointer so the editor/quick-menu/touchscreen gating
                 // still applies rather than grabbing the pointer unconditionally.
-                PluviaApp.touchpadView?.setPointerCaptureRequester { tryCapturePointer() }
+                PluviaApp.touchpadView?.setPointerCaptureRequester {
+                    if (hasPhysicalMouse || hasInternalTouchpad) tryCapturePointer()
+                }
+                PluviaApp.touchpadView?.setPointerInputListener { onPointerInput() }
 
                 // Wire keyboard toggle callback for gesture "Show Keyboard" action.
                 // Mirrors the QuickMenuAction.KEYBOARD external-display routing

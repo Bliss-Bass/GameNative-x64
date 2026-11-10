@@ -127,6 +127,7 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     private float singleFingerLastRawX, singleFingerLastRawY;
     // Preserve transformed sub-pixel motion for the title-scoped relative-drag fix.
     private float relativeDragRemainderX, relativeDragRemainderY;
+    private float rawRemainderX, rawRemainderY;
     // Two-finger gesture mutual exclusion (only pan OR pinch, not both)
     private static final int TWO_FINGER_GESTURE_NONE = 0;
     private static final int TWO_FINGER_GESTURE_PAN = 1;
@@ -280,6 +281,17 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     }
 
     @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // A game opened from the library keeps the same focused window, so no focus change
+        // follows to request capture.
+        if (hasWindowFocus() && capturePointerOnExternalMouse && pointerCaptureRequester != null
+                && !hasPointerCapture()) {
+            pointerCaptureRequester.run();
+        }
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         // allow re-capture after app returns from background
@@ -376,9 +388,27 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         }
     }
 
+    private Runnable pointerInputListener;
+    private long lastPointerInputNotifyMs;
+
+    /** Told, at most twice a second, that a mouse, touchpad or stylus is in use. */
+    public void setPointerInputListener(Runnable listener) {
+        this.pointerInputListener = listener;
+    }
+
+    private void notifyPointerInput() {
+        Runnable listener = pointerInputListener;
+        if (listener == null) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastPointerInputNotifyMs < 500) return;
+        lastPointerInputNotifyMs = now;
+        listener.run();
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         boolean isStylus = isEventTriggeredByStylus(event);
+        if (isStylus || event.isFromSource(InputDevice.SOURCE_MOUSE)) notifyPointerInput();
         if (touchscreenMouseDisabled
                 && !isStylus
                 && !event.isFromSource(InputDevice.SOURCE_MOUSE)) {
@@ -427,6 +457,9 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
 
     @Override
     public boolean onHoverEvent(MotionEvent event) {
+        if (isEventTriggeredByStylus(event) || event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            notifyPointerInput();
+        }
         if (isEventTriggeredByStylus(event)) {
             return handleStylusHoverEvent(event);
         }
@@ -2022,11 +2055,20 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
         int my = (int) relativeDragRemainderY;
         relativeDragRemainderX -= mx;
         relativeDragRemainderY -= my;
-        if (mx == 0 && my == 0) return;
+        // XInput2 raw motion (WM_INPUT in games) is device counts, as on Windows. Scaling it by
+        // the display-to-X ratio made raw-input games turn slower on denser panels and at lower
+        // game resolutions. Anything that moves a cursor keeps the scaled delta.
+        rawRemainderX += dx;
+        rawRemainderY += dy;
+        int rx = (int) rawRemainderX;
+        int ry = (int) rawRemainderY;
+        rawRemainderX -= rx;
+        rawRemainderY -= ry;
+        if (mx == 0 && my == 0 && rx == 0 && ry == 0) return;
         if (xServer.isRelativeMouseMovement()) {
-            xServer.getWinHandler().mouseEvent(MouseEventFlags.MOVE, mx, my, 0);
+            if (mx != 0 || my != 0) xServer.getWinHandler().mouseEvent(MouseEventFlags.MOVE, mx, my, 0);
         } else {
-            xServer.injectPointerMoveDelta(mx, my);
+            xServer.injectPointerMoveDelta(mx, my, rx, ry);
         }
     }
 
@@ -2455,6 +2497,7 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
 
     @Override // android.view.View.OnCapturedPointerListener
     public boolean onCapturedPointer(View view, MotionEvent event) {
+        notifyPointerInput();
         // Defensive, and unverified against real hardware: the trackpad tested here
         // reports either SOURCE_MOUSE_RELATIVE or SOURCE_TOUCHPAD but never both, so this
         // guard has not been observed to change routing. It matters only for a device that

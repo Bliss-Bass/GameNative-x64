@@ -3,6 +3,7 @@ package app.gamenative.utils
 import android.content.Context
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import app.gamenative.PluviaApp
 
@@ -32,9 +33,27 @@ class PointerCaptureDispatchLayout @JvmOverloads constructor(
         descendantFocusability = FOCUS_BEFORE_DESCENDANTS
     }
 
+    // Captured events follow the focus chain. Opening a game removes the focused library
+    // node, and the window is left with no focused view at all, so every captured event was
+    // dropped until a dialog moved focus away and back.
+    private val focusLossListener = ViewTreeObserver.OnGlobalFocusChangeListener { _, newFocus ->
+        if (newFocus == null && hasPointerCapture()) post { ensureCaptureFocus() }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        viewTreeObserver.addOnGlobalFocusChangeListener(focusLossListener)
         ensureCaptureFocus()
+    }
+
+    override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnGlobalFocusChangeListener(focusLossListener)
+        super.onDetachedFromWindow()
+    }
+
+    override fun onPointerCaptureChange(hasCapture: Boolean) {
+        super.onPointerCaptureChange(hasCapture)
+        if (hasCapture) ensureCaptureFocus()
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {

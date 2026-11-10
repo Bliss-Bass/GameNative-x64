@@ -207,11 +207,16 @@ public class XServer {
     }
 
     public void injectPointerMoveDelta(int dx, int dy) {
-        if (dx == 0 && dy == 0) return;
+        injectPointerMoveDelta(dx, dy, dx, dy);
+    }
+
+    /** {@code rawDx}/{@code rawDy} are device counts for raw input; dx/dy move the cursor. */
+    public void injectPointerMoveDelta(int dx, int dy, int rawDx, int rawDy) {
+        if (dx == 0 && dy == 0 && rawDx == 0 && rawDy == 0) return;
 
         WinHandler handler = winHandler;
         if (relativeMouseMovement && handler != null) {
-            handler.mouseEvent(MouseEventFlags.MOVE, dx, dy, 0);
+            if (dx != 0 || dy != 0) handler.mouseEvent(MouseEventFlags.MOVE, dx, dy, 0);
             return;
         }
 
@@ -266,8 +271,8 @@ public class XServer {
             }
 
             XInput2Extension xi = getExtension(XInput2Extension.MAJOR_OPCODE);
-            if (xi != null)
-                xi.emitRawMotion(2, dx, dy);
+            if (xi != null && (rawDx != 0 || rawDy != 0))
+                xi.emitRawMotion(2, rawDx, rawDy);
         }
     }
 

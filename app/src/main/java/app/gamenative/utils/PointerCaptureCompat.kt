@@ -14,6 +14,10 @@ import app.gamenative.PluviaApp
 object PointerCaptureCompat {
     @JvmStatic
     fun requestRelativeCapture(view: View) {
+        // Requests are posted with a delay and re-sent on focus changes, so one can land after
+        // the game closed. The library then holds capture and the system cursor stays hidden
+        // until another window takes focus.
+        if (PluviaApp.touchpadView?.isAttachedToWindow != true) return
         try {
             val relative = View::class.java.getField("POINTER_CAPTURE_MODE_RELATIVE").getInt(null)
             View::class.java.getMethod("requestPointerCapture", Int::class.javaPrimitiveType)
