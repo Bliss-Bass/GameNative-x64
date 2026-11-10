@@ -56,8 +56,7 @@ import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
 import app.gamenative.utils.HostBionicLibs;
 import app.gamenative.utils.HostCpu;
-import app.gamenative.utils.HostGraphicsEnv;
-import app.gamenative.utils.HostDisplayEnv;
+import app.gamenative.utils.X86GuestLaunch;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -98,22 +97,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             return null;
         }
         return imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
-    }
-
-    // x86_64 has no libredirect build; libexec-redirect.so covers the exec redirect that stock
-    // Android needs to run Wine's loader, wineserver and child processes from app storage.
-    private void addRedirectPreload(Context context, ImageFs imageFs, ArrayList<String> preloadLibs) {
-        if (!HostCpu.current().isX86_64()) {
-            String replacePath = resolveLibredirectPreload(imageFs);
-            if (replacePath != null && new File(replacePath).exists()) preloadLibs.add(replacePath);
-            return;
-        }
-        String execRedirect = context.getApplicationInfo().nativeLibraryDir + "/libexec-redirect.so";
-        if (new File(execRedirect).exists()) {
-            preloadLibs.add(execRedirect);
-        } else {
-            Log.w("BionicProgramLauncherComponent", "libexec-redirect.so missing at " + execRedirect);
-        }
     }
 
     /** Numeric Steam appid for the game in this container (e.g. "221380").
@@ -341,20 +324,20 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("ANDROID_RESOLV_DNS", primaryDNS);
         envVars.put("WINE_NEW_NDIS", "1");
 
-        ArrayList<String> preloadLibs = new ArrayList<>();
-        String sysvPath = resolveSysvShmPreloadPath(context, imageFs);
-        if (sysvPath != null) preloadLibs.add(sysvPath);
-
+        String ld_preload = "";
+        String sysvPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
         String evshimPath = context.getApplicationInfo().nativeLibraryDir + "/libevshim.so";
-        if (new File(evshimPath).exists()) {
-            preloadLibs.add(evshimPath);
-        } else {
-            Log.w("BionicProgramLauncherComponent",
-                    "libevshim.so missing at " + evshimPath + ", skipping evshim preload");
-        }
-        addRedirectPreload(context, imageFs, preloadLibs);
+        String replacePath = resolveLibredirectPreload(imageFs);
 
-        envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
+        if (new File(sysvPath).exists()) ld_preload += sysvPath;
+
+
+        ld_preload += ":" + evshimPath;
+        if (replacePath != null) ld_preload += ":" + replacePath;
+
+        envVars.put("LD_PRELOAD", ld_preload);
+        String x86Preloads = X86GuestLaunch.preloads(context, true);
+        if (x86Preloads != null) envVars.put("LD_PRELOAD", x86Preloads);
         envVars.put("EVSHIM_WINE", 1);
         envVars.put("EVSHIM_SHM_NAME", "controller-shm0");
 
@@ -414,17 +397,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             LsfgVkManager.applyLaunchEnv(container, envVars);
         }
 
-        if (HostCpu.current().isX86_64()) {
-            HostDisplayEnv.applyForX86_64Guest(envVars, imageFs);
-        }
-
-        if (HostCpu.current().isX86_64()
-                && container != null
-                && container.getGraphicsDriver().equalsIgnoreCase("System")) {
-            HostGraphicsEnv.sanitizeForSystemVulkan(envVars);
-        }
-
-        HostBionicLibs.applyGuestVulkanEnv(envVars, context, container);
+        X86GuestLaunch.applyGuestEnv(envVars, context, imageFs, container, true);
 
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
 
@@ -539,20 +512,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         containerDataChanged = true;
         if (containerDataChanged) container.saveData();
-    }
-
-    private String resolveSysvShmPreloadPath(Context context, ImageFs imageFs) {
-        if (HostCpu.current().isX86_64()) {
-            String nativePath = context.getApplicationInfo().nativeLibraryDir + "/libandroid-sysvshm.so";
-            if (new File(nativePath).exists()) {
-                return nativePath;
-            }
-            Log.w("BionicProgramLauncherComponent",
-                    "x86_64 libandroid-sysvshm.so missing at " + nativePath);
-            return null;
-        }
-        String imageFsPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
-        return new File(imageFsPath).exists() ? imageFsPath : null;
     }
 
     /** Without libredirect on x86_64, point Wine at Proton's ntdll.so instead of the apex stub path. */
@@ -849,19 +808,22 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("WINE_DISABLE_FULLSCREEN_HACK", "1");
         envVars.put("SteamGameId", "0");
 
-        ArrayList<String> preloadLibs = new ArrayList<>();
-        String sysvPath = resolveSysvShmPreloadPath(context, imageFs);
-        if (sysvPath != null) preloadLibs.add(sysvPath);
-        addRedirectPreload(context, imageFs, preloadLibs);
+        String ld_preload = "";
+        String sysvPath = imageFs.getLibDir() + "/libandroid-sysvshm.so";
+        String replacePath = resolveLibredirectPreload(imageFs);
 
-        envVars.put("LD_PRELOAD", String.join(":", preloadLibs));
+        if (new File(sysvPath).exists()) ld_preload += sysvPath;
+
+        if (replacePath != null) ld_preload += ":" + replacePath;
+
+        envVars.put("LD_PRELOAD", ld_preload);
+        String x86Preloads = X86GuestLaunch.preloads(context, false);
+        if (x86Preloads != null) envVars.put("LD_PRELOAD", x86Preloads);
 
         String emulator = container.getEmulator();
         if (this.envVars != null) envVars.putAll(this.envVars);
 
-        if (HostCpu.current().isX86_64()) {
-            HostDisplayEnv.applyForX86_64Guest(envVars, imageFs);
-        }
+        X86GuestLaunch.applyGuestEnv(envVars, context, imageFs, container, false);
 
         String finalCommand = getFinalCommand(winePath, emulator, envVars, imageFs.getBinDir(), command);
 
