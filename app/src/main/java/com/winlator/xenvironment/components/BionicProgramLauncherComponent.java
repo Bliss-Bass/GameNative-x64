@@ -424,7 +424,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             HostGraphicsEnv.sanitizeForSystemVulkan(envVars);
         }
 
-        HostBionicLibs.applyGuestVulkanEnv(envVars, context);
+        HostBionicLibs.applyGuestVulkanEnv(envVars, context, container);
 
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
 

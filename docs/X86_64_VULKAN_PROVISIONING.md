@@ -200,12 +200,20 @@ Three app-side fixes were needed alongside the staging:
 ## How frames are presented
 
 Presentation is a Settings choice (Performance -> Frame presentation), and on x86_64 it picks
-between three routes:
+between three routes, plus **Automatic**, the default:
 
-* **Software copy** (`MESA_VK_WSI_DEBUG=sw,noshm`), the default: Mesa's software WSI copies the
+* **Automatic**: Direct (DRI3) for every game. When a session's DRI3 buffer imports are all
+  rejected (`BadAlloc`, `BadMatch` or `BadValue` from `PixmapFromBuffers`), the game is marked
+  with the container extra `presentationFallback=software@<versionCode>` and its next launch uses
+  Software copy. A later successful DRI3 session clears the mark, and an app update retries DRI3.
+  An early exit alone never counts as a failure (`PresentationFallback`).
+* **Software copy** (`MESA_VK_WSI_DEBUG=sw,noshm`): Mesa's software WSI copies the
   GPU-rendered image back to the CPU and pushes the whole frame to the X server as an
   `XPutImage` over the unix socket. Two costs — a readback per frame and a full frame through a
-  socket.
+  socket. This path never uses the Present extension, so no `PresentCompleteNotify` advances the
+  swapchain's present ID; `scripts/patches/mesa/0001-*` signals it after the `PutImage` instead.
+  Without that patch, anything using `VK_KHR_present_wait` (vkd3d-proton, current DXVK) stalls
+  after its first few frames: a black screen while the game keeps running and playing audio.
 * **Shared memory** (`sw`): the readback stays, but the frame does not travel through the socket;
   the server presents a pixmap backed by the guest's own segment. Measurably faster at game
   resolutions — see "The MIT-SHM path works" below for numbers and for what it took.

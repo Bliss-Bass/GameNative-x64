@@ -4,6 +4,8 @@ import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
 
 import android.util.SparseArray;
 
+import app.gamenative.utils.HostCpu;
+
 import com.winlator.renderer.ASurfaceRenderer;
 import com.winlator.renderer.GPUImage;
 import com.winlator.renderer.Texture;
@@ -512,7 +514,10 @@ public class PresentExtension implements Extension {
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
 
-        if (GPUImage.isSupported() && !mask.isEmpty()) {
+        // Vortek renders into the window's own AHB. On x86_64 nothing does: DRI3 swaps a
+        // pixmap's texture in, and Mesa's software WSI still selects Present input while
+        // drawing with PutImage, which lands in CPU memory the AHB never sees.
+        if (GPUImage.isSupported() && !mask.isEmpty() && !HostCpu.current().isX86_64()) {
             Drawable content = window.getContent();
             final Texture oldTexture = content.getTexture();
             if (oldTexture != null && !(oldTexture instanceof GPUImage)) {

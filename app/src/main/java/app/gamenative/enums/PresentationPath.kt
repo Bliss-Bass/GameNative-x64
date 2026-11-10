@@ -6,7 +6,8 @@ import app.gamenative.R
  * How a guest Vulkan frame reaches the in-app X server on x86_64.
  *
  * Each route is a trade between how much copying a frame costs and how much of the stack has to be
- * in place for it to work at all, so the choice is a user setting with [SOFTWARE] as the safe default.
+ * in place for it to work at all, so the choice is a user setting. [AUTO] is the default; it is
+ * resolved per game by [app.gamenative.utils.PresentationFallback] and never reaches Mesa itself.
  */
 enum class PresentationPath(
     val key: String,
@@ -15,6 +16,13 @@ enum class PresentationPath(
     val titleRes: Int,
     val summaryRes: Int,
 ) {
+    /**
+     * [DRI3], unless this game's DRI3 buffer imports were rejected before, then [SOFTWARE].
+     * Software copy is not a universal floor (it shows no picture on some Android 17 devices), so
+     * only a rejected import moves a game off DRI3, never an early exit on its own.
+     */
+    AUTO("auto", "", R.string.present_auto, R.string.present_auto_summary),
+
     /**
      * Software WSI with MIT-SHM disabled: every frame is read back to the CPU and pushed over the X
      * socket with PutImage. Slowest, but the only route that needs nothing beyond the X server itself.
@@ -37,11 +45,7 @@ enum class PresentationPath(
     ;
 
     companion object {
-        /**
-         * Software until the interposer and the DRI3 import path are proven on the device in hand --
-         * a wrong guess here does not degrade, it takes the guest down mid-frame.
-         */
-        val DEFAULT = SOFTWARE
+        val DEFAULT = AUTO
 
         fun fromKey(key: String?): PresentationPath =
             entries.firstOrNull { it.key == key } ?: DEFAULT

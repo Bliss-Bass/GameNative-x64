@@ -336,6 +336,21 @@ fetch_mesa() {
         's/#if DETECT_OS_ANDROID\n(\s*image->vk\.ahb_format)/#ifdef VK_USE_PLATFORM_ANDROID_KHR\n$1/ and $c++;
          END { print STDERR "patched radv_image.c (ahb_format guard)\n" if $c }' \
         "$radv"
+
+    # Our fixes to Mesa itself, kept as format-patch output. The tree is a tarball, not a
+    # clone, so a patch that reverses cleanly is taken as already applied. Not git apply:
+    # this tree sits inside the app's repo, and git apply resolves paths from that repo's
+    # root, so it would skip every file and report success.
+    local patch mesa="$SRC_DIR/mesa-$MESA_VERSION"
+    for patch in "$ROOT"/scripts/patches/mesa/*.patch; do
+        [[ -e "$patch" ]] || continue
+        if patch -d "$mesa" -p1 -R -s -f --dry-run < "$patch" >/dev/null 2>&1; then
+            continue
+        fi
+        patch -d "$mesa" -p1 -s -N < "$patch" \
+            || { echo "$(basename "$patch") does not apply" >&2; exit 1; }
+        echo "applied $(basename "$patch")"
+    done
 }
 
 # ANV is in Mesa's with_driver_using_cl list, so building it requires the OpenCL-C

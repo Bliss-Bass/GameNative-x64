@@ -151,6 +151,7 @@ import app.gamenative.utils.launchdependencies.BionicSteamAssetsDependency
 import app.gamenative.utils.downloader.DXWrapperDownloader
 import app.gamenative.utils.downloader.GraphicsDriverDownloader
 import app.gamenative.utils.PreInstallSteps
+import app.gamenative.utils.PresentationFallback
 import app.gamenative.utils.SteamInstallScriptRegistry
 import app.gamenative.utils.BrightnessManager
 import app.gamenative.utils.SteamTokenLogin
@@ -4088,7 +4089,8 @@ private fun setupXEnvironment(
 
         if (HostCpu.current().isX86_64) {
             HostDisplayEnv.applyForX86_64Guest(envVars, imageFs)
-            HostBionicLibs.applyGuestVulkanEnv(envVars, context)
+            val presentation = HostBionicLibs.applyGuestVulkanEnv(envVars, context, container)
+            PresentationFallback.watch(context, xServer, container, presentation)
         }
 
         // Re-apply after container envVars merge so a stale MESA_VK_WSI_DEBUG cannot stick.

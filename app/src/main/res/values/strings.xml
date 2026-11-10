@@ -1101,6 +1101,9 @@
     <string name="settings_performance_power_control_title">Power Control</string>
     <string name="settings_performance_power_control_subtitle">Enable in-game power control by default (enabled on tested devices: AYN Odin 3, Retroid Pocket 6/Nova)</string>
     <string name="settings_performance_presentation_title">Frame presentation</string>
+    <string name="present_auto">Automatic</string>
+    <string name="present_auto_summary">Direct (DRI3) for every game. A game whose frames Direct cannot show switches to Software copy on its next launch.</string>
+    <string name="present_auto_fell_back">Direct presentation failed for this game. It will use Software copy from its next launch.</string>
     <string name="present_software">Software copy</string>
     <string name="present_software_summary">Every frame is copied to the CPU and sent over the X socket. Slowest, but always works.</string>
     <string name="present_shm">Shared memory</string>

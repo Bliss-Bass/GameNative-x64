@@ -1,0 +1,39 @@
+From 372affeecb03ac1524878e28b34825d1d5e0fdc3 Mon Sep 17 00:00:00 2001
+From: Jon West <electrikjesus@gmail.com>
+Date: Tue, 10 Nov 2026 14:50:50 -0500
+Subject: [PATCH] wsi/x11: signal present_id after a software PutImage present
+
+The software path without MIT-SHM presents with PutImage and never uses the
+Present extension, so no PresentCompleteNotify arrives to advance present_id.
+Present wait is still advertised, so vkWaitForPresentKHR blocked forever and
+D3D12 games under vkd3d-proton stopped after their first few frames.
+---
+ src/vulkan/wsi/wsi_common_x11.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/vulkan/wsi/wsi_common_x11.c b/src/vulkan/wsi/wsi_common_x11.c
+index c592a7d..7fd05f1 100644
+--- a/src/vulkan/wsi/wsi_common_x11.c
++++ b/src/vulkan/wsi/wsi_common_x11.c
+@@ -1572,6 +1572,18 @@ x11_present_to_x11_sw(struct x11_swapchain *chain, uint32_t image_index)
+    free(err);
+    free(geom);
+ 
++   /* Without the Present extension no PresentCompleteNotify ever arrives to advance
++    * present_id, so vkWaitForPresentKHR would block forever. The frame is with the
++    * server once PutImage has been flushed. */
++   if (image->present_id) {
++      mtx_lock(&chain->present_progress_mutex);
++      if (image->present_id > chain->present_id) {
++         chain->present_id = image->present_id;
++         u_cnd_monotonic_broadcast(&chain->present_progress_cond);
++      }
++      mtx_unlock(&chain->present_progress_mutex);
++   }
++
+    wsi_queue_push(&chain->acquire_queue, image_index);
+    return result;
+ }
+-- 
+2.43.0
+

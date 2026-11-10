@@ -67,6 +67,25 @@ public class DRI3Extension implements Extension {
         I915_FORMAT_MOD_4_TILED,
     };
 
+    /**
+     * Told about every buffer import, on the X request thread with X locks held, so it must not
+     * call back into the server.
+     */
+    public interface ImportListener {
+        void onImport(boolean imported);
+    }
+
+    private volatile ImportListener importListener;
+
+    public void setImportListener(ImportListener listener) {
+        importListener = listener;
+    }
+
+    private void reportImport(boolean imported) {
+        ImportListener listener = importListener;
+        if (listener != null) listener.onImport(imported);
+    }
+
     private byte firstEventId = 0;
     private byte firstErrorId = 0;
 
@@ -493,6 +512,10 @@ public class DRI3Extension implements Extension {
             case ClientOpcodes.PIXMAP_FROM_BUFFER:
                 try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
                     pixmapFromBuffer(client, inputStream, outputStream);
+                    reportImport(true);
+                } catch (BadAlloc | BadMatch | BadValue e) {
+                    reportImport(false);
+                    throw e;
                 }
                 break;
             case ClientOpcodes.FENCE_FROM_FD:
@@ -506,6 +529,10 @@ public class DRI3Extension implements Extension {
             case ClientOpcodes.PIXMAP_FROM_BUFFERS:
                 try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
                     pixmapFromBuffers(client, inputStream, outputStream);
+                    reportImport(true);
+                } catch (BadAlloc | BadMatch | BadValue e) {
+                    reportImport(false);
+                    throw e;
                 }
                 break;
             default:

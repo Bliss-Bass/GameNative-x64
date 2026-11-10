@@ -1,8 +1,8 @@
 package app.gamenative.utils
 
 import android.content.Context
-import app.gamenative.PrefManager
 import app.gamenative.enums.PresentationPath
+import com.winlator.container.Container
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.envvars.EnvVars
 import timber.log.Timber
@@ -21,7 +21,7 @@ object HostBionicLibs {
      * Khronos loader + ICDs for ANV (Intel), RADV (AMD) and lavapipe (software).
      * Built by scripts/provision-x86_64-vulkan.sh tarball.
      */
-    const val VULKAN_ASSET = "vulkan-x86_64-20260828.tzst"
+    const val VULKAN_ASSET = "vulkan-x86_64-20261110.tzst"
 
     @JvmStatic
     fun pulseAssetName(): String =
@@ -190,12 +190,15 @@ object HostBionicLibs {
         }
     }
 
-    /** Points the guest Vulkan loader at staged ICDs so DXVK can get an X11 surface. */
+    /**
+     * Points the guest Vulkan loader at staged ICDs so DXVK can get an X11 surface. Returns the
+     * presentation path the guest was given, or null when none applies.
+     */
     @JvmStatic
-    fun applyGuestVulkanEnv(envVars: EnvVars, context: Context) {
-        if (!HostCpu.current().isX86_64) return
+    fun applyGuestVulkanEnv(envVars: EnvVars, context: Context, container: Container?): PresentationPath? {
+        if (!HostCpu.current().isX86_64) return null
         val manifests = stagedIcdManifests(context)
-        if (manifests.isEmpty()) return
+        if (manifests.isEmpty()) return null
 
         overrideGuestShmemLib(context)
         pointIcdsAtStagedLibs(context, manifests)
@@ -217,10 +220,12 @@ object HostBionicLibs {
         //   shm       the same copy, but read out of a shared segment rather than the socket.
         //   dri3      leave Mesa on the hardware WSI path; server imports dma-bufs (AHB/Vulkan)
         //             with LINEAR mmap+opaque upload as fallback.
+        //   auto      dri3, or software for a game whose DRI3 imports were rejected
+        //             (PresentationFallback).
         //
         // See docs/X86_64_VULKAN_PROVISIONING.md.
         // debug.gamenative.presentation={software|shm|dri3} overrides the Settings choice for A/B tests.
-        val path = presentationPathForLaunch()
+        val path = presentationPathForLaunch(container)
         if (path.wsiDebug.isNotEmpty()) {
             envVars.put("MESA_VK_WSI_DEBUG", path.wsiDebug)
         } else {
@@ -229,17 +234,23 @@ object HostBionicLibs {
         }
 
         Timber.i("HostBionicLibs: guest Vulkan ICDs -> %s (presentation=%s)", value, path.key)
+        return path
     }
 
-    private fun presentationPathForLaunch(): PresentationPath {
+    private fun presentationOverride(): PresentationPath? {
         val override = systemProperty("debug.gamenative.presentation")
-        if (override.isNotEmpty()) {
-            val parsed = PresentationPath.fromKey(override)
-            if (parsed.key == override) return parsed
-            Timber.w("HostBionicLibs: ignoring unknown debug.gamenative.presentation=%s", override)
-        }
-        return PrefManager.presentationPath
+        if (override.isEmpty()) return null
+        val parsed = PresentationPath.fromKey(override)
+        if (parsed.key == override && parsed != PresentationPath.AUTO) return parsed
+        Timber.w("HostBionicLibs: ignoring unknown debug.gamenative.presentation=%s", override)
+        return null
     }
+
+    @JvmStatic
+    fun isPresentationOverridden(): Boolean = presentationOverride() != null
+
+    private fun presentationPathForLaunch(container: Container?): PresentationPath =
+        presentationOverride() ?: PresentationFallback.forLaunch(container)
 
     private fun systemProperty(key: String): String {
         return try {
