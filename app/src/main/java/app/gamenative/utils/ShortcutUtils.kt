@@ -12,6 +12,7 @@ import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Icon
 import android.os.Build
+import app.gamenative.linux.LinuxIntents
 import app.gamenative.MainActivity
 import app.gamenative.R
 import app.gamenative.data.GameSource
@@ -147,13 +148,13 @@ internal suspend fun createLinuxAppShortcut(
     val appContext = context.applicationContext
     val shortcutManager = appContext.getSystemService(ShortcutManager::class.java)
 
-    val intent = Intent(MainActivity.ACTION_LINUX_DESKTOP).apply {
+    val intent = Intent(LinuxIntents.ACTION_LINUX_DESKTOP).apply {
         setClass(appContext, MainActivity::class.java)
-        putExtra(MainActivity.EXTRA_LINUX_ARGV, app.launchArgv)
+        putExtra(LinuxIntents.EXTRA_LINUX_ARGV, app.launchArgv)
         // So a shortcut reaches the same session and the same window as any other launch of this
         // application, rather than a second copy keyed on the command alone.
-        putExtra(MainActivity.EXTRA_LINUX_ENTRY_ID, app.entryId)
-        putExtra(MainActivity.EXTRA_LINUX_LABEL, app.name)
+        putExtra(LinuxIntents.EXTRA_LINUX_ENTRY_ID, app.entryId)
+        putExtra(LinuxIntents.EXTRA_LINUX_LABEL, app.name)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 

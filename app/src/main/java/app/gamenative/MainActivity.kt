@@ -54,7 +54,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.utils.GameSessionMemory
 import app.gamenative.service.gog.GOGService
 import app.gamenative.service.epic.EpicService
-import app.gamenative.ui.LinuxSessionActivity
+import app.gamenative.linux.LinuxIntents
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.util.AppUiScale
@@ -106,50 +106,6 @@ class MainActivity : ComponentActivity() {
             Build.MANUFACTURER.equals("Oculus", true) ||
                 Build.MANUFACTURER.equals("Meta", true) ||
                 Build.BRAND.equals("oculus", true)
-
-        /** Opens the Linux desktop, with an optional [EXTRA_LINUX_ARGV] command to run in it. */
-        const val ACTION_LINUX_DESKTOP = "app.gamenative.action.LINUX_DESKTOP"
-        const val EXTRA_LINUX_ARGV = "linux_argv"
-
-        /**
-         * Which desktop entry the command came from, when the caller knows.
-         *
-         * What a session is keyed on, so launching an application that is already running finds
-         * it instead of starting a second copy, and what Android files the window's task under.
-         * Optional: a stub built before this was carried supplies only a command.
-         */
-        const val EXTRA_LINUX_ENTRY_ID = "linux_entry_id"
-
-        /** The application's name, for the window and the running-sessions notification. */
-        const val EXTRA_LINUX_LABEL = "linux_label"
-
-        /** Opens the Linux terminal, which is also where the userland is installed from. */
-        const val ACTION_LINUX_TERMINAL = "app.gamenative.action.LINUX_TERMINAL"
-
-        /** Opens the Linux Distros screen. */
-        const val ACTION_LINUX_DISTROS = "app.gamenative.action.LINUX_DISTROS"
-
-        /** Opens the Linux Apps screen. */
-        const val ACTION_LINUX_APPS = "app.gamenative.action.LINUX_APPS"
-
-        /** For [ACTION_LINUX_TERMINAL]: the installed distro to open in, instead of the default. */
-        const val EXTRA_LINUX_DISTRO = "linux_distro"
-
-        enum class LinuxScreen { DESKTOP, TERMINAL, DISTROS, APPS }
-
-        /** A Linux screen asked for by intent, held until the UI can act on it. */
-        data class PendingLinuxRequest(val screen: LinuxScreen, val argv: String?, val distroId: String? = null)
-
-        @Volatile
-        private var pendingLinuxRequest: PendingLinuxRequest? = null
-
-        fun setPendingLinuxRequest(request: PendingLinuxRequest) {
-            synchronized(this) { pendingLinuxRequest = request }
-        }
-
-        fun consumePendingLinuxRequest(): PendingLinuxRequest? = synchronized(this) {
-            pendingLinuxRequest.also { pendingLinuxRequest = null }
-        }
 
         // Store pending launch request to be processed after UI is ready
         @Volatile
@@ -458,55 +414,7 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (intent.action == ACTION_LINUX_DESKTOP || intent.action == ACTION_LINUX_TERMINAL ||
-            intent.action == ACTION_LINUX_DISTROS || intent.action == ACTION_LINUX_APPS
-        ) {
-            // Not a game launch, so these skip IntentLaunchManager entirely. The desktop
-            // action is also the entry point a per-app launcher shortcut uses.
-            val screen = when (intent.action) {
-                ACTION_LINUX_TERMINAL -> LinuxScreen.TERMINAL
-                ACTION_LINUX_DISTROS -> LinuxScreen.DISTROS
-                ACTION_LINUX_APPS -> LinuxScreen.APPS
-                else -> LinuxScreen.DESKTOP
-            }
-            val terminal = screen != LinuxScreen.DESKTOP
-            val distroId = intent.getStringExtra(EXTRA_LINUX_DISTRO)
-            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
-            val argv = intent.getStringExtra(EXTRA_LINUX_ARGV)
-            val entryId = intent.getStringExtra(EXTRA_LINUX_ENTRY_ID)
-            val label = intent.getStringExtra(EXTRA_LINUX_LABEL)
-            Timber.i("[IntentLaunch]: Linux %s requested (argv=%s, distro=%s)", screen.name.lowercase(), argv, distroId)
-
-            // An application gets a window of its own, so Android sizes and remembers it per
-            // application rather than reusing whatever bounds this activity happens to have. The
-            // in-app route below stays as the fallback: an older stub or an unusual device that
-            // cannot start the session activity should still open the app, in here, rather than
-            // fail. A bare desktop request is a screen of this app and stays put.
-            if (!terminal && !argv.isNullOrBlank()) {
-                val opened = runCatching {
-                    LinuxSessionActivity.open(this, argv, entryId, label)
-                }.onFailure { Timber.w(it, "[IntentLaunch]: no session window, falling back in-app") }
-
-                if (opened.isSuccess) {
-                    // Keep Main alive for drawer / Steam / FGS, but do not leave a second freeform
-                    // window titled GameNativeX64 sitting beside the Linux session.
-                    moveTaskToBack(true)
-                    return
-                }
-            }
-
-            // Always recorded, and the event only says one is waiting. The alternative --
-            // carrying the request on the event and recording it only for a cold start -- looks
-            // like it covers both cases and does not: the event bus does not replay, and whether
-            // anything is collecting yet does not follow from this being a new intent. A new
-            // intent can arrive while the activity is still being created, which is what a
-            // launcher shortcut does when its own task is already in recents, and the request
-            // was then dropped. Recording it first means the request survives either way, and is
-            // picked up by whichever of the two runs.
-            setPendingLinuxRequest(PendingLinuxRequest(screen, argv, distroId))
-            lifecycleScope.launch { PluviaApp.events.emit(AndroidEvent.LinuxRequestPending) }
-            return
-        }
+        if (LinuxIntents.handle(this, intent)) return
         Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}, isNewIntent=$isNewIntent")
         try {
             val launchRequest = IntentLaunchManager.parseLaunchIntent(intent)

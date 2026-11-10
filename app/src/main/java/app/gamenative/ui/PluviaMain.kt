@@ -96,6 +96,7 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.DebugPaywallScreen
 import app.gamenative.ui.screen.HomeScreen
+import app.gamenative.linux.LinuxIntents
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.screen.linux.LinuxAppsScreen
 import app.gamenative.ui.screen.linux.LinuxDesktopScreen
@@ -174,45 +175,6 @@ private fun NavHostController.navigateFromLoginIfNeeded(
             }
         }
     }
-}
-
-/**
- * Opens whichever Linux screen was asked for by intent, if one was.
- *
- * Called both when this screen first composes and when the event says a request arrived, because
- * an intent can land on either side of the UI being ready. Consuming the request is what keeps
- * the two from acting on it twice.
- */
-private fun NavHostController.navigateToPendingLinuxRequest() {
-    val request = MainActivity.consumePendingLinuxRequest() ?: return
-    Timber.i("[PluviaMain]: Opening Linux %s", request.screen.name.lowercase())
-    when (request.screen) {
-        MainActivity.Companion.LinuxScreen.TERMINAL -> {
-            navigate(PluviaScreen.Terminal.route(request.distroId))
-            return
-        }
-        MainActivity.Companion.LinuxScreen.DISTROS -> {
-            navigate(PluviaScreen.LinuxDistros.route)
-            return
-        }
-        MainActivity.Companion.LinuxScreen.APPS -> {
-            navigate(PluviaScreen.LinuxApps.route)
-            return
-        }
-        MainActivity.Companion.LinuxScreen.DESKTOP -> Unit
-    }
-
-    // A session launched from an app-drawer entry has only the graph's start destination beneath
-    // it, so back leaves the app the user was just in and lands on the library -- or, before a
-    // Steam login, on the sign-in screen, which has nothing to do with what they opened. The list
-    // the entry was made from is the screen "back" means here, so put it underneath first.
-    //
-    // Only for a launch that names a program. A bare desktop request is the desktop itself rather
-    // than something reached from the list, and the library is its parent.
-    if (request.argv != null && currentDestination?.route != PluviaScreen.LinuxApps.route) {
-        navigate(PluviaScreen.LinuxApps.route)
-    }
-    navigate(PluviaScreen.LinuxDesktop.route(request.argv))
 }
 
 /**
@@ -516,7 +478,7 @@ fun PluviaMain(
     // service and so has nothing to wait for beyond this point. The request may also arrive
     // while this is already composed, which the event handles; whichever runs first takes it.
     LaunchedEffect(Unit) {
-        navController.navigateToPendingLinuxRequest()
+        LinuxIntents.navigateToPendingRequest(navController)
     }
 
     // process pending launch request from cold start (event bus has no replay)
@@ -624,7 +586,7 @@ fun PluviaMain(
                 }
 
                 MainViewModel.MainUiEvent.LinuxRequestPending -> {
-                    navController.navigateToPendingLinuxRequest()
+                    LinuxIntents.navigateToPendingRequest(navController)
                 }
 
                 is MainViewModel.MainUiEvent.ExternalGameLaunch -> {
