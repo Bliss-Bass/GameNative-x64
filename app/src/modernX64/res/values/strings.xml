@@ -19,4 +19,9 @@
     <string name="debug_report_send">Report on GitHub</string>
     <string name="debug_report_share_instead">Share log only</string>
     <string name="debug_report_success_message">Your report was opened on GitHub.</string>
+    <string name="app_name">GameNativeX64</string>
+    <!-- Login Screen -->
+    <string name="login_app_name">GameNativeX64</string>
+    <string name="lsfg_description">Generate intermediate frames using Lossless Scaling\'s Vulkan layer. Works on Adreno 6xx+ and experimental on x86_64 (Intel/AMD Mesa).</string>
+    <string name="lsfg_install_prompt">Lossless Scaling not installed. Tap to install. Requires Lossless Scaling from Steam.</string>
 </resources>

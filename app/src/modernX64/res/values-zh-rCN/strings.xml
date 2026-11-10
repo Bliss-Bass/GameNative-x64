@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GameNativeX64</string>
+    <!-- 登录界面 -->
+    <string name="login_app_name">GameNativeX64</string>
+</resources>

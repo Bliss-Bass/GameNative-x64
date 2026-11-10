@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GameNativeX64</string>
+    <!-- Login Screen -->
+    <string name="login_app_name">GameNativeX64</string>
+</resources>
