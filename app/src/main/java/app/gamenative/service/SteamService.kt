@@ -3038,7 +3038,9 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         suspend fun notifyRunningProcesses(vararg gameProcesses: GameProcessInfo) = withContext(Dispatchers.IO) {
             instance?.let { steamInstance ->
-                if (isConnected) {
+                // Connected is reported before logon completes, so the user can still be unknown.
+                val steamId = userSteamId
+                if (isConnected && steamId != null) {
                     val gamesPlayed = gameProcesses.mapNotNull { gameProcess ->
                         getAppInfoOf(gameProcess.appId)?.let { appInfo ->
                             getPkgInfoOf(gameProcess.appId)?.let { pkgInfo ->
@@ -3049,7 +3051,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                         ?: gameProcess.processes.firstOrNull()?.processId
                                         ?: 0
 
-                                    val userAccountId = userSteamId!!.accountID.toInt()
+                                    val userAccountId = steamId.accountID.toInt()
                                     val preferredLender = instance?.preferredLenderByAppId?.get(gameProcess.appId)
                                         ?: PrefManager.preferredFamilyLenders[gameProcess.appId]
                                     val preferredAccountId = preferredLender?.let { SteamID(it).accountID.toInt() }
