@@ -9,7 +9,7 @@ SRC_DIR="$BUILD_DIR/.src"
 PREFIX="$BUILD_DIR/root-x86_64"
 OUT_LIB="$PREFIX/usr/lib"
 OUT_ETC="$PREFIX/usr/etc"
-ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20261014.tzst"
+ASSET_OUT="$ROOT/app/src/modernX64/assets/bionic-libs-x86_64-20261110.tzst"
 
 NDK_ROOT="${NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}}"
 if [[ -z "$NDK_ROOT" ]]; then
@@ -78,7 +78,7 @@ build_autotools() {
 build_x11_stack() {
   # Keyed on the library built last, so an existing tree is topped up rather than
   # skipped when this list grows.
-  if [[ -f "$OUT_LIB/libXrandr.so" ]]; then
+  if [[ -f "$OUT_LIB/libXcursor.so" ]]; then
     echo "X11 stack already built"
     return 0
   fi
@@ -135,6 +135,20 @@ build_x11_stack() {
   # build in build-x86_64-mesa-vulkan.sh does not configure without it.
   build_autotools libXrandr-1.5.4.tar.xz \
     https://xorg.freedesktop.org/archive/individual/lib/libXrandr-1.5.4.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no
+
+  # winex11.drv dlopens these. Without libXi, Proton has no XInput2, and XInput2 raw
+  # motion is its only source of WM_INPUT, so games that read raw mouse input (most
+  # shooters once in-game) get no mouse movement at all.
+  build_autotools libXi-1.8.2.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXi-1.8.2.tar.xz \
+    --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
+    --enable-malloc0returnsnull=no --disable-docs --disable-specs
+
+  # Without it Wine falls back to monochrome core cursors for every game cursor.
+  build_autotools libXcursor-1.2.3.tar.xz \
+    https://xorg.freedesktop.org/archive/individual/lib/libXcursor-1.2.3.tar.xz \
     --host="$HOST" --prefix="$PREFIX/usr" --disable-static \
     --enable-malloc0returnsnull=no
 }
@@ -325,7 +339,15 @@ fi
 
 mkdir -p "$(dirname "$ASSET_OUT")"
 rm -f "$ASSET_OUT"
-tar -I 'zstd -19' -cf "$ASSET_OUT" -C "$PREFIX" usr
+# The prefix doubles as Mesa's build sysroot, so it holds headers, docs and libtool files
+# the device never reads. The app unpacks this asset on every launch.
+tar -I 'zstd -19' -cf "$ASSET_OUT" -C "$PREFIX" \
+    --exclude='usr/include' --exclude='usr/share/man' --exclude='usr/share/doc' \
+    --exclude='usr/share/xcb' --exclude='usr/share/aclocal' --exclude='usr/share/pkgconfig' \
+    --exclude='usr/share/gtk-doc' --exclude='usr/share/info' --exclude='usr/share/gettext' \
+    --exclude='usr/lib/pkgconfig' --exclude='usr/lib/cmake' --exclude='usr/bin' \
+    --exclude='*.la' --exclude='*.a' \
+    usr
 
 echo "Built bionic libs asset: $ASSET_OUT"
 find "$OUT_LIB" -maxdepth 1 -name '*.so*' -exec file {} \; | head -20
