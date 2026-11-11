@@ -724,26 +724,9 @@ fun XServerScreen(
         }
     }
 
-    fun applyFramePresentModeToEngines(mode: String) {
-        val lean = mode == Container.FRAME_PRESENT_LEAN
-        val balanced = lean || mode == Container.FRAME_PRESENT_BALANCED
-        val hold = balanced || mode == Container.FRAME_PRESENT_QUALITY
-        (xServerView as? XServerView)?.setNativeResolutionSurface(lean)
-        xServerView?.getxServer()
-            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-            ?.setHoldFlips(hold, balanced)
-        (xServerView?.renderer as? VulkanRenderer)?.setDmaBufWriterWait(
-            when {
-                balanced -> VulkanRenderer.DMABUF_WAIT_GPU
-                hold -> VulkanRenderer.DMABUF_WAIT_CPU
-                else -> VulkanRenderer.DMABUF_WAIT_NONE
-            },
-        )
-    }
-
     fun applyFramePresentMode(mode: String) {
         framePresentMode = mode
-        applyFramePresentModeToEngines(mode)
+        applyFramePresentModeToEngines(xServerView, mode)
         container.framePresentMode = mode
         container.saveData()
     }
@@ -2094,7 +2077,7 @@ fun XServerScreen(
                     }
                     renderer.setVkPresentMode(vkMode)
                 }
-                applyFramePresentModeToEngines(framePresentMode)
+                applyFramePresentModeToEngines(xServerView, framePresentMode)
                 if (renderer is ASurfaceRenderer) {
                     renderer.setSfCompatMode(container.sfCompatMode)
                 }
