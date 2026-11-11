@@ -260,81 +260,6 @@ public class WindowManager extends XResourceManager {
         return window;
     }
 
-    /**
-     * Resize/move a window as a WM would, without SubstructureRedirect or ResizeRedirect.
-     * Used by Linux app sessions that run without openbox on Android X.
-     * Must bypass {@link Event#RESIZE_REDIRECT}: otherwise geometry stays put while
-     * ConfigureNotify lies about the new size and the guest stops painting.
-     */
-    public void forceGeometry(Window window, short x, short y, short width, short height) {
-        if (window == null || window == rootWindow) return;
-        if (width <= 0 || height <= 0) return;
-        applyGeometry(window, x, y, width, height, /* honorResizeRedirect= */ false);
-        window.setBorderWidth((short) 0);
-        Window previousSibling = window.previousSibling();
-        boolean overrideRedirect = window.attributes.isOverrideRedirect();
-        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
-        Window parent = window.getParent();
-        if (parent != null) {
-            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
-        }
-    }
-
-    /**
-     * Re-send ConfigureNotify+Expose at the window's current size without reallocating.
-     * Used after freeform resize when X geometry already matches but GTK/Mesa still
-     * Present undersized buffers — a size nudge would wipe the drawable to white.
-     */
-    public void reannounceGeometry(Window window) {
-        if (window == null || window == rootWindow) return;
-        if (!window.isInputOutput() || !window.attributes.isMapped()) return;
-        short x = window.getX();
-        short y = window.getY();
-        short width = window.getWidth();
-        short height = window.getHeight();
-        Window previousSibling = window.previousSibling();
-        boolean overrideRedirect = window.attributes.isOverrideRedirect();
-        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
-        Window parent = window.getParent();
-        if (parent != null) {
-            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
-        }
-        window.sendEvent(new Expose(window));
-    }
-
-    /**
-     * Grows or shrinks the root window drawable to a new screen size.
-     * {@link #forceGeometry} refuses the root; Linux freeform resize needs this explicitly.
-     */
-    public void resizeRootWindow(short width, short height) {
-        if (width <= 0 || height <= 0) return;
-        if (rootWindow.getWidth() == width && rootWindow.getHeight() == height) return;
-
-        Drawable content = rootWindow.getContent();
-        if (content != null) {
-            try {
-                content.reallocate(width, height);
-            } catch (IllegalStateException shared) {
-                drawableManager.removeDrawable(content.id);
-                Drawable newContent = drawableManager.createDrawable(
-                    content.id, width, height, content.visual);
-                newContent.setOnDrawListener(() -> triggerOnUpdateWindowContent(rootWindow));
-                rootWindow.setContent(newContent);
-            }
-        }
-        rootWindow.setWidth(width);
-        rootWindow.setHeight(height);
-        triggerOnUpdateWindowGeometry(rootWindow, true);
-        rootWindow.sendEvent(
-            Event.STRUCTURE_NOTIFY,
-            new ConfigureNotify(
-                rootWindow, rootWindow, null,
-                (short) 0, (short) 0, width, height, (short) 0, false));
-        if (rootWindow.attributes.isMapped()) {
-            rootWindow.sendEvent(new Expose(rootWindow));
-        }
-    }
-
     private void changeWindowGeometry(Window window, short x, short y, short width, short height) {
         applyGeometry(window, x, y, width, height, /* honorResizeRedirect= */ true);
     }
@@ -557,6 +482,81 @@ public class WindowManager extends XResourceManager {
     public void triggerOnModifyWindowProperty(Window window, Property property) {
         for (int i = onWindowModificationListeners.size()-1; i >= 0; i--) {
             onWindowModificationListeners.get(i).onModifyWindowProperty(window, property);
+        }
+    }
+
+    /**
+     * Resize/move a window as a WM would, without SubstructureRedirect or ResizeRedirect.
+     * Used by Linux app sessions that run without openbox on Android X.
+     * Must bypass {@link Event#RESIZE_REDIRECT}: otherwise geometry stays put while
+     * ConfigureNotify lies about the new size and the guest stops painting.
+     */
+    public void forceGeometry(Window window, short x, short y, short width, short height) {
+        if (window == null || window == rootWindow) return;
+        if (width <= 0 || height <= 0) return;
+        applyGeometry(window, x, y, width, height, /* honorResizeRedirect= */ false);
+        window.setBorderWidth((short) 0);
+        Window previousSibling = window.previousSibling();
+        boolean overrideRedirect = window.attributes.isOverrideRedirect();
+        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        Window parent = window.getParent();
+        if (parent != null) {
+            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        }
+    }
+
+    /**
+     * Re-send ConfigureNotify+Expose at the window's current size without reallocating.
+     * Used after freeform resize when X geometry already matches but GTK/Mesa still
+     * Present undersized buffers — a size nudge would wipe the drawable to white.
+     */
+    public void reannounceGeometry(Window window) {
+        if (window == null || window == rootWindow) return;
+        if (!window.isInputOutput() || !window.attributes.isMapped()) return;
+        short x = window.getX();
+        short y = window.getY();
+        short width = window.getWidth();
+        short height = window.getHeight();
+        Window previousSibling = window.previousSibling();
+        boolean overrideRedirect = window.attributes.isOverrideRedirect();
+        window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        Window parent = window.getParent();
+        if (parent != null) {
+            parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, (short) 0, overrideRedirect));
+        }
+        window.sendEvent(new Expose(window));
+    }
+
+    /**
+     * Grows or shrinks the root window drawable to a new screen size.
+     * {@link #forceGeometry} refuses the root; Linux freeform resize needs this explicitly.
+     */
+    public void resizeRootWindow(short width, short height) {
+        if (width <= 0 || height <= 0) return;
+        if (rootWindow.getWidth() == width && rootWindow.getHeight() == height) return;
+
+        Drawable content = rootWindow.getContent();
+        if (content != null) {
+            try {
+                content.reallocate(width, height);
+            } catch (IllegalStateException shared) {
+                drawableManager.removeDrawable(content.id);
+                Drawable newContent = drawableManager.createDrawable(
+                    content.id, width, height, content.visual);
+                newContent.setOnDrawListener(() -> triggerOnUpdateWindowContent(rootWindow));
+                rootWindow.setContent(newContent);
+            }
+        }
+        rootWindow.setWidth(width);
+        rootWindow.setHeight(height);
+        triggerOnUpdateWindowGeometry(rootWindow, true);
+        rootWindow.sendEvent(
+            Event.STRUCTURE_NOTIFY,
+            new ConfigureNotify(
+                rootWindow, rootWindow, null,
+                (short) 0, (short) 0, width, height, (short) 0, false));
+        if (rootWindow.attributes.isMapped()) {
+            rootWindow.sendEvent(new Expose(rootWindow));
         }
     }
 }
