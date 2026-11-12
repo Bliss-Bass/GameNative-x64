@@ -1,5 +1,6 @@
-**GameNative ported to x86_64 (bionic)** for Bass:Lineout / ax86 tablets — run Windows games
-through Proton/Wine on Intel or AMD Android devices, with hardware Vulkan.
+**GameNative-x64 (GameNativeX64, GameNative x86)** is GameNative ported to x86_64 (bionic) —
+run your Steam, Epic, GOG and Amazon PC games through Proton/Wine on Intel or AMD Android
+devices (Googlebooks, Bliss OS, Android-x86, Bass:Lineout), with hardware Vulkan.
 
 Upstream GameNative targets arm64 and leans on ARM-only pieces (Box64, the Vortek Vulkan
 proxy, `libredirect-bionic-wx.so`). This fork replaces those with a native x86_64 path: no
@@ -12,15 +13,17 @@ cross-compiled for bionic.
 - **Hardware Vulkan** via Mesa ANV (Intel) and RADV (AMD); lavapipe bundled as a software fallback
 - Vulkan loader, ICDs, and X11 client stack shipped in-APK and staged on first launch
 - PulseAudio wired up for in-game sound
-- Trackpad/mouse pointer capture fixes for desktop-style tablets
+- Automatic presentation: DRI3 GPU zero-copy, with a per-game Software copy fallback
+- Raw mouse input, pointer capture, and touch controls that follow the last input used
+- Linux apps from Ubuntu, Debian or Arch in their own Android windows
 
-**Experimental.** Verified with Half-Life 2 on Intel UHD (Amber Lake / Coffee Lake).
-Presentation still uses Mesa's software WSI path, so framerate is below what the GPU can do.
+**Experimental.** Verified with Half-Life 2, Boltgun and Selaco on Intel GPUs.
 
 ## Install
 
-1. Download **`app-modernX64-release.apk`** below.
-2. Install on an **x86_64** Android device (API 26+).
+1. Download **`app-modernX64-release.apk`** below (not the debug APK).
+2. Install on an **x86_64** Android device running Android 10 (API 29) or newer.
+   Do not use the Play Store GameNative on x86_64; it is ARM64-only.
 
 ```bash
 adb install -r app-modernX64-release.apk

@@ -84,6 +84,37 @@ the user adds it again.
 To start over: **Linux Apps → trash icon (Reset Linux environment)**, or
 `adb shell rm -rf /data/data/app.gamenative/files/linux` then reopen the terminal to reinstall.
 
+## Linux app session internals
+
+- `LinuxSessions` registry + `LinuxSessionService` foreground service
+  (`foregroundServiceType specialUse`), keyed by entry id
+- `LinuxSession` interface - display, run, stop; Xvnc/RFB path behind it
+- Teardown - `GuestProcesses` kills the whole guest process group
+- Liveness-aware stale display lock, so sessions do not collide on a display
+- `LinuxSessionActivity` with a per-app document URI (`gamenative://linux/<entryId>`) -
+  one freeform task per Linux app
+- Entry id in stub metadata + trampoline extras; a fingerprint change triggers an
+  automatic reconcile/republish
+- Session mode pref (`CLOSE_WITH_APP` / `KEEP_RUNNING`), per-app stop/restart, Stop all
+  header and notification actions
+- GTK4 window fill - the `fit-windows.sh` watcher maximizes windows after their size hints
+  relax (openbox's map-time rule alone misses the GTK4 hint window)
+- `LinuxDisplayScale` converts Android DPI (160 baseline) to X DPI (96 baseline), fixing a
+  ~1.7x overshoot on ax86 displays
+- Launcher entries are kept even when Android cannot decode their icon at scan time
+- Drawer-launched Linux apps get the app list as their task parent
+
+## Roadmap
+
+- **R8 minification** - fix the Compose recomposition loop ANR so release builds can drop
+  `-PnoMinify=true`
+- **Boot sessions** - an `AT_BOOT` session mode that starts a Linux session at device boot
+  via a receiver or ROM addon init script (deferred pending idle-cost measurement)
+- **Per-app SmartDock DFC** - stub-hosted windows for per-Linux-app launch-mode overrides
+  (SmartDock DFC currently keys on package name only)
+- **Theme sync** - propagate Android light/dark to guest `xsettingsd`, `GTK_THEME` and
+  `ADW_DEBUG_COLOR_SCHEME`
+
 ## Upstream
 
 Contribute `HostCpu`, launcher branches, and CI in small PRs to
